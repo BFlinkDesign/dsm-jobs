@@ -30,29 +30,17 @@ def test_title_excluded_blocks_it_roles():
 
 
 def test_requires_degree_detection():
+    assert fa.requires_degree({"title": "Admin", "description": "Bachelor's degree required."}) is True
     assert (
-        fa.requires_degree(
-            {"title": "Admin", "description": "Bachelor's degree required."}
-        )
-        is True
-    )
-    assert (
-        fa.requires_degree(
-            {"title": "Admin", "description": "Associate's preferred, HS diploma ok."}
-        )
+        fa.requires_degree({"title": "Admin", "description": "Associate's preferred, HS diploma ok."})
         is False
     )
-    assert (
-        fa.requires_degree({"title": "Receptionist", "description": "Answer phones."})
-        is False
-    )
+    assert fa.requires_degree({"title": "Receptionist", "description": "Answer phones."}) is False
 
 
 def test_looks_remote():
     assert fa.looks_remote({"title": "Data Entry (Remote)", "description": ""}) is True
-    assert (
-        fa.looks_remote({"title": "Clerk", "description": "Work from home OK"}) is True
-    )
+    assert fa.looks_remote({"title": "Clerk", "description": "Work from home OK"}) is True
     assert fa.looks_remote({"title": "Receptionist", "description": "On site"}) is False
 
 
@@ -79,10 +67,7 @@ def test_verdict_meets_when_listed_above_floor():
 
 
 def test_verdict_estimated_when_predicted_above_floor():
-    assert (
-        fa.normalize(_job(39520, 39520, predicted="1"), "local")["verdict"]
-        == "estimated_ok"
-    )
+    assert fa.normalize(_job(39520, 39520, predicted="1"), "local")["verdict"] == "estimated_ok"
 
 
 def test_verdict_unlisted_when_no_salary():
@@ -136,4 +121,56 @@ def test_cli_mock_runs_and_writes_files(tmp_path):
         cwd=root,
     )
     assert result.returncode == 0, result.stderr
-    assert "Total jobs:" in result.stdout
+    assert "Total jobs found:" in result.stdout
+    assert "Hidden as scams:" in result.stdout
+
+
+# ── scam shield + attainability ───────────────────────────────────────
+
+
+def _row(title="Receptionist", company="Some LLC", source="local", desc="", hmin=20.0, hmax=24.0):
+    return {
+        "title": title,
+        "company": company,
+        "location": "Des Moines, IA",
+        "description": desc,
+        "source": source,
+        "hourly_min": hmin,
+        "hourly_max": hmax,
+    }
+
+
+def test_scam_hard_phrase_is_scam_even_for_known_employer():
+    r = _row(company="State of Iowa", desc="You must cash a check and wire transfer the balance.")
+    out = fa.scam_assessment(r, {})
+    assert out["level"] == "scam"
+
+
+def test_scam_remote_unknown_employer_is_hidden():
+    r = _row(title="Administrative Assistant", company="Unknownish Co", source="remote", desc="")
+    out = fa.scam_assessment(r, {})
+    assert out["level"] in ("scam", "suspect")  # never 'safe'
+
+
+def test_scam_remote_too_good_pay_is_scam():
+    r = _row(title="Data Entry", company="Mystery Co", source="remote", hmin=35.0, hmax=40.0)
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+
+
+def test_trusted_local_employer_is_safe():
+    r = _row(title="Receptionist", company="UnityPoint Health", source="local")
+    assert fa.scam_assessment(r, {})["level"] == "safe"
+
+
+def test_spam_across_cities_flagged():
+    company, title = "Turbo Co", "remote administrative assistant"
+    idx = {(fa._norm_company(company), title[:25]): {"a", "b", "c", "d"}}
+    r = _row(title=title, company=company, source="remote")
+    assert fa.scam_assessment(r, idx)["level"] == "scam"
+
+
+def test_attainability_drops_senior_roles():
+    assert fa.is_attainable("Administrative Assistant") is True
+    assert fa.is_attainable("Senior Administrative Assistant") is False
+    assert fa.is_attainable("Office Manager") is False
+    assert fa.is_attainable("Receptionist") is True
