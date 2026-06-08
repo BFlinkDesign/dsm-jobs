@@ -27,7 +27,6 @@ No third-party packages required - stock Python 3 only.
 
 import argparse
 import csv
-import html
 import json
 import os
 import sys
@@ -491,90 +490,283 @@ def write_csv(rows, path):
                         r["created"], r["source"], "; ".join(sc["reasons"]), r["url"]])
 
 
-# Plain-language rules card shown at the top of the friend's page.
-RULES_HTML = """
-<div class="rules">
-  <div class="rules-h">Read this first — how to stay safe</div>
-  <div class="ok">These jobs were checked and look real and a good fit for you.
-    Click <b>View &amp; apply</b>, read the job, and apply.</div>
-  <div class="bad"><b>It is ALWAYS a scam</b> if a "job" asks you to:
-    <ul>
-      <li>Pay money, a fee, or buy your own equipment to start</li>
-      <li>Cash a check and send part of it back, or buy gift cards</li>
-      <li>Give your Social Security number or bank info before a real interview</li>
-      <li>Only talk by text, Telegram, or WhatsApp</li>
-    </ul>
-    If a job asks for any of that — <b>STOP and call {contact}.</b> Don't reply, don't send anything.</div>
-</div>
-"""
+def _jobs_payload(safe_rows):
+    """Build the JSON list the front-end app renders."""
+    jobs = []
+    for r in friend_sort(safe_rows):
+        label, color = VERDICT_LABEL.get(r["verdict"], ("?", "#57606a"))
+        floor = r["hourly_min"] if r["hourly_min"] is not None else (r["hourly_max"] or 0)
+        jobs.append({
+            "id": str(r.get("id") or r["url"]),
+            "title": r["title"],
+            "company": r["company"],
+            "location": r["location"],
+            "pay": salary_text(r),
+            "payNum": float(floor or 0),
+            "remote": r["source"] == "remote",
+            "trusted": employer_is_trusted(r["company"]),
+            "good": r["verdict"] in ("meets", "estimated_ok"),
+            "tagLabel": label,
+            "tagColor": color,
+            "posted": r["created"] or "",
+            "url": r["url"],
+        })
+    return jobs
 
 
-def write_html(safe_rows, hidden_count, total_checked, path, generated, contact="me"):
-    rows = friend_sort(safe_rows)
-    n_good = sum(1 for r in rows if r["verdict"] in ("meets", "estimated_ok"))
-
-    parts = [f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Jobs for you — Des Moines</title>
-<style>
-  body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 0;
-         background: #f6f8fa; color: #1f2328; }}
-  .wrap {{ max-width: 820px; margin: 0 auto; padding: 22px 16px 64px; }}
-  h1 {{ font-size: 23px; margin: 0 0 4px; }}
-  .sub {{ color: #57606a; font-size: 14px; margin-bottom: 16px; }}
-  .rules {{ background: #fff8e5; border: 2px solid #e3b341; border-radius: 12px;
-           padding: 14px 16px; margin-bottom: 22px; font-size: 15px; line-height: 1.5; }}
-  .rules-h {{ font-weight: 700; font-size: 16px; margin-bottom: 8px; }}
-  .rules .ok {{ margin-bottom: 10px; }}
-  .rules .bad {{ background: #fff; border-left: 4px solid #cf222e; padding: 8px 12px; border-radius: 6px; }}
-  .rules ul {{ margin: 6px 0 6px 0; padding-left: 20px; }}
-  .card {{ background: #fff; border: 1px solid #d0d7de; border-radius: 10px;
-          padding: 14px 16px; margin: 10px 0; }}
-  .t {{ font-size: 17px; font-weight: 600; margin: 0 0 2px; }}
-  .co {{ color: #1f2328; font-size: 15px; font-weight: 600; }}
-  .trust {{ color: #1a7f37; font-size: 13px; font-weight: 600; }}
-  .meta {{ color: #57606a; font-size: 13px; margin-top: 4px; }}
-  .tag {{ display: inline-block; font-size: 12px; font-weight: 600; color: #fff;
-         padding: 2px 8px; border-radius: 999px; margin-bottom: 6px; }}
-  a.apply {{ display: inline-block; margin-top: 10px; font-size: 15px; background:#0969da;
-            color:#fff; text-decoration: none; padding: 8px 14px; border-radius: 8px; font-weight: 600; }}
-  .section {{ font-size: 14px; font-weight: 700; color: #1f2328; margin: 26px 0 6px; }}
-</style></head><body><div class="wrap">
-<h1>Jobs for you — Des Moines area</h1>
-<div class="sub">{len(rows)} jobs that look safe and fit you &middot; {n_good} pay $19+/hr
-&middot; updated {generated}</div>
-{RULES_HTML.format(contact=html.escape(contact))}
-<div class="sub">We looked at {total_checked} postings and <b>hid {hidden_count}</b> that
-looked like scams so you won't see them.</div>
-"""]
-
-    order = [("meets", "✅ Pays $19+/hr"),
-             ("estimated_ok", "✅ Pays about $19+/hr (confirm the pay when you apply)"),
-             ("unlisted", "Pay not listed"),
-             ("below", "Under $19/hr (extra options)")]
-
-    for verdict, heading in order:
-        group = [r for r in rows if r["verdict"] == verdict]
-        if not group:
-            continue
-        parts.append(f'<div class="section">{html.escape(heading)} ({len(group)})</div>')
-        for r in group:
-            label, color = VERDICT_LABEL.get(r["verdict"], ("?", "#57606a"))
-            src = "Work from home" if r["source"] == "remote" else "In person"
-            trust = '<span class="trust">✓ known employer</span> &middot; ' \
-                if employer_is_trusted(r["company"]) else ""
-            parts.append(f"""<div class="card">
-  <span class="tag" style="background:{color}">{html.escape(label)}</span>
-  <div class="t">{html.escape(r['title'])}</div>
-  <div class="co">{html.escape(r['company'])}</div>
-  <div class="meta">{trust}{html.escape(r['location'])} &middot; {html.escape(salary_text(r))}
-  &middot; {src} &middot; posted {html.escape(r['created'] or 'n/a')}</div>
-  <a class="apply" href="{html.escape(r['url'])}" target="_blank" rel="noopener">View &amp; apply</a>
-</div>""")
-
-    parts.append("</div></body></html>")
+def write_html(safe_rows, hidden_count, total_checked, path, generated,
+               contact="me", contact_phone=""):
+    jobs = _jobs_payload(safe_rows)
+    meta = {
+        "contact": contact,
+        "phone": contact_phone,
+        "generated": generated,
+        "hidden": hidden_count,
+        "total": total_checked,
+    }
+    jobs_json = json.dumps(jobs, ensure_ascii=False).replace("</", "<\\/")
+    meta_json = json.dumps(meta, ensure_ascii=False).replace("</", "<\\/")
+    out = (APP_TEMPLATE
+           .replace("##JOBS##", jobs_json)
+           .replace("##META##", meta_json))
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write("".join(parts))
+        fh.write(out)
+
+
+# Mobile-first installable PWA. {{tokens}} are filled by write_html; CSS/JS braces
+# are literal (this is NOT an f-string).
+APP_TEMPLATE = r"""<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d7c66">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="My Jobs">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Jobs for you — Des Moines</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{
+ --bg:#fbf7f0; --card:#fff; --ink:#1d2127; --muted:#5b6470; --line:#e8e1d4;
+ --primary:#0d7c66; --primary-d:#0a5f4e; --amber-bg:#fff4d6; --amber-bd:#e3b341;
+ --danger:#c0362c; --good:#1a7f37; --chip:#efe9dd;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--bg);color:var(--ink);
+ font-family:'Atkinson Hyperlegible',-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+ font-size:18px;line-height:1.5}
+.app{max-width:680px;margin:0 auto;padding:0 14px 110px}
+header.bar{position:sticky;top:0;z-index:20;background:var(--primary);color:#fff;
+ margin:0 -14px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.12)}
+header .h1{font-size:23px;font-weight:700}
+header .meta{font-size:14px;opacity:.93;margin-top:2px}
+.safety{background:var(--amber-bg);border:2px solid var(--amber-bd);border-radius:14px;
+ padding:14px 16px;margin:16px 0;font-size:17px}
+.safety h2{margin:0 0 6px;font-size:19px}
+.safety ul{margin:8px 0;padding-left:22px}
+.safety li{margin:5px 0}
+.callbtn{display:block;text-align:center;margin-top:12px;background:var(--danger);color:#fff;
+ text-decoration:none;font-weight:700;padding:15px;border-radius:12px;font-size:18px;min-height:54px}
+.toggle{background:none;border:none;color:var(--primary-d);font:inherit;font-weight:700;
+ text-decoration:underline;padding:6px 0;cursor:pointer}
+.controls{position:sticky;top:70px;z-index:15;background:var(--bg);padding:10px 0 4px}
+.search{width:100%;font-size:18px;padding:15px 16px;border:2px solid var(--line);border-radius:12px;
+ background:#fff;min-height:54px}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:10px 0 4px;-webkit-overflow-scrolling:touch}
+.chip{flex:0 0 auto;background:var(--chip);border:2px solid transparent;border-radius:999px;
+ padding:10px 16px;font-size:16px;font-weight:700;color:var(--ink);min-height:46px;white-space:nowrap}
+.chip[aria-pressed="true"]{background:var(--primary);color:#fff}
+.count{color:var(--muted);font-size:15px;margin:8px 2px}
+.progress{color:var(--good);font-weight:700;font-size:15px;margin:2px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0;
+ box-shadow:0 1px 4px rgba(0,0,0,.05);animation:rise .22s ease both}
+.tag{display:inline-block;font-size:13px;font-weight:700;color:#fff;padding:3px 11px;border-radius:999px;margin-bottom:8px}
+.title{font-size:20px;font-weight:700;margin:0 0 2px}
+.co{font-size:17px;font-weight:700}
+.known{color:var(--good)}
+.r{color:var(--muted);font-size:15px;margin-top:6px}
+.pay{font-weight:700;color:var(--ink)}
+.apply{display:block;text-align:center;margin-top:14px;background:var(--primary);color:#fff;
+ text-decoration:none;font-weight:700;padding:16px;border-radius:12px;font-size:19px;min-height:56px}
+.apply:active{background:var(--primary-d)}
+.actions{display:flex;gap:10px;margin-top:10px}
+.act{flex:1;background:#fff;border:2px solid var(--line);border-radius:12px;padding:13px 8px;
+ font:inherit;font-size:16px;font-weight:700;min-height:52px;color:var(--ink)}
+.act.on{background:var(--primary);color:#fff;border-color:var(--primary)}
+.act.applied.on{background:var(--good);border-color:var(--good)}
+.empty{text-align:center;color:var(--muted);padding:48px 12px;font-size:18px}
+.foot{color:var(--muted);font-size:14px;text-align:center;margin:26px 0 0;line-height:1.6}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.card{animation:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="h1">Jobs for you</div>
+    <div class="meta" id="hdrmeta"></div>
+  </header>
+
+  <section class="safety" id="safety">
+    <h2>⚠️ Stay safe — read this</h2>
+    <div>These jobs were checked and look real. Tap <b>Apply</b> to read and apply.</div>
+    <div><b>It is ALWAYS a scam if a job asks you to:</b>
+      <ul>
+        <li>Pay money or buy equipment to start</li>
+        <li>Cash a check and send part back, or buy gift cards</li>
+        <li>Give your Social Security or bank number before a real interview</li>
+        <li>Only talk by text, Telegram, or WhatsApp</li>
+      </ul>
+      If that happens — <b>STOP.</b> Don't reply. Don't send anything.</div>
+    <a class="callbtn" id="callbtn" href="#">Something feels wrong? Ask first</a>
+  </section>
+
+  <div class="controls">
+    <input class="search" id="search" type="search" inputmode="search"
+      placeholder="Search job or company…" aria-label="Search jobs">
+    <div class="chips" id="chips"></div>
+  </div>
+
+  <div class="progress" id="progress"></div>
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+  <div class="empty" id="empty" hidden>No jobs match. Tap “All jobs” to see everything.</div>
+
+  <div class="foot" id="foot"></div>
+</div>
+
+<script>
+const JOBS = ##JOBS##;
+const META = ##META##;
+const LS = "myjobs:v1";
+function load(){ try{return JSON.parse(localStorage.getItem(LS))||{}}catch(e){return {}} }
+function save(s){ try{localStorage.setItem(LS, JSON.stringify(s))}catch(e){} }
+let state = load();
+state.applied = new Set(state.applied||[]);
+state.saved   = new Set(state.saved||[]);
+state.hidden  = new Set(state.hidden||[]);
+function persist(){ save({applied:[...state.applied], saved:[...state.saved], hidden:[...state.hidden]}); }
+
+let filters = { q:"", pay:false, inperson:false, remote:false, known:false, saved:false, applied:false, showHidden:false };
+let sortBy = "pay";
+
+const CHIPS = [
+  ["pay","💵 $19+/hr only"], ["inperson","🏢 In person"], ["remote","🏠 Work from home"],
+  ["known","✓ Known employer"], ["saved","⭐ Saved"], ["applied","✅ Applied"],
+  ["showHidden","👁 Show hidden"],
+];
+
+function esc(s){ const d=document.createElement("div"); d.textContent=s==null?"":s; return d.innerHTML; }
+
+function matches(j){
+  if(!filters.showHidden && state.hidden.has(j.id)) return false;
+  if(filters.showHidden && !state.hidden.has(j.id)) return false;
+  if(filters.q){
+    const q=filters.q.toLowerCase();
+    if(!((j.title+" "+j.company+" "+j.location).toLowerCase().includes(q))) return false;
+  }
+  if(filters.pay && !j.good) return false;
+  if(filters.inperson && j.remote) return false;
+  if(filters.remote && !j.remote) return false;
+  if(filters.known && !j.trusted) return false;
+  if(filters.saved && !state.saved.has(j.id)) return false;
+  if(filters.applied && !state.applied.has(j.id)) return false;
+  return true;
+}
+
+function render(){
+  document.getElementById("hdrmeta").textContent =
+    JOBS.length + " safe jobs · updated " + META.generated;
+  const ap = state.applied.size;
+  document.getElementById("progress").textContent = ap ? ("✅ You've applied to " + ap + (ap===1?" job":" jobs") + " — nice work!") : "";
+
+  let list = JOBS.filter(matches);
+  if(sortBy==="pay") list.sort((a,b)=> b.payNum-a.payNum || (b.posted<a.posted?-1:1));
+  else list.sort((a,b)=> (b.posted<a.posted?-1: b.posted>a.posted?1:0));
+
+  document.getElementById("count").textContent =
+    "Showing " + list.length + (filters.showHidden? " hidden":" ") + " job" + (list.length===1?"":"s");
+
+  const wrap = document.getElementById("list");
+  wrap.innerHTML = "";
+  document.getElementById("empty").hidden = list.length>0;
+
+  for(const j of list){
+    const applied = state.applied.has(j.id), saved = state.saved.has(j.id);
+    const known = j.trusted ? '<span class="known">✓ known employer</span> · ' : '';
+    const where = j.remote ? "🏠 Work from home" : "🏢 In person";
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML =
+      '<span class="tag" style="background:'+j.tagColor+'">'+esc(j.tagLabel)+'</span>'+
+      '<div class="title">'+esc(j.title)+'</div>'+
+      '<div class="co">'+esc(j.company)+'</div>'+
+      '<div class="r">'+known+esc(j.location)+'</div>'+
+      '<div class="r"><span class="pay">'+esc(j.pay)+'</span> · '+where+
+        (j.posted?(' · posted '+esc(j.posted)):'')+'</div>'+
+      '<a class="apply" href="'+esc(j.url)+'" target="_blank" rel="noopener" '+
+        'data-act="open" data-id="'+esc(j.id)+'">Apply</a>'+
+      '<div class="actions">'+
+        '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+(applied?'✅ Applied':'Mark applied')+'</button>'+
+        '<button class="act'+(saved?' on':'')+'" data-act="saved" data-id="'+esc(j.id)+'">'+(saved?'⭐ Saved':'⭐ Save')+'</button>'+
+        '<button class="act" data-act="hide" data-id="'+esc(j.id)+'">'+(filters.showHidden?'Unhide':'Hide')+'</button>'+
+      '</div>';
+    wrap.appendChild(el);
+  }
+}
+
+function buildChips(){
+  const c = document.getElementById("chips"); c.innerHTML="";
+  for(const [key,label] of CHIPS){
+    const b=document.createElement("button");
+    b.className="chip"; b.textContent=label; b.setAttribute("aria-pressed","false");
+    b.onclick=()=>{
+      filters[key]=!filters[key];
+      if(key==="inperson"&&filters.inperson) filters.remote=false;
+      if(key==="remote"&&filters.remote) filters.inperson=false;
+      [...c.children].forEach((ch,i)=>ch.setAttribute("aria-pressed", String(filters[CHIPS[i][0]])));
+      render();
+    };
+    c.appendChild(b);
+  }
+}
+
+document.getElementById("list").addEventListener("click",(e)=>{
+  const t=e.target.closest("[data-act]"); if(!t) return;
+  const id=t.getAttribute("data-id"), act=t.getAttribute("data-act");
+  if(act==="open"){ state.applied.add(id); persist(); setTimeout(render,400); return; }
+  e.preventDefault();
+  if(act==="applied"){ state.applied.has(id)?state.applied.delete(id):state.applied.add(id); }
+  if(act==="saved"){ state.saved.has(id)?state.saved.delete(id):state.saved.add(id); }
+  if(act==="hide"){ state.hidden.has(id)?state.hidden.delete(id):state.hidden.add(id); }
+  persist(); render();
+});
+
+document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.target.value; render(); });
+
+(function callBtn(){
+  const b=document.getElementById("callbtn");
+  const who = META.contact || "someone you trust";
+  if(META.phone){ b.href="tel:"+META.phone.replace(/[^0-9+]/g,""); b.textContent="Something feels wrong? Call "+who; }
+  else { b.removeAttribute("href"); b.style.cursor="default"; b.textContent="Something feels wrong? Ask "+who+" before you reply"; }
+})();
+
+document.getElementById("foot").innerHTML =
+  "We checked "+META.total+" postings and hid <b>"+META.hidden+"</b> that looked like scams.<br>"+
+  "Tip: tap your phone's Share button → <b>Add to Home Screen</b> to keep this handy.";
+
+buildChips();
+render();
+if("serviceWorker" in navigator){ navigator.serviceWorker.register("sw.js").catch(()=>{}); }
+</script>
+</body>
+</html>"""
 
 
 # --------------------------------------------------------------------------
@@ -632,6 +824,8 @@ def main():
     ap.add_argument("--min-hourly", type=float, default=MIN_HOURLY, help="Wage floor (default 19).")
     ap.add_argument("--contact", default="me",
                     help="Name the friend should call if a job looks like a scam (shown in the page).")
+    ap.add_argument("--contact-phone", default="",
+                    help="Optional phone number for the in-page 'Call' button (tel: link).")
     args = ap.parse_args()
 
     MIN_HOURLY = args.min_hourly
@@ -664,10 +858,13 @@ def main():
     human = stamp.strftime("%Y-%m-%d %H:%M")
 
     base = os.path.dirname(os.path.abspath(__file__))
+    web_dir = os.path.join(base, "web")
+    os.makedirs(web_dir, exist_ok=True)
     csv_path = os.path.join(base, f"admin-jobs-{datestr}.csv")
-    html_path = os.path.join(base, f"admin-jobs-{datestr}.html")
-    write_csv(sort_rows(rows), csv_path)           # full audit incl. hidden
-    write_html(safe, len(hidden), len(rows), html_path, human, contact=args.contact)
+    html_path = os.path.join(web_dir, "index.html")     # the mobile PWA
+    write_csv(sort_rows(rows), csv_path)                 # full audit incl. hidden
+    write_html(safe, len(hidden), len(rows), html_path, human,
+               contact=args.contact, contact_phone=args.contact_phone)
 
     n_good = sum(1 for r in safe if r["verdict"] in ("meets", "estimated_ok"))
     print("-" * 40)
@@ -680,8 +877,9 @@ def main():
         for reason, c in why.most_common(4):
             print(f"      - {c}x {reason}")
     print("-" * 40)
-    print(f"SEND THIS to your friend: {html_path}")
-    print(f"Your audit (all + scam reasons): {csv_path}")
+    print(f"MOBILE APP (send/host this folder): {web_dir}")
+    print(f"  open locally: {html_path}")
+    print(f"Your audit (all + scam reasons):    {csv_path}")
     return 0
 
 
