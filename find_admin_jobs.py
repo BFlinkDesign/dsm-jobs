@@ -120,6 +120,13 @@ TRUSTED_EMPLOYER_HINTS = [
     "goodwill", "salvation army", "ymca", "library", "department of", "police",
     "veterans affairs", "social security administration", "aerotek", "robert half",
     "kelly services", "express employment", "adecco", "manpower",
+    # Additional recognizable Iowa + national employers (legit; reduces false hides)
+    "vermeer", "kum & go", "kwik", "meredith", "voya", "gartner", "edward jones",
+    "marsh", "businessolver", "dotdash", "ruan", "kemin", "pioneer", "telligen",
+    "labcorp", "quest diagnostics", "amgen", "ups", "fedex", "target", "walmart",
+    "amazon", "concentrix", "teleperformance", "sykes", "kelly", "randstad",
+    "mercy", "methodist", "genesis health", "iowa health", "wellpoint", "humana",
+    "cvs", "walgreens", "hyvee", "menards", "lowe's", "home depot", "costco",
 ]
 
 # Seniority / competitiveness markers -> not attainable for this user; dropped.
