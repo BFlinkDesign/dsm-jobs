@@ -365,14 +365,16 @@ def normalize(job, source):
 
     hourly_min = to_hourly(smin)
     hourly_max = to_hourly(smax)
-    # Wage FLOOR test: a job clears $19 only if the LOW end of its range does.
-    # ($16-$23 should NOT count as "$19+"; the friend could be offered the bottom.)
-    hourly_for_test = hourly_min if hourly_min is not None else hourly_max
+    # SAFETY: Adzuna *predicts* pay when the employer didn't post it. Those guesses
+    # are unreliable per-listing, so we NEVER promise a number from them. Only an
+    # employer-STATED salary earns a dollar figure / a $19+ badge. Wage FLOOR test:
+    # the LOW end of a stated range must clear $19 ("$16-$23" does not count).
+    floor = hourly_min if hourly_min is not None else hourly_max
 
-    if hourly_for_test is None:
-        verdict = "unlisted"            # no salary data at all
-    elif hourly_for_test >= MIN_HOURLY:
-        verdict = "estimated_ok" if predicted else "meets"
+    if floor is None or predicted:
+        verdict = "unlisted"            # no pay, or only an Adzuna guess
+    elif floor >= MIN_HOURLY:
+        verdict = "meets"
     else:
         verdict = "below"
 
@@ -449,10 +451,10 @@ def _neg_date(d):
 # --------------------------------------------------------------------------
 
 VERDICT_LABEL = {
-    "meets":        ("PAYS $19+/hr",       "#1a7f37"),
-    "estimated_ok": ("est. $19+/hr",       "#9a6700"),
-    "unlisted":     ("salary not posted",  "#57606a"),
-    "below":        ("below $19/hr",       "#cf222e"),
+    "meets":        ("Pays $19+/hr",          "#1a7f37"),
+    "unlisted":     ("Pay not listed",        "#5b6470"),
+    "below":        ("Under $19/hr",          "#a04100"),
+    "estimated_ok": ("Pay not listed",        "#5b6470"),  # legacy; predicted now = unlisted
 }
 
 
@@ -495,17 +497,19 @@ def _jobs_payload(safe_rows):
     jobs = []
     for r in friend_sort(safe_rows):
         label, color = VERDICT_LABEL.get(r["verdict"], ("?", "#57606a"))
+        # Only an EMPLOYER-STATED salary shows a number; predicted/none -> "Pay not listed".
+        stated = (not r["predicted"]) and (r["hourly_min"] is not None or r["hourly_max"] is not None)
         floor = r["hourly_min"] if r["hourly_min"] is not None else (r["hourly_max"] or 0)
         jobs.append({
             "id": str(r.get("id") or r["url"]),
             "title": r["title"],
             "company": r["company"],
             "location": r["location"],
-            "pay": salary_text(r),
-            "payNum": float(floor or 0),
+            "pay": salary_text(r) if stated else "Pay not listed",
+            "payNum": float(floor) if stated else 0.0,
             "remote": r["source"] == "remote",
             "trusted": employer_is_trusted(r["company"]),
-            "good": r["verdict"] in ("meets", "estimated_ok"),
+            "good": r["verdict"] == "meets",          # only employer-stated $19+
             "tagLabel": label,
             "tagColor": color,
             "posted": r["created"] or "",
@@ -540,104 +544,135 @@ APP_TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0d7c66">
+<meta name="theme-color" content="#f4efe6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<meta name="apple-mobile-web-app-title" content="My Jobs">
+<meta name="apple-mobile-web-app-title" content="Job Board">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>Jobs for you — Des Moines</title>
+<title>Job Board — Des Moines</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
- --bg:#fbf7f0; --card:#fff; --ink:#1d2127; --muted:#5b6470; --line:#e8e1d4;
- --primary:#0d7c66; --primary-d:#0a5f4e; --amber-bg:#fff4d6; --amber-bd:#e3b341;
- --danger:#c0362c; --good:#1a7f37; --chip:#efe9dd;
+ --paper:#f7f3ea; --card:#fffdf8; --ink:#16241f; --ink2:#4c5a53; --line:#e6dccb;
+ --green:#0f6b54; --green-d:#0a5340; --green-soft:#e6f0eb;
+ --gold:#8a6d2b; --red:#a8312a; --shadow:0 1px 2px rgba(20,33,28,.05),0 6px 18px rgba(20,33,28,.06);
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
-body{margin:0;background:var(--bg);color:var(--ink);
+body{margin:0;background:var(--paper);color:var(--ink);
  font-family:'Atkinson Hyperlegible',-apple-system,Segoe UI,Roboto,Arial,sans-serif;
- font-size:18px;line-height:1.5}
-.app{max-width:680px;margin:0 auto;padding:0 14px 110px}
-header.bar{position:sticky;top:0;z-index:20;background:var(--primary);color:#fff;
- margin:0 -14px;padding:16px;box-shadow:0 2px 10px rgba(0,0,0,.12)}
-header .h1{font-size:23px;font-weight:700}
-header .meta{font-size:14px;opacity:.93;margin-top:2px}
-.safety{background:var(--amber-bg);border:2px solid var(--amber-bd);border-radius:14px;
- padding:14px 16px;margin:16px 0;font-size:17px}
-.safety h2{margin:0 0 6px;font-size:19px}
-.safety ul{margin:8px 0;padding-left:22px}
+ font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased}
+.app{max-width:640px;margin:0 auto;padding:0 16px 120px}
+svg{display:inline-block;vertical-align:-2px}
+/* App bar */
+header.bar{position:sticky;top:0;z-index:20;background:rgba(247,243,234,.92);
+ backdrop-filter:saturate(1.1) blur(8px);margin:0 -16px;padding:14px 16px 12px;
+ border-bottom:1px solid var(--line)}
+.brandrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.word{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:26px;line-height:1.05;letter-spacing:-.01em}
+.safebadge{display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);color:var(--green-d);
+ font-size:12px;font-weight:700;padding:6px 10px;border-radius:999px;white-space:nowrap}
+.summary{color:var(--ink2);font-size:14px;margin-top:6px}
+/* Safety */
+.safety{background:#fff;border:1px solid var(--line);border-left:4px solid var(--red);
+ border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
+.safety h2{margin:0 0 4px;font-family:'Fraunces',Georgia,serif;font-size:19px;font-weight:600;
+ display:flex;align-items:center;gap:8px}
+.safety h2 svg{color:var(--red)}
+.safety ul{margin:8px 0;padding-left:20px}
 .safety li{margin:5px 0}
-.callbtn{display:block;text-align:center;margin-top:12px;background:var(--danger);color:#fff;
- text-decoration:none;font-weight:700;padding:15px;border-radius:12px;font-size:18px;min-height:54px}
-.toggle{background:none;border:none;color:var(--primary-d);font:inherit;font-weight:700;
- text-decoration:underline;padding:6px 0;cursor:pointer}
-.controls{position:sticky;top:70px;z-index:15;background:var(--bg);padding:10px 0 4px}
-.search{width:100%;font-size:18px;padding:15px 16px;border:2px solid var(--line);border-radius:12px;
- background:#fff;min-height:54px}
-.chips{display:flex;gap:8px;overflow-x:auto;padding:10px 0 4px;-webkit-overflow-scrolling:touch}
-.chip{flex:0 0 auto;background:var(--chip);border:2px solid transparent;border-radius:999px;
- padding:10px 16px;font-size:16px;font-weight:700;color:var(--ink);min-height:46px;white-space:nowrap}
-.chip[aria-pressed="true"]{background:var(--primary);color:#fff}
-.count{color:var(--muted);font-size:15px;margin:8px 2px}
-.progress{color:var(--good);font-weight:700;font-size:15px;margin:2px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;margin:12px 0;
- box-shadow:0 1px 4px rgba(0,0,0,.05);animation:rise .22s ease both}
-.tag{display:inline-block;font-size:13px;font-weight:700;color:#fff;padding:3px 11px;border-radius:999px;margin-bottom:8px}
-.title{font-size:20px;font-weight:700;margin:0 0 2px}
-.co{font-size:17px;font-weight:700}
-.known{color:var(--good)}
-.r{color:var(--muted);font-size:15px;margin-top:6px}
-.pay{font-weight:700;color:var(--ink)}
-.apply{display:block;text-align:center;margin-top:14px;background:var(--primary);color:#fff;
- text-decoration:none;font-weight:700;padding:16px;border-radius:12px;font-size:19px;min-height:56px}
-.apply:active{background:var(--primary-d)}
-.actions{display:flex;gap:10px;margin-top:10px}
-.act{flex:1;background:#fff;border:2px solid var(--line);border-radius:12px;padding:13px 8px;
- font:inherit;font-size:16px;font-weight:700;min-height:52px;color:var(--ink)}
-.act.on{background:var(--primary);color:#fff;border-color:var(--primary)}
-.act.applied.on{background:var(--good);border-color:var(--good)}
-.empty{text-align:center;color:var(--muted);padding:48px 12px;font-size:18px}
-.foot{color:var(--muted);font-size:14px;text-align:center;margin:26px 0 0;line-height:1.6}
-@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.safety .note{color:var(--ink2);font-size:15px;margin-top:6px}
+.callbtn{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;
+ background:#fff;border:2px solid var(--red);color:var(--red);text-decoration:none;font-weight:700;
+ padding:13px;border-radius:11px;font-size:16px;min-height:52px}
+/* Controls */
+.controls{position:sticky;top:62px;z-index:15;background:var(--paper);padding:10px 0 2px}
+.searchwrap{position:relative}
+.searchwrap svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--ink2)}
+.search{width:100%;font:inherit;font-size:17px;padding:14px 16px 14px 44px;border:1.5px solid var(--line);
+ border-radius:12px;background:#fff;min-height:52px;color:var(--ink)}
+.search:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:11px 0 5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;background:#fff;border:1.5px solid var(--line);border-radius:999px;
+ padding:9px 15px;font:inherit;font-size:15px;font-weight:700;color:var(--ink2);min-height:44px;white-space:nowrap;transition:.15s}
+.chip[aria-pressed="true"]{background:var(--green);color:#fff;border-color:var(--green)}
+/* Lists */
+.progress{display:flex;align-items:center;gap:7px;color:var(--green-d);font-weight:700;font-size:14px;margin:8px 2px 0}
+.count{color:var(--ink2);font-size:13px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin:14px 2px 4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 14px;margin:12px 0;
+ box-shadow:var(--shadow);animation:rise .3s cubic-bezier(.2,.7,.3,1) both}
+.cardtop{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.pill{display:inline-flex;align-items:center;font-size:13px;font-weight:700;padding:5px 11px;border-radius:8px}
+.pill.good{background:var(--green);color:#fff}
+.pill.none{background:#f0ebe0;color:var(--ink2)}
+.verified{display:inline-flex;align-items:center;gap:5px;color:var(--gold);font-size:13px;font-weight:700}
+.title{font-family:'Fraunces',Georgia,serif;font-size:20px;font-weight:600;line-height:1.18;margin:0 0 3px}
+.co{font-size:16px;font-weight:700;color:var(--ink)}
+.meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--ink2);font-size:14px;margin-top:9px}
+.meta span{display:inline-flex;align-items:center;gap:6px}
+.apply{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;background:var(--green);color:#fff;
+ text-decoration:none;font-weight:700;padding:15px;border-radius:11px;font-size:17px;min-height:54px;transition:.12s}
+.apply:active{transform:scale(.985);background:var(--green-d)}
+.actions{display:flex;gap:8px;margin-top:9px}
+.act{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:#fff;
+ border:1.5px solid var(--line);border-radius:11px;padding:11px 6px;font:inherit;font-size:14px;font-weight:700;
+ min-height:48px;color:var(--ink2);transition:.12s}
+.act:active{transform:scale(.97)}
+.act.on{background:var(--green);color:#fff;border-color:var(--green)}
+.act.applied.on{background:var(--green-d);border-color:var(--green-d)}
+.empty{text-align:center;color:var(--ink2);padding:52px 16px;font-size:17px}
+.empty svg{color:var(--line);margin-bottom:10px}
+.foot{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--ink2);font-size:13px;
+ text-align:center;margin:30px 0 0;line-height:1.6;border-top:1px solid var(--line);padding-top:18px}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.card{animation:none}}
 </style>
 </head>
 <body>
 <div class="app">
   <header class="bar">
-    <div class="h1">Jobs for you</div>
-    <div class="meta" id="hdrmeta"></div>
+    <div class="brandrow">
+      <div>
+        <div class="eyebrow">Des Moines Metro</div>
+        <div class="word">Job Board</div>
+      </div>
+      <span class="safebadge"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Scam-checked</span>
+    </div>
+    <div class="summary" id="summary"></div>
   </header>
 
-  <section class="safety" id="safety">
-    <h2>⚠️ Stay safe — read this</h2>
-    <div>These jobs were checked and look real. Tap <b>Apply</b> to read and apply.</div>
-    <div><b>It is ALWAYS a scam if a job asks you to:</b>
-      <ul>
-        <li>Pay money or buy equipment to start</li>
-        <li>Cash a check and send part back, or buy gift cards</li>
-        <li>Give your Social Security or bank number before a real interview</li>
-        <li>Only talk by text, Telegram, or WhatsApp</li>
-      </ul>
-      If that happens — <b>STOP.</b> Don't reply. Don't send anything.</div>
-    <a class="callbtn" id="callbtn" href="#">Something feels wrong? Ask first</a>
+  <section class="safety">
+    <h2><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/></svg>Before you apply</h2>
+    <div>These jobs were checked and look real. Read the posting, then apply.</div>
+    <div class="note"><b>It's a scam if a job ever asks you to:</b></div>
+    <ul>
+      <li>Pay money or buy equipment to start</li>
+      <li>Cash a check and send part back, or buy gift cards</li>
+      <li>Give your Social Security or bank number before a real interview</li>
+      <li>Only talk by text, Telegram, or WhatsApp</li>
+    </ul>
+    <div class="note"><b>“Pay not listed”</b> means the employer didn't post the wage — ask what it pays when you apply.</div>
+    <a class="callbtn" id="callbtn" href="#"></a>
   </section>
 
   <div class="controls">
-    <input class="search" id="search" type="search" inputmode="search"
-      placeholder="Search job or company…" aria-label="Search jobs">
+    <div class="searchwrap">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
+      <input class="search" id="search" type="search" inputmode="search"
+        placeholder="Search job or employer" aria-label="Search jobs">
+    </div>
     <div class="chips" id="chips"></div>
   </div>
 
   <div class="progress" id="progress"></div>
   <div class="count" id="count"></div>
   <div id="list"></div>
-  <div class="empty" id="empty" hidden>No jobs match. Tap “All jobs” to see everything.</div>
-
+  <div class="empty" id="empty" hidden></div>
   <div class="foot" id="foot"></div>
 </div>
 
@@ -657,10 +692,19 @@ let filters = { q:"", pay:false, inperson:false, remote:false, known:false, save
 let sortBy = "pay";
 
 const CHIPS = [
-  ["pay","💵 $19+/hr only"], ["inperson","🏢 In person"], ["remote","🏠 Work from home"],
-  ["known","✓ Known employer"], ["saved","⭐ Saved"], ["applied","✅ Applied"],
-  ["showHidden","👁 Show hidden"],
+  ["pay","$19+/hr"], ["inperson","In person"], ["remote","Work from home"],
+  ["known","Verified employer"], ["saved","Saved"], ["applied","Applied"],
+  ["showHidden","Hidden"],
 ];
+const IC = {
+  pin:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21s-6.5-5.7-6.5-10.5a6.5 6.5 0 0113 0C18.5 15.3 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.3"/></svg>',
+  home:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
+  bldg:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2"/></svg>',
+  check:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5 5-5"/></svg>',
+  bookmark:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>',
+  eye:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="2.5"/></svg>',
+  arrow:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+};
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"'`]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c];});}
 function safeUrl(u){try{var p=new URL(u,location.href);return (p.protocol==="http:"||p.protocol==="https:")?p.href:"#";}catch(e){return "#";}}
@@ -682,44 +726,50 @@ function matches(j){
 }
 
 function render(){
-  document.getElementById("hdrmeta").textContent =
-    JOBS.length + " safe jobs · updated " + META.generated;
+  const good = JOBS.filter(j=>j.good).length;
+  document.getElementById("summary").textContent =
+    JOBS.length + " safe jobs · " + good + " pay $19+/hr · updated " + META.generated;
   const ap = state.applied.size;
-  document.getElementById("progress").textContent = ap ? ("✅ You've applied to " + ap + (ap===1?" job":" jobs") + " — nice work!") : "";
+  const prog = document.getElementById("progress");
+  prog.innerHTML = ap ? (IC.check + "You've applied to " + ap + (ap===1?" job":" jobs")) : "";
 
-  let list = JOBS.filter(matches);
-  if(sortBy==="pay") list.sort((a,b)=> b.payNum-a.payNum || (b.posted<a.posted?-1:1));
-  else list.sort((a,b)=> (b.posted<a.posted?-1: b.posted>a.posted?1:0));
+  const list = JOBS.filter(matches);
+  list.sort((a,b)=> b.payNum-a.payNum || (b.posted<a.posted?-1: b.posted>a.posted?1:0));
 
   document.getElementById("count").textContent =
-    "Showing " + list.length + (filters.showHidden? " hidden":" ") + " job" + (list.length===1?"":"s");
+    list.length + (filters.showHidden?" hidden ":" ") + (list.length===1?"job":"jobs");
 
   const wrap = document.getElementById("list");
   wrap.innerHTML = "";
-  document.getElementById("empty").hidden = list.length>0;
+  const empty = document.getElementById("empty");
+  empty.hidden = list.length>0;
+  if(!list.length){ empty.innerHTML = IC.eye + "<div>No jobs match. Turn off a filter to see more.</div>"; }
 
-  for(const j of list){
+  list.forEach(function(j,i){
     const applied = state.applied.has(j.id), saved = state.saved.has(j.id);
-    const known = j.trusted ? '<span class="known">✓ known employer</span> · ' : '';
-    const where = j.remote ? "🏠 Work from home" : "🏢 In person";
+    const payCls = j.good ? "good" : "none";
+    const verified = j.trusted ? '<span class="verified">'+IC.check+'Verified employer</span>' : '<span></span>';
+    const where = j.remote ? (IC.home+"Work from home") : (IC.bldg+"In person");
     const el = document.createElement("div");
     el.className = "card";
+    el.style.animationDelay = (Math.min(i,12)*0.025)+"s";
     el.innerHTML =
-      '<span class="tag" style="background:'+j.tagColor+'">'+esc(j.tagLabel)+'</span>'+
+      '<div class="cardtop"><span class="pill '+payCls+'">'+esc(j.pay)+'</span>'+verified+'</div>'+
       '<div class="title">'+esc(j.title)+'</div>'+
       '<div class="co">'+esc(j.company)+'</div>'+
-      '<div class="r">'+known+esc(j.location)+'</div>'+
-      '<div class="r"><span class="pay">'+esc(j.pay)+'</span> · '+where+
-        (j.posted?(' · posted '+esc(j.posted)):'')+'</div>'+
-      '<a class="apply" href="'+esc(safeUrl(j.url))+'" target="_blank" rel="noopener" '+
-        'data-act="open" data-id="'+esc(j.id)+'">Apply</a>'+
+      '<div class="meta">'+
+        '<span>'+IC.pin+esc(j.location)+'</span>'+
+        '<span>'+where+'</span>'+
+        (j.posted?'<span>posted '+esc(j.posted)+'</span>':'')+
+      '</div>'+
+      '<a class="apply" href="'+esc(safeUrl(j.url))+'" target="_blank" rel="noopener" data-act="open" data-id="'+esc(j.id)+'">Apply'+IC.arrow+'</a>'+
       '<div class="actions">'+
-        '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+(applied?'✅ Applied':'Mark applied')+'</button>'+
-        '<button class="act'+(saved?' on':'')+'" data-act="saved" data-id="'+esc(j.id)+'">'+(saved?'⭐ Saved':'⭐ Save')+'</button>'+
-        '<button class="act" data-act="hide" data-id="'+esc(j.id)+'">'+(filters.showHidden?'Unhide':'Hide')+'</button>'+
+        '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+IC.check+(applied?'Applied':'I applied')+'</button>'+
+        '<button class="act'+(saved?' on':'')+'" data-act="saved" data-id="'+esc(j.id)+'">'+IC.bookmark+(saved?'Saved':'Save')+'</button>'+
+        '<button class="act" data-act="hide" data-id="'+esc(j.id)+'">'+IC.eye+(filters.showHidden?'Unhide':'Hide')+'</button>'+
       '</div>';
     wrap.appendChild(el);
-  }
+  });
 }
 
 function buildChips(){
@@ -759,8 +809,8 @@ document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.ta
 })();
 
 document.getElementById("foot").innerHTML =
-  "We checked "+META.total+" postings and hid <b>"+META.hidden+"</b> that looked like scams.<br>"+
-  "Tip: tap your phone's Share button → <b>Add to Home Screen</b> to keep this handy.";
+  "<div>We checked "+META.total+" postings and hid <b>"+META.hidden+"</b> that looked like scams.</div>"+
+  "<div>Tip: tap Share, then <b>Add to Home Screen</b> to keep this on your phone.</div>";
 
 buildChips();
 render();

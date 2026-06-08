@@ -66,8 +66,26 @@ def test_verdict_meets_when_listed_above_floor():
     assert fa.normalize(_job(41600, 45760), "local")["verdict"] == "meets"
 
 
-def test_verdict_estimated_when_predicted_above_floor():
-    assert fa.normalize(_job(39520, 39520, predicted="1"), "local")["verdict"] == "estimated_ok"
+def test_predicted_salary_is_never_promised():
+    # Adzuna-predicted pay must NOT earn a $19+ verdict; treated as unlisted.
+    assert fa.normalize(_job(39520, 39520, predicted="1"), "local")["verdict"] == "unlisted"
+
+
+def test_payload_hides_predicted_number():
+    # Even a high predicted salary shows "Pay not listed" with no number / no $19+ flag.
+    row = fa.normalize(_job(41600, 45760, predicted="1"), "local")
+    row["scam"] = {"level": "safe", "reasons": []}
+    p = fa._jobs_payload([row])[0]
+    assert p["pay"] == "Pay not listed"
+    assert p["good"] is False
+    assert p["payNum"] == 0.0
+
+
+def test_payload_shows_employer_stated_number():
+    row = fa.normalize(_job(41600, 45760, predicted="0"), "local")
+    row["scam"] = {"level": "safe", "reasons": []}
+    p = fa._jobs_payload([row])[0]
+    assert "$20" in p["pay"] and p["good"] is True
 
 
 def test_verdict_unlisted_when_no_salary():
