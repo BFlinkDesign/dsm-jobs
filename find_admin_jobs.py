@@ -200,6 +200,24 @@ def load_env(path=".env"):
         print(f"WARN: could not read {path}: {err}")
 
 
+# Scam/spam blocklist (employer names or domains that are ALWAYS hidden).
+BLOCKLIST = []
+
+
+def load_blocklist(path="scam_blocklist.txt"):
+    items = []
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if line and not line.startswith("#"):
+                        items.append(line.lower())
+        except OSError:
+            pass
+    return items
+
+
 # --------------------------------------------------------------------------
 # Adzuna API
 # --------------------------------------------------------------------------
@@ -330,6 +348,12 @@ def scam_assessment(row, spam_index):
     title = (row["title"] or "").lower()
     company = row["company"] or ""
     desc = (row.get("description") or "").lower()
+
+    # Hard blocklist (confirmed scams) overrides everything, including trusted.
+    block_blob = (company + " " + (row.get("url") or "")).lower()
+    for b in BLOCKLIST:
+        if b in block_blob:
+            return {"level": "scam", "reasons": ["on scam blocklist (" + b + ")"]}
     trusted = employer_is_trusted(company)
     remote = row["source"] == "remote" or title_is_remote(row)
     hourly = row["hourly_max"] if row["hourly_max"] is not None else row["hourly_min"]
@@ -917,6 +941,9 @@ def main():
             return 1
 
     # Scam shield: assess every row, then split safe vs hidden.
+    global BLOCKLIST
+    BLOCKLIST = load_blocklist(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                            "scam_blocklist.txt"))
     spam_index = build_spam_index(rows)
     for r in rows:
         r["scam"] = scam_assessment(r, spam_index)
