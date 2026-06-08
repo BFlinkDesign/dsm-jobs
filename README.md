@@ -25,10 +25,32 @@ won't break every week.
 ## Run it
 
 ```
-python find_admin_jobs.py          # live search
-python find_admin_jobs.py --mock   # demo with fake data, no key needed
-python find_admin_jobs.py --min-hourly 20   # raise the wage floor
+python find_admin_jobs.py --contact "Your Name"   # live search
+python find_admin_jobs.py --mock                   # demo, no key needed
+python find_admin_jobs.py --min-hourly 20          # raise the wage floor
 ```
+
+`--contact` puts your name on the page ("if a job looks like a scam, call ___").
+
+## Safety / scam shield (important)
+
+This tool is built for a job-seeker who **can't always spot a scam**, so it does the
+vetting for them:
+
+- **Scams are hidden, not just labeled.** Postings with scam tells are removed from the
+  page entirely — the friend never sees them, so they can't fall for them.
+- **What gets hidden:** advance-fee / check-cashing / gift-card / wire language; off-platform
+  "interviews" (Telegram/WhatsApp); the same employer+role spammed across many cities;
+  unknown-employer **remote** roles (remote admin/data-entry is the #1 scam category);
+  remote pay that's too good to be true for entry admin.
+- **Attainable only.** Senior/lead/manager/competitive titles are dropped — only realistic
+  entry-level admin/reception/clerical roles are shown.
+- **Known employers first.** Recognizable local/government employers are sorted to the top.
+- **You get the audit.** The CSV lists *every* posting with a `safety` column and the exact
+  `scam_reasons`, so you can spot-check what was hidden.
+
+The HTML page also opens with a plain-language rule sheet: never pay money, buy equipment,
+cash a check, or give SSN/bank info to get a job.
 
 It creates two dated files in this folder:
 - **`admin-jobs-YYYY-MM-DD.html`** ← open this, then forward it to your friend
