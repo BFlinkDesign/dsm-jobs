@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10          # REQUIRED: never let a hung job run forever
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dev tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Compile check (syntax)
+        run: python -m compileall -q find_admin_jobs.py tests
+
+      - name: Unit + smoke tests (mock, no network)
+        run: pytest --timeout=30 --timeout-method=thread
+
+      - name: Mock pipeline end-to-end
+        run: python find_admin_jobs.py --mock
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Shape-based secret scan (no external deps)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Each alternation requires trailing chars so this rule never matches itself.
+          PATTERN='(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36,}|gho_[a-zA-Z0-9]{36,}|xox[bp]-[a-zA-Z0-9-]{20,}|AKIA[A-Z0-9]{16}|AIza[a-zA-Z0-9_-]{35}|-----BEGIN [A-Z]+ PRIVATE KEY-----)'
+          if git grep -nE "$PATTERN" -- . ':!*.lock' ; then
+            echo "::error::Potential secret detected (see matches above)"; exit 1
+          fi
+          echo "No secret shapes found."

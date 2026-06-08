@@ -1,0 +1,6 @@
+.env
+admin-jobs-*.csv
+admin-jobs-*.html
+data/
+__pycache__/
+*.pyc

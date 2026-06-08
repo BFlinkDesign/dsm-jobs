@@ -1,0 +1,27 @@
+[project]
+name = "dsm-job-finder"
+version = "0.1.0"
+description = "Find admin/clerical jobs (no degree, $19+/hr) in the Des Moines metro + remote, via the Adzuna API."
+requires-python = ">=3.9"
+readme = "README.md"
+license = { text = "MIT" }
+dependencies = []  # runtime is stdlib-only by design
+
+[tool.ruff]
+line-length = 110
+target-version = "py39"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]  # long lines tolerated (HTML template strings)
+
+[tool.ruff.lint.per-file-ignores]
+# Tests must insert sys.path before importing the module under test.
+"tests/*" = ["E402", "I001"]
+
+[tool.pytest.ini_options]
+# Timeouts are mandatory (CI-hang incident). Every test dies after 30s.
+timeout = 30
+timeout_method = "thread"
+addopts = "-q"
+testpaths = ["tests"]

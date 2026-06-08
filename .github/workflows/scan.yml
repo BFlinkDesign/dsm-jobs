@@ -1,0 +1,53 @@
+name: Daily Job Scan (CD)
+
+# Continuous "delivery" for a CLI tool: run the real search on a schedule,
+# publish the dated HTML + CSV as downloadable artifacts. Add the Adzuna key
+# as repo secrets (Settings -> Secrets -> Actions): ADZUNA_APP_ID, ADZUNA_APP_KEY.
+
+on:
+  schedule:
+    - cron: "0 12 * * *"   # 12:00 UTC daily (~6-7am Central)
+  workflow_dispatch:        # also runnable on demand from the Actions tab
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
+      ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Skip if Adzuna key not configured
+        id: gate
+        shell: bash
+        run: |
+          if [ -z "${ADZUNA_APP_ID}" ] || [ -z "${ADZUNA_APP_KEY}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::ADZUNA_APP_ID / ADZUNA_APP_KEY not set - add them in repo secrets to enable live scans. Skipping (not a failure)."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run live job scan
+        if: steps.gate.outputs.run == 'true'
+        run: python find_admin_jobs.py
+
+      - name: Upload results
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: admin-jobs-${{ github.run_id }}
+          path: |
+            admin-jobs-*.html
+            admin-jobs-*.csv
+          if-no-files-found: warn
+          retention-days: 14
