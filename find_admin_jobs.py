@@ -57,19 +57,28 @@ MAX_DAYS_OLD = 30                  # ignore stale postings
 RESULTS_PER_PAGE = 50             # Adzuna max per page
 
 # Job titles to search (each is a separate query for relevance, then de-duped).
+# Search queries (each is one API call per source). Grouped: admin/clerical,
+# light office-adjacent, and entry-level general (no-degree, $19+ paths).
 TITLES = [
-    "administrative assistant",
-    "office assistant",
-    "office administrator",
-    "receptionist",
-    "front desk",
-    "data entry",
-    "office clerk",
-    "administrative coordinator",
-    "office coordinator",
-    "secretary",
-    "clerical",
-    "scheduler",
+    # admin / clerical
+    "administrative assistant", "office assistant", "receptionist", "front desk",
+    "data entry", "office clerk", "administrative coordinator", "secretary",
+    "clerical", "file clerk",
+    # light office-adjacent
+    "scheduler", "medical receptionist", "billing clerk", "accounts payable clerk",
+    "medical records clerk", "bank teller", "customer service representative",
+    "call center representative", "mail clerk",
+    # entry-level general (no degree)
+    "warehouse associate", "retail associate", "cashier", "stocker",
+    "food service worker", "caregiver", "housekeeper", "production associate",
+    "general laborer",
+]
+
+# Subset that genuinely exists as remote work (skip remote calls for in-person roles).
+REMOTE_TITLES = [
+    "administrative assistant", "data entry", "receptionist", "scheduler",
+    "customer service representative", "call center representative",
+    "billing clerk", "medical records clerk",
 ]
 
 # Titles that LOOK like admin but are actually skilled/licensed roles a HS-diploma
@@ -140,12 +149,22 @@ SENIORITY_DROP_TERMS = [
 # "Coordinator/Manager/Specialist/Investigator" roles that are not entry-level
 # admin/reception work. Requiring an admin term in the title drops that noise.
 ADMIN_TITLE_TERMS = [
+    # admin / clerical
     "administrative assistant", "admin assistant", "administrative support",
     "administrative coordinator", "administrative specialist", "administrative aide",
     "receptionist", "front desk", "front office", "office assistant",
     "office administrator", "office coordinator", "office clerk", "office support",
     "data entry", "file clerk", "clerk typist", "clerical", "secretary",
     "scheduling coordinator", "scheduler", "office associate", "admin coordinator",
+    # light office-adjacent
+    "billing", "accounts payable", "accounts receivable", "medical records",
+    "bank teller", "teller", "customer service", "call center", "mail clerk",
+    "patient access", "records clerk", "data clerk", "intake",
+    # entry-level general (no degree)
+    "warehouse", "retail associate", "sales associate", "cashier", "stocker",
+    "food service", "caregiver", "caretaker", "home care", "housekeep",
+    "production associate", "production worker", "general labor", "laborer",
+    "packer", "picker", "assembler", "dishwasher", "janitor", "custodian",
 ]
 
 # Phrases that mean a 4-year/college degree is REQUIRED. Jobs matching these are
@@ -412,8 +431,8 @@ def collect(verbose=True):
         add(search_title(title, remote=False), "local")
         time.sleep(0.3)
 
-    # Remote pass across all admin titles (remote was explicitly requested).
-    for title in TITLES:
+    # Remote pass across titles that actually exist as remote work.
+    for title in REMOTE_TITLES:
         if verbose:
             print(f"  remote: {title}")
         for j in search_title(title, remote=True):
