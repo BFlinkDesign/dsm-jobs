@@ -85,6 +85,19 @@ EXCLUDE_TITLE_WORDS = [
 # Words that, if present in the title, mark a job as REMOTE.
 REMOTE_HINTS = ["remote", "work from home", "wfh", "telecommute", "virtual"]
 
+# A job is kept only if its TITLE contains one of these admin/clerical terms.
+# This is the precision gate: Adzuna fuzzy-matches queries and returns lots of
+# "Coordinator/Manager/Specialist/Investigator" roles that are not entry-level
+# admin/reception work. Requiring an admin term in the title drops that noise.
+ADMIN_TITLE_TERMS = [
+    "administrative assistant", "admin assistant", "administrative support",
+    "administrative coordinator", "administrative specialist", "administrative aide",
+    "receptionist", "front desk", "front office", "office assistant",
+    "office administrator", "office coordinator", "office clerk", "office support",
+    "data entry", "file clerk", "clerk typist", "clerical", "secretary",
+    "scheduling coordinator", "scheduler", "office associate", "admin coordinator",
+]
+
 # Phrases that mean a 4-year/college degree is REQUIRED. Jobs matching these are
 # dropped (the target applicant has zero college). "preferred" / "associate" are
 # intentionally NOT here -- those don't disqualify.
@@ -201,6 +214,18 @@ def requires_degree(job):
     return any(h in blob for h in DEGREE_REQUIRED_HINTS)
 
 
+def is_admin_title(title):
+    """Precision gate: keep only genuine admin/clerical titles."""
+    t = (title or "").lower()
+    return any(term in t for term in ADMIN_TITLE_TERMS)
+
+
+def title_is_remote(job):
+    """Stricter than looks_remote: only the TITLE counts, so an in-office job that
+    merely mentions 'remote' in its description is NOT treated as remote."""
+    return any(h in (job.get("title") or "").lower() for h in REMOTE_HINTS)
+
+
 def normalize(job, source):
     """Flatten an Adzuna result into the row we care about + a salary verdict."""
     title = job.get("title") or ""
@@ -212,8 +237,9 @@ def normalize(job, source):
 
     hourly_min = to_hourly(smin)
     hourly_max = to_hourly(smax)
-    # Use the high end of the range to decide "does it clear $19" (employers post ranges).
-    hourly_for_test = hourly_max if hourly_max is not None else hourly_min
+    # Wage FLOOR test: a job clears $19 only if the LOW end of its range does.
+    # ($16-$23 should NOT count as "$19+"; the friend could be offered the bottom.)
+    hourly_for_test = hourly_min if hourly_min is not None else hourly_max
 
     if hourly_for_test is None:
         verdict = "unlisted"            # no salary data at all
@@ -261,7 +287,7 @@ def collect(verbose=True):
         if verbose:
             print(f"  remote: {title}")
         for j in search_title(title, remote=True):
-            if looks_remote(j):
+            if title_is_remote(j):
                 jid = j.get("id")
                 if jid and jid not in seen:
                     seen[jid] = normalize(j, "remote")
@@ -269,10 +295,12 @@ def collect(verbose=True):
 
     all_rows = list(seen.values())
     rows = [r for r in all_rows
-            if not title_excluded(r["title"]) and not requires_degree(r)]
+            if is_admin_title(r["title"])
+            and not title_excluded(r["title"])
+            and not requires_degree(r)]
     dropped = len(all_rows) - len(rows)
     if verbose and dropped:
-        print(f"  (filtered out {dropped} skilled/degree-required postings)")
+        print(f"  (filtered out {dropped} non-admin / skilled / degree-required postings)")
     return rows
 
 
@@ -424,7 +452,8 @@ def collect_mock():
         if requires_degree(j):
             continue
         seen[j["id"]] = normalize(j, "remote" if looks_remote(j) else "local")
-    return [r for r in seen.values() if not title_excluded(r["title"])]
+    return [r for r in seen.values()
+            if is_admin_title(r["title"]) and not title_excluded(r["title"])]
 
 
 # --------------------------------------------------------------------------

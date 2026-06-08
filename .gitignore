@@ -4,3 +4,5 @@ admin-jobs-*.html
 data/
 __pycache__/
 *.pyc
+.add_secret_status.json
+push_secrets_to_github.py
