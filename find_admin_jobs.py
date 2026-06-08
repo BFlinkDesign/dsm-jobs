@@ -662,7 +662,8 @@ const CHIPS = [
   ["showHidden","👁 Show hidden"],
 ];
 
-function esc(s){ const d=document.createElement("div"); d.textContent=s==null?"":s; return d.innerHTML; }
+function esc(s){return String(s==null?"":s).replace(/[&<>"'`]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c];});}
+function safeUrl(u){try{var p=new URL(u,location.href);return (p.protocol==="http:"||p.protocol==="https:")?p.href:"#";}catch(e){return "#";}}
 
 function matches(j){
   if(!filters.showHidden && state.hidden.has(j.id)) return false;
@@ -710,7 +711,7 @@ function render(){
       '<div class="r">'+known+esc(j.location)+'</div>'+
       '<div class="r"><span class="pay">'+esc(j.pay)+'</span> · '+where+
         (j.posted?(' · posted '+esc(j.posted)):'')+'</div>'+
-      '<a class="apply" href="'+esc(j.url)+'" target="_blank" rel="noopener" '+
+      '<a class="apply" href="'+esc(safeUrl(j.url))+'" target="_blank" rel="noopener" '+
         'data-act="open" data-id="'+esc(j.id)+'">Apply</a>'+
       '<div class="actions">'+
         '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+(applied?'✅ Applied':'Mark applied')+'</button>'+
