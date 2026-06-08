@@ -187,6 +187,13 @@ def test_spam_across_cities_flagged():
     assert fa.scam_assessment(r, idx)["level"] == "scam"
 
 
+def test_blocklist_hides_even_trusted(monkeypatch):
+    monkeypatch.setattr(fa, "BLOCKLIST", ["maxion corp"])
+    r = _row(title="Administrative Assistant", company="Maxion Corp LLC", source="remote")
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+    monkeypatch.setattr(fa, "BLOCKLIST", [])
+
+
 def test_attainability_drops_senior_roles():
     assert fa.is_attainable("Administrative Assistant") is True
     assert fa.is_attainable("Senior Administrative Assistant") is False
