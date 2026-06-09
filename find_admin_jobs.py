@@ -158,6 +158,24 @@ TRUSTED_EMPLOYER_GROUPS = {
 }
 TRUSTED_EMPLOYER_HINTS = [h for hints in TRUSTED_EMPLOYER_GROUPS.values() for h in hints]
 
+# Local jobs must be in Polk or Dallas County. Adzuna locations are city-based,
+# so this is an allowlist of every city/CDP in the two counties; a local posting
+# whose location doesn't name one of these places (or the county itself) is
+# dropped, even inside the search radius (e.g. Norwalk/Indianola in Warren Co).
+# Matched as comma-separated location tokens, exact, case-insensitive.
+POLK_DALLAS_PLACES = {
+    "polk county", "dallas county",
+    # Polk County
+    "des moines", "west des moines", "ankeny", "urbandale", "johnston",
+    "altoona", "pleasant hill", "clive", "grimes", "windsor heights",
+    "bondurant", "polk city", "mitchellville", "elkhart", "alleman",
+    "runnells", "saylorville", "sheldahl", "berwick",
+    # Dallas County
+    "waukee", "adel", "perry", "granger", "dallas center", "van meter",
+    "de soto", "minburn", "woodward", "dawson", "redfield", "dexter",
+    "linden", "bouton",
+}
+
 # Rough drive times from Grimes (the user's home base) to each metro suburb,
 # in minutes. Matched as a substring of the posting's location, longest first
 # ("west des moines" before "des moines"). Coarse on purpose — it only needs
@@ -166,8 +184,8 @@ COMMUTE_MINUTES_FROM_GRIMES = {
     "grimes": 5, "dallas center": 12, "johnston": 12, "urbandale": 12,
     "polk city": 15, "waukee": 15, "clive": 15, "adel": 15, "windsor heights": 18,
     "ankeny": 18, "west des moines": 18, "des moines": 20, "saylorville": 20,
-    "norwalk": 30, "altoona": 25, "pleasant hill": 25, "bondurant": 25,
-    "ames": 35, "indianola": 35, "carlisle": 30,
+    "altoona": 25, "pleasant hill": 25, "bondurant": 25, "granger": 12,
+    "perry": 30, "van meter": 25, "woodward": 25, "mitchellville": 30,
 }
 
 # Seniority / competitiveness markers -> not attainable for this user; dropped.
@@ -371,6 +389,15 @@ def trusted_reason(company):
     return ""
 
 
+def in_polk_or_dallas(location):
+    """True when a location names a Polk/Dallas County place (or the county).
+    Token match on the comma-separated parts so 'Adel' can't fire on a street
+    name. Unknown/blank locations are NOT in-county — the user asked for these
+    two counties only."""
+    tokens = [t.strip().lower() for t in (location or "").split(",")]
+    return any(t in POLK_DALLAS_PLACES for t in tokens)
+
+
 def commute_text(location):
     """'~15 min drive' for a known metro suburb, else ''. Longest match wins
     so 'West Des Moines' doesn't get Des Moines' time."""
@@ -556,10 +583,12 @@ def collect(verbose=True):
             if is_admin_title(r["title"])
             and is_attainable(r["title"])
             and not title_excluded(r["title"])
-            and not requires_degree(r)]
+            and not requires_degree(r)
+            and (r["source"] != "local" or in_polk_or_dallas(r["location"]))]
     dropped = len(all_rows) - len(rows)
     if verbose and dropped:
-        print(f"  (filtered out {dropped} non-admin / senior / skilled / degree postings)")
+        print(f"  (filtered out {dropped} non-admin / senior / skilled / degree / "
+              f"out-of-county postings)")
     rows, dupes = dedupe_rows(rows)
     if verbose and dupes:
         print(f"  (collapsed {dupes} duplicate postings of the same job)")
@@ -1150,7 +1179,8 @@ def collect_mock():
         seen[j["id"]] = normalize(j, "remote" if looks_remote(j) else "local")
     rows = [r for r in seen.values()
             if is_admin_title(r["title"]) and is_attainable(r["title"])
-            and not title_excluded(r["title"])]
+            and not title_excluded(r["title"])
+            and (r["source"] != "local" or in_polk_or_dallas(r["location"]))]
     return dedupe_rows(rows)[0]
 
 
