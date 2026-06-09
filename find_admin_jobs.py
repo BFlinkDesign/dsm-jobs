@@ -694,7 +694,7 @@ APP_TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#f4efe6">
+<meta name="theme-color" content="#ffffff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="Job Board">
@@ -703,12 +703,12 @@ APP_TEMPLATE = r"""<!doctype html>
 <title>Job Board — Des Moines</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
 <style>
 :root{
- --paper:#f7f3ea; --card:#fffdf8; --ink:#16241f; --ink2:#4c5a53; --line:#e6dccb;
- --green:#0f6b54; --green-d:#0a5340; --green-soft:#e6f0eb;
- --gold:#8a6d2b; --red:#a8312a; --shadow:0 1px 2px rgba(20,33,28,.05),0 6px 18px rgba(20,33,28,.06);
+ --paper:#ffffff; --card:#ffffff; --surface:#f6f7f9; --ink:#0d1117; --ink2:#5b636e; --line:#e7e9ee;
+ --green:#0f9d63; --green-d:#0b7c4e; --green-soft:#e8f7ef;
+ --gold:#0b7c4e; --red:#d23b35; --shadow:0 1px 2px rgba(13,17,23,.04);
 }
 *{box-sizing:border-box}
 html{-webkit-text-size-adjust:100%}
@@ -718,19 +718,19 @@ body{margin:0;background:var(--paper);color:var(--ink);
 .app{max-width:640px;margin:0 auto;padding:0 16px 120px}
 svg{display:inline-block;vertical-align:-2px}
 /* App bar */
-header.bar{position:sticky;top:0;z-index:20;background:rgba(247,243,234,.92);
- backdrop-filter:saturate(1.1) blur(8px);margin:0 -16px;padding:14px 16px 12px;
+header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
+ backdrop-filter:saturate(1.1) blur(10px);margin:0 -16px;padding:16px;
  border-bottom:1px solid var(--line)}
 .brandrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);font-weight:700}
-.word{font-family:'Fraunces',Georgia,serif;font-weight:600;font-size:26px;line-height:1.05;letter-spacing:-.01em}
+.word{font-family:inherit;font-weight:600;font-size:26px;line-height:1.05;letter-spacing:-.01em}
 .safebadge{display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);color:var(--green-d);
  font-size:12px;font-weight:700;padding:6px 10px;border-radius:999px;white-space:nowrap}
 .summary{color:var(--ink2);font-size:14px;margin-top:6px}
 /* Safety */
 .safety{background:#fff;border:1px solid var(--line);border-left:4px solid var(--red);
  border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
-.safety h2{margin:0 0 4px;font-family:'Fraunces',Georgia,serif;font-size:19px;font-weight:600;
+.safety h2{margin:0 0 4px;font-family:inherit;font-size:19px;font-weight:600;
  display:flex;align-items:center;gap:8px}
 .safety h2 svg{color:var(--red)}
 .safety ul{margin:8px 0;padding-left:20px}
@@ -759,9 +759,9 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(247,243,234,.92);
 .cardtop{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .pill{display:inline-flex;align-items:center;font-size:13px;font-weight:700;padding:5px 11px;border-radius:8px}
 .pill.good{background:var(--green);color:#fff}
-.pill.none{background:#f0ebe0;color:var(--ink2)}
+.pill.none{background:var(--surface);color:var(--ink2)}
 .verified{display:inline-flex;align-items:center;gap:5px;color:var(--gold);font-size:13px;font-weight:700}
-.title{font-family:'Fraunces',Georgia,serif;font-size:20px;font-weight:600;line-height:1.18;margin:0 0 3px}
+.title{font-family:inherit;font-size:20px;font-weight:600;line-height:1.18;margin:0 0 3px}
 .co{font-size:16px;font-weight:700;color:var(--ink)}
 .meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--ink2);font-size:14px;margin-top:9px}
 .meta span{display:inline-flex;align-items:center;gap:6px}
