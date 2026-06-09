@@ -143,6 +143,72 @@ def test_cli_mock_runs_and_writes_files(tmp_path):
     assert "Hidden as scams:" in result.stdout
 
 
+# ── categories, dedup, enrichment ─────────────────────────────────────
+
+
+def test_warehouse_jobs_removed():
+    assert fa.is_admin_title("Warehouse Associate") is False
+    assert "warehouse associate" not in fa.TITLES
+    assert not any("warehouse" in t for t in fa.ADMIN_TITLE_TERMS)
+    assert not any("packer" in t or "picker" in t for t in fa.ADMIN_TITLE_TERMS)
+
+
+def test_job_category():
+    assert fa.job_category("Administrative Assistant") == "Office"
+    assert fa.job_category("Call Center Representative") == "Customer service"
+    assert fa.job_category("Retail Sales Associate") == "Store & retail"
+    assert fa.job_category("Caregiver - Evenings") == "Caregiving"
+    assert fa.job_category("Janitor") == "Food & cleaning"
+    assert fa.job_category("General Laborer") == "Production & labor"
+    assert fa.job_category("Quantum Engineer") == ""
+
+
+def test_trusted_reason_labels():
+    assert fa.trusted_reason("State of Iowa - DOT") == "Government"
+    assert fa.trusted_reason("UnityPoint Health") == "Healthcare"
+    assert fa.trusted_reason("Robert Half") == "Staffing agency"
+    assert fa.trusted_reason("Unknown LLC") == ""
+
+
+def test_commute_text_prefers_longest_match():
+    assert fa.commute_text("West Des Moines, IA") == "~18 min drive"
+    assert fa.commute_text("Des Moines, IA") == "~20 min drive"
+    assert fa.commute_text("Grimes, Polk County") == "~5 min drive"
+    assert fa.commute_text("Remote, US") == ""
+
+
+def test_snippet_truncates_at_word_boundary():
+    long = "word " * 100
+    s = fa.snippet(long)
+    assert len(s) <= 241 and s.endswith("…")
+    assert fa.snippet("  Short   description. ") == "Short description."
+    assert fa.snippet(None) == ""
+
+
+def test_dedupe_collapses_same_job_from_two_boards():
+    j1, j2 = _job(41600, 45760), _job(41600, 45760)
+    j2["id"], j2["created"] = "y", "2026-06-05T00:00:00Z"
+    rows = [fa.normalize(j1, "local"), fa.normalize(j2, "local")]
+    deduped, n = fa.dedupe_rows(rows)
+    assert n == 1 and len(deduped) == 1
+    assert deduped[0]["id"] == "y"  # newest posting wins
+
+
+def test_payload_includes_enrichment_fields():
+    row = fa.normalize(_job(41600, 45760), "local")
+    row["scam"] = {"level": "safe", "reasons": []}
+    p = fa._jobs_payload([row])[0]
+    assert p["category"] == "Office"
+    assert p["commute"] == "~20 min drive"  # Des Moines, IA from Grimes
+    assert "trustLabel" in p and "about" in p
+
+
+def test_app_keeps_server_sort_order():
+    # Invariant #2: the page must NOT re-sort by pay, which would bury
+    # "Pay not listed" jobs under every stated-pay job.
+    assert "payNum-a.payNum" not in fa.APP_TEMPLATE
+
+
 # ── scam shield + attainability ───────────────────────────────────────
 
 

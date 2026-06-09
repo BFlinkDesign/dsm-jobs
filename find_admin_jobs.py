@@ -69,7 +69,7 @@ TITLES = [
     "medical records clerk", "bank teller", "customer service representative",
     "call center representative", "mail clerk",
     # entry-level general (no degree)
-    "warehouse associate", "retail associate", "cashier", "stocker",
+    "retail associate", "cashier", "stocker",
     "food service worker", "caregiver", "housekeeper", "production associate",
     "general laborer",
 ]
@@ -117,25 +117,58 @@ SCAM_TITLE_FLAGS = [
 ]
 
 # Recognizable, lower-risk employers (local/government/known). Boosts to SAFE and
-# sorts first. Substring match on company name, case-insensitive.
-TRUSTED_EMPLOYER_HINTS = [
-    "state of iowa", "city of", "county", "school district", "community school",
-    "dmacc", "drake university", "grand view", "des moines area", "iowa state",
-    "unitypoint", "mercyone", "broadlawns", "the iowa clinic", "hy-vee", "hyvee",
-    "fareway", "casey's", "caseys", "wells fargo", "principal financial", "nationwide",
-    "wellmark", "athene", "emc insurance", "john deere", "corteva", "pella",
-    "credit union", "bankers trust", "u.s. bank", "us bank", "wesley life",
-    "goodwill", "salvation army", "ymca", "library", "department of", "police",
-    "veterans affairs", "social security administration", "aerotek", "robert half",
-    "kelly services", "express employment", "adecco", "manpower",
-    # Additional recognizable Iowa + national employers (legit; reduces false hides)
-    "vermeer", "kum & go", "kwik", "meredith", "voya", "gartner", "edward jones",
-    "marsh", "businessolver", "dotdash", "ruan", "kemin", "pioneer", "telligen",
-    "labcorp", "quest diagnostics", "amgen", "ups", "fedex", "target", "walmart",
-    "amazon", "concentrix", "teleperformance", "sykes", "kelly", "randstad",
-    "mercy", "methodist", "genesis health", "iowa health", "wellpoint", "humana",
-    "cvs", "walgreens", "hyvee", "menards", "lowe's", "home depot", "costco",
-]
+# sorts first. Substring match on company name, case-insensitive. Grouped so the
+# app can say WHY an employer is verified ("Government", "Healthcare", ...) —
+# that label teaches the end user what a legitimate employer looks like.
+TRUSTED_EMPLOYER_GROUPS = {
+    "Government": [
+        "state of iowa", "city of", "county", "department of", "police",
+        "veterans affairs", "social security administration", "library",
+    ],
+    "School or college": [
+        "school district", "community school", "dmacc", "drake university",
+        "grand view", "des moines area", "iowa state",
+    ],
+    "Healthcare": [
+        "unitypoint", "mercyone", "broadlawns", "the iowa clinic", "wesley life",
+        "mercy", "methodist", "genesis health", "iowa health", "wellpoint",
+        "humana", "labcorp", "quest diagnostics", "amgen", "cvs", "walgreens",
+    ],
+    "Bank or insurance": [
+        "wells fargo", "principal financial", "nationwide", "wellmark", "athene",
+        "emc insurance", "credit union", "bankers trust", "u.s. bank", "us bank",
+        "edward jones", "voya", "marsh",
+    ],
+    "Major local company": [
+        "hy-vee", "hyvee", "fareway", "casey's", "caseys", "john deere", "corteva",
+        "pella", "vermeer", "kum & go", "kwik", "meredith", "businessolver",
+        "dotdash", "ruan", "kemin", "pioneer", "telligen", "gartner",
+    ],
+    "National company": [
+        "ups", "fedex", "target", "walmart", "amazon", "concentrix",
+        "teleperformance", "sykes", "menards", "lowe's", "home depot", "costco",
+    ],
+    "Staffing agency": [
+        "aerotek", "robert half", "kelly services", "kelly", "express employment",
+        "adecco", "manpower", "randstad",
+    ],
+    "Community organization": [
+        "goodwill", "salvation army", "ymca",
+    ],
+}
+TRUSTED_EMPLOYER_HINTS = [h for hints in TRUSTED_EMPLOYER_GROUPS.values() for h in hints]
+
+# Rough drive times from Grimes (the user's home base) to each metro suburb,
+# in minutes. Matched as a substring of the posting's location, longest first
+# ("west des moines" before "des moines"). Coarse on purpose — it only needs
+# to answer "can I get there?", not navigate.
+COMMUTE_MINUTES_FROM_GRIMES = {
+    "grimes": 5, "dallas center": 12, "johnston": 12, "urbandale": 12,
+    "polk city": 15, "waukee": 15, "clive": 15, "adel": 15, "windsor heights": 18,
+    "ankeny": 18, "west des moines": 18, "des moines": 20, "saylorville": 20,
+    "norwalk": 30, "altoona": 25, "pleasant hill": 25, "bondurant": 25,
+    "ames": 35, "indianola": 35, "carlisle": 30,
+}
 
 # Seniority / competitiveness markers -> not attainable for this user; dropped.
 SENIORITY_DROP_TERMS = [
@@ -148,24 +181,37 @@ SENIORITY_DROP_TERMS = [
 # This is the precision gate: Adzuna fuzzy-matches queries and returns lots of
 # "Coordinator/Manager/Specialist/Investigator" roles that are not entry-level
 # admin/reception work. Requiring an admin term in the title drops that noise.
-ADMIN_TITLE_TERMS = [
-    # admin / clerical
-    "administrative assistant", "admin assistant", "administrative support",
-    "administrative coordinator", "administrative specialist", "administrative aide",
-    "receptionist", "front desk", "front office", "office assistant",
-    "office administrator", "office coordinator", "office clerk", "office support",
-    "data entry", "file clerk", "clerk typist", "clerical", "secretary",
-    "scheduling coordinator", "scheduler", "office associate", "admin coordinator",
-    # light office-adjacent
-    "billing", "accounts payable", "accounts receivable", "medical records",
-    "bank teller", "teller", "customer service", "call center", "mail clerk",
-    "patient access", "records clerk", "data clerk", "intake",
-    # entry-level general (no degree)
-    "warehouse", "retail associate", "sales associate", "cashier", "stocker",
-    "food service", "caregiver", "caretaker", "home care", "housekeep",
-    "production associate", "production worker", "general labor", "laborer",
-    "packer", "picker", "assembler", "dishwasher", "janitor", "custodian",
-]
+# Grouped by the plain-language category shown as a filter chip in the app.
+# First matching group wins, so "front desk" lands in Office, not elsewhere.
+CATEGORY_TERMS = {
+    "Office": [
+        "administrative assistant", "admin assistant", "administrative support",
+        "administrative coordinator", "administrative specialist", "administrative aide",
+        "receptionist", "front desk", "front office", "office assistant",
+        "office administrator", "office coordinator", "office clerk", "office support",
+        "data entry", "file clerk", "clerk typist", "clerical", "secretary",
+        "scheduling coordinator", "scheduler", "office associate", "admin coordinator",
+        "billing", "accounts payable", "accounts receivable", "medical records",
+        "mail clerk", "patient access", "records clerk", "data clerk", "intake",
+    ],
+    "Customer service": [
+        "customer service", "call center", "bank teller", "teller",
+    ],
+    "Store & retail": [
+        "retail associate", "sales associate", "cashier", "stocker",
+    ],
+    "Caregiving": [
+        "caregiver", "caretaker", "home care",
+    ],
+    "Food & cleaning": [
+        "food service", "dishwasher", "housekeep", "janitor", "custodian",
+    ],
+    "Production & labor": [
+        "production associate", "production worker", "general labor", "laborer",
+        "assembler",
+    ],
+}
+ADMIN_TITLE_TERMS = [t for terms in CATEGORY_TERMS.values() for t in terms]
 
 # Phrases that mean a 4-year/college degree is REQUIRED. Jobs matching these are
 # dropped (the target applicant has zero college). "preferred" / "associate" are
@@ -305,6 +351,45 @@ def is_admin_title(title):
     """Precision gate: keep only genuine admin/clerical titles."""
     t = (title or "").lower()
     return any(term in t for term in ADMIN_TITLE_TERMS)
+
+
+def job_category(title):
+    """Plain-language category for the title (the app's type-filter chips)."""
+    t = (title or "").lower()
+    for category, terms in CATEGORY_TERMS.items():
+        if any(term in t for term in terms):
+            return category
+    return ""
+
+
+def trusted_reason(company):
+    """Why an employer is on the trusted list ('Government', ...), or ''."""
+    c = (company or "").lower()
+    for label, hints in TRUSTED_EMPLOYER_GROUPS.items():
+        if any(h in c for h in hints):
+            return label
+    return ""
+
+
+def commute_text(location):
+    """'~15 min drive' for a known metro suburb, else ''. Longest match wins
+    so 'West Des Moines' doesn't get Des Moines' time."""
+    loc = (location or "").lower()
+    best = None
+    for town, minutes in COMMUTE_MINUTES_FROM_GRIMES.items():
+        if town in loc and (best is None or len(town) > best[0]):
+            best = (len(town), minutes)
+    return f"~{best[1]} min drive" if best else ""
+
+
+def snippet(description, limit=240):
+    """Short 'what you'd do' excerpt for the card: collapsed whitespace,
+    cut at a word boundary. Adzuna descriptions are already plain text."""
+    text = " ".join((description or "").split())
+    if len(text) <= limit:
+        return text
+    cut = text.rfind(" ", 0, limit)
+    return text[: cut if cut > 0 else limit].rstrip(",;:.") + "…"
 
 
 def title_is_remote(job):
@@ -475,12 +560,29 @@ def collect(verbose=True):
     dropped = len(all_rows) - len(rows)
     if verbose and dropped:
         print(f"  (filtered out {dropped} non-admin / senior / skilled / degree postings)")
+    rows, dupes = dedupe_rows(rows)
+    if verbose and dupes:
+        print(f"  (collapsed {dupes} duplicate postings of the same job)")
     return rows
+
+
+def dedupe_rows(rows):
+    """Adzuna re-publishes the same posting from multiple boards under different
+    IDs. Collapse rows with the same employer + title + location, keeping the
+    newest. Returns (deduped_rows, number_collapsed)."""
+    best = {}
+    for r in rows:
+        key = (_norm_company(r["company"]), (r["title"] or "").lower().strip(),
+               (r["location"] or "").lower().strip())
+        cur = best.get(key)
+        if cur is None or (r["created"] or "") > (cur["created"] or ""):
+            best[key] = r
+    return list(best.values()), len(rows) - len(best)
 
 
 def sort_rows(rows):
     # Group by salary verdict (best first), newest-first within each group.
-    rank = {"meets": 0, "estimated_ok": 1, "unlisted": 2, "below": 3}
+    rank = {"meets": 0, "unlisted": 1, "below": 2}
     return sorted(rows, key=lambda r: (rank.get(r["verdict"], 9), _neg_date(r["created"])))
 
 
@@ -494,10 +596,9 @@ def _neg_date(d):
 # --------------------------------------------------------------------------
 
 VERDICT_LABEL = {
-    "meets":        ("Pays $19+/hr",          "#1a7f37"),
-    "unlisted":     ("Pay not listed",        "#5b6470"),
-    "below":        ("Under $19/hr",          "#a04100"),
-    "estimated_ok": ("Pay not listed",        "#5b6470"),  # legacy; predicted now = unlisted
+    "meets":    ("Pays $19+/hr",   "#1a7f37"),
+    "unlisted": ("Pay not listed", "#5b6470"),
+    "below":    ("Under $19/hr",   "#a04100"),
 }
 
 
@@ -516,8 +617,10 @@ def salary_text(r):
 
 
 def friend_sort(rows):
-    """Trusted/known employers first, then $19+ first, then newest."""
-    rank = {"meets": 0, "estimated_ok": 1, "unlisted": 2, "below": 3}
+    """Trusted/known employers first, then $19+ first, then newest. The app
+    preserves this order — re-sorting by pay would bury 'Pay not listed' jobs,
+    which are often the best leads (see invariant #2)."""
+    rank = {"meets": 0, "unlisted": 1, "below": 2}
     return sorted(rows, key=lambda r: (0 if employer_is_trusted(r["company"]) else 1,
                                        rank.get(r["verdict"], 9), _neg_date(r["created"])))
 
@@ -552,11 +655,15 @@ def _jobs_payload(safe_rows):
             "payNum": float(floor) if stated else 0.0,
             "remote": r["source"] == "remote",
             "trusted": employer_is_trusted(r["company"]),
+            "trustLabel": trusted_reason(r["company"]),
             "good": r["verdict"] == "meets",          # only employer-stated $19+
             "tagLabel": label,
             "tagColor": color,
             "posted": r["created"] or "",
             "url": r["url"],
+            "category": job_category(r["title"]),
+            "commute": "" if r["source"] == "remote" else commute_text(r["location"]),
+            "about": snippet(r.get("description")),
         })
     return jobs
 
@@ -672,6 +779,30 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(247,243,234,.92);
 .empty svg{color:var(--line);margin-bottom:10px}
 .foot{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--ink2);font-size:13px;
  text-align:center;margin:30px 0 0;line-height:1.6;border-top:1px solid var(--line);padding-top:18px}
+/* Enhancements */
+.stale{background:#fff3e2;border:1px solid #ecd2a8;color:#7a5417;border-radius:12px;
+ padding:12px 14px;margin:14px 0 0;font-size:15px;line-height:1.45}
+.coach{background:var(--green-soft);border:1px solid #cfe3da;border-radius:14px;
+ padding:14px 44px 12px 16px;margin:18px 0;position:relative}
+.coach h2{margin:0 0 4px;font-family:'Fraunces',Georgia,serif;font-size:18px;font-weight:600;color:var(--green-d)}
+.coach ul{margin:6px 0 2px;padding-left:20px}
+.coach li{margin:5px 0;font-size:15px}
+.coach .dismiss{position:absolute;top:8px;right:8px;background:none;border:0;font:inherit;
+ font-size:22px;line-height:1;color:var(--green-d);padding:8px;cursor:pointer}
+.newtag{display:inline-flex;align-items:center;background:var(--gold);color:#fff;font-size:12px;
+ font-weight:700;padding:4px 9px;border-radius:999px}
+.pillrow{display:inline-flex;align-items:center;gap:7px}
+.about{margin-top:10px;font-size:15px;color:var(--ink2)}
+.about summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
+.about p{margin:6px 0 0}
+.nudge{margin-top:10px;background:#fff3e2;border-left:3px solid var(--gold);padding:8px 11px;
+ font-size:14px;color:#7a5417;border-radius:7px}
+.notes{display:none;margin-top:9px}
+.notes.open{display:block}
+.notes textarea{width:100%;min-height:84px;font:inherit;font-size:15px;border:1.5px solid var(--line);
+ border-radius:11px;padding:10px 12px;background:#fff;color:var(--ink);resize:vertical}
+.notes textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+.old{color:#9aa39e}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.card{animation:none}}
 </style>
@@ -689,6 +820,8 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(247,243,234,.92);
     <div class="summary" id="summary"></div>
   </header>
 
+  <div class="stale" id="stale" hidden></div>
+
   <section class="safety">
     <h2><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/></svg>Before you apply</h2>
     <div>These jobs were checked and look real. Read the posting, then apply.</div>
@@ -703,6 +836,17 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(247,243,234,.92);
     <a class="callbtn" id="callbtn" href="#"></a>
   </section>
 
+  <section class="coach" id="coach" hidden>
+    <button class="dismiss" id="coachoff" aria-label="Dismiss tips">&times;</button>
+    <h2>Tips for applying</h2>
+    <ul>
+      <li><b>"Pay not listed" is normal</b> — ask what it pays when you apply.</li>
+      <li>Applying in person? Bring your ID and a list of past jobs with dates.</li>
+      <li>A real employer will invite you to a phone call or an in-person interview — never just texting.</li>
+      <li>No answer after a week? It's okay to call and ask about your application.</li>
+    </ul>
+  </section>
+
   <div class="controls">
     <div class="searchwrap">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
@@ -710,6 +854,7 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(247,243,234,.92);
         placeholder="Search job or employer" aria-label="Search jobs">
     </div>
     <div class="chips" id="chips"></div>
+    <div class="chips" id="catchips"></div>
   </div>
 
   <div class="progress" id="progress"></div>
@@ -725,20 +870,43 @@ const META = ##META##;
 const LS = "myjobs:v1";
 function load(){ try{return JSON.parse(localStorage.getItem(LS))||{}}catch(e){return {}} }
 function save(s){ try{localStorage.setItem(LS, JSON.stringify(s))}catch(e){} }
+function today(){ return new Date().toISOString().slice(0,10); }
+function daysSince(d){ const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
+  return isNaN(t) ? null : Math.max(0, Math.floor((Date.now()-t)/864e5)); }
+function ago(d){ const n=daysSince(d); if(n==null) return "";
+  if(n===0) return "today"; if(n===1) return "yesterday";
+  if(n<14) return n+" days ago"; return Math.round(n/7)+" weeks ago"; }
+
 let state = load();
-state.applied = new Set(state.applied||[]);
+// applied used to be an array of ids; it's now a map id -> date applied.
+if(Array.isArray(state.applied)){ const m={}; state.applied.forEach(id=>m[id]=today()); state.applied=m; }
+state.applied = state.applied || {};
 state.saved   = new Set(state.saved||[]);
 state.hidden  = new Set(state.hidden||[]);
-function persist(){ save({applied:[...state.applied], saved:[...state.saved], hidden:[...state.hidden]}); }
+state.notes   = state.notes || {};
+state.coachOff = !!state.coachOff;
+const prevSeen = new Set(state.seen||[]);
+function persist(){ save({applied:state.applied, saved:[...state.saved], hidden:[...state.hidden],
+  notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff}); }
 
-let filters = { q:"", pay:false, inperson:false, remote:false, known:false, saved:false, applied:false, showHidden:false };
-let sortBy = "pay";
+// "New since your last visit": anything not on the page they saw last time.
+// On the very first visit nothing is badged (everything would be "new").
+const firstVisit = prevSeen.size===0;
+const isNew = {};
+JOBS.forEach(j=>{ if(!firstVisit && !prevSeen.has(j.id)) isNew[j.id]=true; });
+const newCount = Object.keys(isNew).length;
+persist();
+
+const openNotes = new Set();
+let filters = { q:"", cat:"", pay:false, inperson:false, remote:false, known:false,
+                saved:false, applied:false, showHidden:false };
 
 const CHIPS = [
   ["pay","$19+/hr"], ["inperson","In person"], ["remote","Work from home"],
   ["known","Verified employer"], ["saved","Saved"], ["applied","Applied"],
   ["showHidden","Hidden"],
 ];
+const CATS = [...new Set(JOBS.map(j=>j.category).filter(Boolean))];
 const IC = {
   pin:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21s-6.5-5.7-6.5-10.5a6.5 6.5 0 0113 0C18.5 15.3 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.3"/></svg>',
   home:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
@@ -747,6 +915,9 @@ const IC = {
   bookmark:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>',
   eye:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="2.5"/></svg>',
   arrow:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+  car:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>',
+  pen:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 013 3L8 19z"/></svg>',
+  share:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v8h14v-8"/></svg>',
 };
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"'`]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c];});}
@@ -759,25 +930,30 @@ function matches(j){
     const q=filters.q.toLowerCase();
     if(!((j.title+" "+j.company+" "+j.location).toLowerCase().includes(q))) return false;
   }
+  if(filters.cat && j.category!==filters.cat) return false;
   if(filters.pay && !j.good) return false;
   if(filters.inperson && j.remote) return false;
   if(filters.remote && !j.remote) return false;
   if(filters.known && !j.trusted) return false;
   if(filters.saved && !state.saved.has(j.id)) return false;
-  if(filters.applied && !state.applied.has(j.id)) return false;
+  if(filters.applied && !(j.id in state.applied)) return false;
   return true;
 }
 
 function render(){
   const good = JOBS.filter(j=>j.good).length;
   document.getElementById("summary").textContent =
-    JOBS.length + " safe jobs · " + good + " pay $19+/hr · updated " + META.generated;
-  const ap = state.applied.size;
+    JOBS.length + " safe jobs · " + good + " pay $19+/hr" +
+    (newCount ? " · " + newCount + " new since your last visit" : "") +
+    " · updated " + META.generated;
+  const ap = Object.keys(state.applied).length;
   const prog = document.getElementById("progress");
   prog.innerHTML = ap ? (IC.check + "You've applied to " + ap + (ap===1?" job":" jobs")) : "";
 
+  // Jobs are pre-sorted by the scanner: verified employers first, then $19+,
+  // then newest. Keep that order — sorting by pay here would bury the
+  // "Pay not listed" jobs, which are often the best leads.
   const list = JOBS.filter(matches);
-  list.sort((a,b)=> b.payNum-a.payNum || (b.posted<a.posted?-1: b.posted>a.posted?1:0));
 
   document.getElementById("count").textContent =
     list.length + (filters.showHidden?" hidden ":" ") + (list.length===1?"job":"jobs");
@@ -789,27 +965,44 @@ function render(){
   if(!list.length){ empty.innerHTML = IC.eye + "<div>No jobs match. Turn off a filter to see more.</div>"; }
 
   list.forEach(function(j,i){
-    const applied = state.applied.has(j.id), saved = state.saved.has(j.id);
+    const appliedOn = state.applied[j.id], applied = !!appliedOn, saved = state.saved.has(j.id);
+    const note = state.notes[j.id] || "";
+    const appliedDays = applied ? daysSince(appliedOn) : null;
     const payCls = j.good ? "good" : "none";
-    const verified = j.trusted ? '<span class="verified">'+IC.check+'Verified employer</span>' : '<span></span>';
+    const verified = j.trusted
+      ? '<span class="verified">'+IC.check+'Verified'+(j.trustLabel?' — '+esc(j.trustLabel):' employer')+'</span>'
+      : '<span></span>';
     const where = j.remote ? (IC.home+"Work from home") : (IC.bldg+"In person");
+    const postedDays = daysSince(j.posted);
     const el = document.createElement("div");
     el.className = "card";
     el.style.animationDelay = (Math.min(i,12)*0.025)+"s";
     el.innerHTML =
-      '<div class="cardtop"><span class="pill '+payCls+'">'+esc(j.pay)+'</span>'+verified+'</div>'+
+      '<div class="cardtop"><span class="pillrow"><span class="pill '+payCls+'">'+esc(j.pay)+'</span>'+
+        (isNew[j.id]?'<span class="newtag">New</span>':'')+'</span>'+verified+'</div>'+
       '<div class="title">'+esc(j.title)+'</div>'+
       '<div class="co">'+esc(j.company)+'</div>'+
       '<div class="meta">'+
         '<span>'+IC.pin+esc(j.location)+'</span>'+
+        (j.commute?'<span>'+IC.car+esc(j.commute)+'</span>':'')+
         '<span>'+where+'</span>'+
-        (j.posted?'<span>posted '+esc(j.posted)+'</span>':'')+
+        (j.posted?'<span'+(postedDays!=null&&postedDays>=21?' class="old"':'')+'>posted '+esc(ago(j.posted)||j.posted)+'</span>':'')+
       '</div>'+
+      (j.about?'<details class="about"><summary>What you\'d do</summary><p>'+esc(j.about)+'</p></details>':'')+
+      (applied&&appliedDays!=null&&appliedDays>=5
+        ?'<div class="nudge">You applied '+esc(ago(appliedOn))+' — it\'s okay to call and ask about your application.</div>':'')+
       '<a class="apply" href="'+esc(safeUrl(j.url))+'" target="_blank" rel="noopener" data-act="open" data-id="'+esc(j.id)+'">Apply'+IC.arrow+'</a>'+
       '<div class="actions">'+
         '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+IC.check+(applied?'Applied':'I applied')+'</button>'+
         '<button class="act'+(saved?' on':'')+'" data-act="saved" data-id="'+esc(j.id)+'">'+IC.bookmark+(saved?'Saved':'Save')+'</button>'+
         '<button class="act" data-act="hide" data-id="'+esc(j.id)+'">'+IC.eye+(filters.showHidden?'Unhide':'Hide')+'</button>'+
+      '</div>'+
+      '<div class="actions">'+
+        '<button class="act'+(note?' on':'')+'" data-act="notes" data-id="'+esc(j.id)+'">'+IC.pen+(note?'My notes':'Add note')+'</button>'+
+        (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Send to '+esc(META.contact||"a friend")+'</button>':'')+
+      '</div>'+
+      '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
+        '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — who you talked to, when to follow up">'+esc(note)+'</textarea>'+
       '</div>';
     wrap.appendChild(el);
   });
@@ -829,17 +1022,52 @@ function buildChips(){
     };
     c.appendChild(b);
   }
+  const cc = document.getElementById("catchips"); cc.innerHTML="";
+  cc.hidden = CATS.length<2;
+  for(const cat of CATS){
+    const b=document.createElement("button");
+    b.className="chip"; b.textContent=cat; b.setAttribute("aria-pressed","false");
+    b.onclick=()=>{
+      filters.cat = (filters.cat===cat) ? "" : cat;
+      [...cc.children].forEach(ch=>ch.setAttribute("aria-pressed", String(ch.textContent===filters.cat)));
+      render();
+    };
+    cc.appendChild(b);
+  }
 }
+
+const jobById = new Map(JOBS.map(j=>[j.id,j]));
 
 document.getElementById("list").addEventListener("click",(e)=>{
   const t=e.target.closest("[data-act]"); if(!t) return;
   const id=t.getAttribute("data-id"), act=t.getAttribute("data-act");
-  if(act==="open"){ state.applied.add(id); persist(); setTimeout(render,400); return; }
+  if(act==="open"){ if(!state.applied[id]) state.applied[id]=today(); persist(); setTimeout(render,400); return; }
   e.preventDefault();
-  if(act==="applied"){ state.applied.has(id)?state.applied.delete(id):state.applied.add(id); }
+  if(act==="applied"){ state.applied[id] ? delete state.applied[id] : state.applied[id]=today(); }
   if(act==="saved"){ state.saved.has(id)?state.saved.delete(id):state.saved.add(id); }
   if(act==="hide"){ state.hidden.has(id)?state.hidden.delete(id):state.hidden.add(id); }
+  if(act==="notes"){
+    const box=t.closest(".card").querySelector(".notes");
+    const open=box.classList.toggle("open");
+    open ? openNotes.add(id) : openNotes.delete(id);
+    if(open) box.querySelector("textarea").focus();
+    return;                       // no re-render; keep the textarea focused
+  }
+  if(act==="share"){
+    const j=jobById.get(id);
+    if(j && navigator.share){ navigator.share({title:j.title+" at "+j.company, url:safeUrl(j.url)}).catch(()=>{}); }
+    return;
+  }
   persist(); render();
+});
+
+// Auto-save notes as they type (no re-render, so the keyboard stays up).
+document.getElementById("list").addEventListener("input",(e)=>{
+  const t=e.target.closest("[data-note]"); if(!t) return;
+  const id=t.getAttribute("data-note");
+  const v=t.value;
+  if(v.trim()) state.notes[id]=v; else delete state.notes[id];
+  persist();
 });
 
 document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.target.value; render(); });
@@ -849,6 +1077,24 @@ document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.ta
   const who = META.contact || "someone you trust";
   if(META.phone){ b.href="tel:"+META.phone.replace(/[^0-9+]/g,""); b.textContent="Something feels wrong? Call "+who; }
   else { b.removeAttribute("href"); b.style.cursor="default"; b.textContent="Something feels wrong? Ask "+who+" before you reply"; }
+})();
+
+// Warn when the list itself is old (offline, or the daily scan stopped).
+(function staleBanner(){
+  const el=document.getElementById("stale");
+  const n=daysSince(META.generated);
+  if(n!=null && n>=3){
+    el.hidden=false;
+    el.innerHTML="These jobs are from <b>"+esc(String(META.generated).slice(0,10))+"</b>. "+
+      "Open this app with internet to get today's list.";
+  }
+})();
+
+// Dismissible "Tips for applying" card.
+(function coach(){
+  const el=document.getElementById("coach");
+  el.hidden = state.coachOff;
+  document.getElementById("coachoff").onclick=()=>{ state.coachOff=true; el.hidden=true; persist(); };
 })();
 
 document.getElementById("foot").innerHTML =
@@ -902,9 +1148,10 @@ def collect_mock():
         if requires_degree(j):
             continue
         seen[j["id"]] = normalize(j, "remote" if looks_remote(j) else "local")
-    return [r for r in seen.values()
+    rows = [r for r in seen.values()
             if is_admin_title(r["title"]) and is_attainable(r["title"])
             and not title_excluded(r["title"])]
+    return dedupe_rows(rows)[0]
 
 
 # --------------------------------------------------------------------------
@@ -963,7 +1210,7 @@ def main():
     write_html(safe, len(hidden), len(rows), html_path, human,
                contact=args.contact, contact_phone=args.contact_phone)
 
-    n_good = sum(1 for r in safe if r["verdict"] in ("meets", "estimated_ok"))
+    n_good = sum(1 for r in safe if r["verdict"] == "meets")
     print("-" * 40)
     print(f"Total jobs found:    {len(rows)}")
     print(f"  Safe to send:      {len(safe)}  (of which {n_good} pay $19+/hr)")
