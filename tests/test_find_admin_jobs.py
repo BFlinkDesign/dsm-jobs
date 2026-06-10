@@ -361,3 +361,85 @@ def test_adzuna_request_gives_up_after_max_attempts(monkeypatch):
     with pytest.raises(RuntimeError, match="Adzuna HTTP 503"):
         fa.adzuna_request({"what": "admin"})
     assert calls["n"] == 3
+
+
+# --- audit-finding fixes: duty-phrase rescue, degree softeners, word-boundary excludes ---
+
+
+def _duty_row(company, desc, title="Administrative Assistant", source="local"):
+    return {
+        "title": title,
+        "company": company,
+        "location": "Des Moines, IA",
+        "description": desc,
+        "source": source,
+        "hourly_min": None,
+        "hourly_max": None,
+        "url": "https://example.com/x",
+    }
+
+
+def test_trusted_employer_financial_duties_not_scam():
+    # Bank/teller-adjacent duty language from a TRUSTED employer is normal work,
+    # not a scam tell ("process payments", "money order", "gift card"...).
+    # Mule-script shapes ("cash a check", "wire transfer") stay fatal for all —
+    # see test_scam_hard_phrase_is_scam_even_for_known_employer.
+    r = _duty_row(
+        "Wells Fargo", "You will process payments, handle money orders, and sell gift cards to members."
+    )
+    assert fa.scam_assessment(r, {})["level"] == "safe"
+
+
+def test_unknown_employer_financial_duties_still_scam():
+    r = _duty_row("Quick Cash Partners LLC", "You will process payments and handle money orders from home.")
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+
+
+def test_hard_tell_overrides_trusted_employer():
+    # Fee/off-platform tells are fatal even from a trusted name (spoofed listings).
+    r = _duty_row("Wells Fargo", "Interview conducted via telegram. Pay a registration fee to start.")
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+
+
+def test_degree_preferred_is_not_required():
+    assert (
+        fa.requires_degree(
+            {"title": "Office Assistant", "description": "Bachelor's degree preferred but not required."}
+        )
+        is False
+    )
+    assert (
+        fa.requires_degree(
+            {"title": "Office Assistant", "description": "No degree required. HS diploma welcome."}
+        )
+        is False
+    )
+    assert (
+        fa.requires_degree(
+            {"title": "Office Assistant", "description": "Bachelor's degree required for this role."}
+        )
+        is True
+    )
+    assert (
+        fa.requires_degree(
+            {"title": "Office Assistant", "description": "Must hold a bachelor degree in business."}
+        )
+        is True
+    )
+
+
+def test_title_excluded_word_boundaries():
+    assert (
+        fa.title_excluded("Engineering Office Assistant") is False
+    )  # 'engineer' must not match 'engineering'
+    assert fa.title_excluded("Network Engineer") is True
+    assert fa.title_excluded("Food Server") is True
+    assert fa.title_excluded("Cybersecurity Analyst") is True  # prefix family
+    assert fa.title_excluded("Phlebotomist") is True  # prefix family
+
+
+def test_template_has_no_legacy_theme_leftovers():
+    t = fa.APP_TEMPLATE
+    assert "Fraunces" not in t  # serif from the pre-Relume theme
+    for warm in ("#fff3e2", "#ecd2a8", "#7a5417", "#9aa39e"):
+        assert warm not in t, f"legacy warm color {warm} still in template"
