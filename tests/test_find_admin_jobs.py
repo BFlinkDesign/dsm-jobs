@@ -163,6 +163,31 @@ def test_job_category():
     assert fa.job_category("Quantum Engineer") == ""
 
 
+def test_in_polk_or_dallas_counties_only():
+    # In: Polk + Dallas County cities, and the counties by name.
+    assert fa.in_polk_or_dallas("Waukee, IA") is True
+    assert fa.in_polk_or_dallas("West Des Moines, IA") is True
+    assert fa.in_polk_or_dallas("Urbandale, Polk County") is True
+    assert fa.in_polk_or_dallas("Adel, Dallas County") is True
+    # Out: inside the search radius but in Warren/Story/etc. counties.
+    assert fa.in_polk_or_dallas("Norwalk, IA") is False
+    assert fa.in_polk_or_dallas("Indianola, IA") is False
+    assert fa.in_polk_or_dallas("Ames, IA") is False
+    # Unknown / blank locations are not in-county.
+    assert fa.in_polk_or_dallas("") is False
+    assert fa.in_polk_or_dallas("Iowa, US") is False
+
+
+def test_county_filter_applies_to_local_rows_only():
+    out_of_county = _job(41600, 45760)
+    out_of_county["location"] = {"display_name": "Norwalk, IA"}
+    local = fa.normalize(out_of_county, "local")
+    remote = fa.normalize(out_of_county, "remote")
+    keep = lambda r: r["source"] != "local" or fa.in_polk_or_dallas(r["location"])  # noqa: E731
+    assert keep(local) is False
+    assert keep(remote) is True  # remote jobs are not county-bound
+
+
 def test_trusted_reason_labels():
     assert fa.trusted_reason("State of Iowa - DOT") == "Government"
     assert fa.trusted_reason("UnityPoint Health") == "Healthcare"
