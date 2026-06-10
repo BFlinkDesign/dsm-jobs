@@ -2,12 +2,12 @@ name: Daily Job Scan (CD)
 
 # Daily: run the real search, build the mobile PWA in web/, upload it as an
 # artifact, and (when PAGES_PUSH_TOKEN is set) publish it to the public Pages
-# repo EAGLE605/dsm-jobs so the friend's link auto-updates.
+# repo BFlinkDesign/dsm-jobs so the friend's link auto-updates.
 #
 # Secrets (Settings -> Secrets -> Actions):
 #   ADZUNA_APP_ID, ADZUNA_APP_KEY  -- required for live scans
 #   PAGES_PUSH_TOKEN               -- fine-grained PAT with Contents:write on
-#                                     EAGLE605/dsm-jobs (optional; enables auto-publish)
+#                                     BFlinkDesign/dsm-jobs (optional; enables auto-publish)
 
 on:
   schedule:
@@ -68,5 +68,5 @@ jobs:
           git config user.email "bot@users.noreply.github.com"
           git add -A
           git commit -q -m "Daily update $(date -u +%Y-%m-%d)"
-          git push -f "https://x-access-token:${PAGES_PUSH_TOKEN}@github.com/EAGLE605/dsm-jobs.git" gh-pages
-          echo "::notice::Published to https://eagle605.github.io/dsm-jobs/"
+          git push -f "https://x-access-token:${PAGES_PUSH_TOKEN}@github.com/BFlinkDesign/dsm-jobs.git" gh-pages
+          echo "::notice::Published to https://bflinkdesign.github.io/dsm-jobs/"

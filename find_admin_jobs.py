@@ -303,15 +303,24 @@ def adzuna_request(params, page=1):
     if not url.startswith(ADZUNA_ALLOWED_PREFIX):
         raise RuntimeError("refusing non-Adzuna URL")
     req = urllib.request.Request(url, headers={"User-Agent": "admin-job-finder/1.0"})
-    try:
-        # nosemgrep - url validated against ADZUNA_ALLOWED_PREFIX above; HTTPS host only.
-        with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-            return json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as err:
-        body = err.read().decode("utf-8", "replace")[:300]
-        raise RuntimeError(f"Adzuna HTTP {err.code}: {body}") from err
-    except urllib.error.URLError as err:
-        raise RuntimeError(f"Network error contacting Adzuna: {err.reason}") from err
+    # Transient 5xx / network blips killed a scheduled scan (Adzuna 503, 2026-06-10);
+    # retry those a bounded number of times. 4xx (bad key, bad request) never retries.
+    attempts = 3
+    for attempt in range(1, attempts + 1):
+        try:
+            # nosemgrep - url validated against ADZUNA_ALLOWED_PREFIX above; HTTPS host only.
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as err:
+            body = err.read().decode("utf-8", "replace")[:300]
+            if err.code < 500 or attempt == attempts:
+                raise RuntimeError(f"Adzuna HTTP {err.code}: {body}") from err
+            print(f"  Adzuna HTTP {err.code}, retry {attempt}/{attempts - 1}...", file=sys.stderr)
+        except urllib.error.URLError as err:
+            if attempt == attempts:
+                raise RuntimeError(f"Network error contacting Adzuna: {err.reason}") from err
+            print(f"  Network error ({err.reason}), retry {attempt}/{attempts - 1}...", file=sys.stderr)
+        time.sleep(5 * attempt)
 
 
 def search_title(title, *, remote=False):

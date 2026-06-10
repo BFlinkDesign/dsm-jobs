@@ -3,6 +3,9 @@
 import os
 import subprocess
 import sys
+import urllib.error
+
+import pytest
 
 # Import the module under test (repo root is one level up from tests/).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -290,3 +293,71 @@ def test_attainability_drops_senior_roles():
     assert fa.is_attainable("Senior Administrative Assistant") is False
     assert fa.is_attainable("Office Manager") is False
     assert fa.is_attainable("Receptionist") is True
+
+
+# --- transient-5xx retry (scheduled scan failed on a one-off Adzuna 503) ---
+
+
+def _http_error(code):
+    import io
+
+    return urllib.error.HTTPError("https://api.adzuna.com/x", code, "err", {}, io.BytesIO(b"down"))
+
+
+def test_adzuna_request_retries_5xx_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b'{"results": []}'
+
+    def fake_urlopen(req, timeout=30):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _http_error(503)
+        return FakeResp()
+
+    monkeypatch.setenv("ADZUNA_APP_ID", "x")
+    monkeypatch.setenv("ADZUNA_APP_KEY", "y")
+    monkeypatch.setattr(fa.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(fa.time, "sleep", lambda s: None)
+    assert fa.adzuna_request({"what": "admin"}) == {"results": []}
+    assert calls["n"] == 3
+
+
+def test_adzuna_request_does_not_retry_4xx(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=30):
+        calls["n"] += 1
+        raise _http_error(401)
+
+    monkeypatch.setenv("ADZUNA_APP_ID", "x")
+    monkeypatch.setenv("ADZUNA_APP_KEY", "y")
+    monkeypatch.setattr(fa.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(fa.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="Adzuna HTTP 401"):
+        fa.adzuna_request({"what": "admin"})
+    assert calls["n"] == 1
+
+
+def test_adzuna_request_gives_up_after_max_attempts(monkeypatch):
+    calls = {"n": 0}
+
+    def fake_urlopen(req, timeout=30):
+        calls["n"] += 1
+        raise _http_error(503)
+
+    monkeypatch.setenv("ADZUNA_APP_ID", "x")
+    monkeypatch.setenv("ADZUNA_APP_KEY", "y")
+    monkeypatch.setattr(fa.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(fa.time, "sleep", lambda s: None)
+    with pytest.raises(RuntimeError, match="Adzuna HTTP 503"):
+        fa.adzuna_request({"what": "admin"})
+    assert calls["n"] == 3
