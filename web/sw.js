@@ -25,12 +25,17 @@ self.addEventListener("fetch", (e) => {
   const isPage = req.mode === "navigate" || req.url.endsWith("index.html") || req.url.endsWith("/");
   if (isPage) {
     // Network-first so jobs are fresh; fall back to cached page offline.
+    // Only res.ok responses may be cached: a transient 404/500 must never
+    // replace the app shell (it would persist even offline).
     e.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put("./index.html", copy)).catch(() => {});
-          return res;
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put("./index.html", copy)).catch(() => {});
+            return res;
+          }
+          return caches.match("./index.html").then((cached) => cached || res);
         })
         .catch(() => caches.match("./index.html"))
     );
@@ -40,8 +45,10 @@ self.addEventListener("fetch", (e) => {
       caches.match(req).then((cached) =>
         cached ||
         fetch(req).then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          }
           return res;
         }).catch(() => cached)
       )

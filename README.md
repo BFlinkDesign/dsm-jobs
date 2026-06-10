@@ -1,6 +1,6 @@
 # dsm-job-finder
 
-![CI](https://github.com/EAGLE605/dsm-job-finder/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/BFlinkDesign/dsm-job-finder/actions/workflows/ci.yml/badge.svg)
 
 Finds **admin / office / clerical** jobs that are **no-degree / HS-diploma friendly** and
 target **$19+/hr**, across the **Des Moines metro** (~20 mi: Grimes, Ankeny, Waukee, West
