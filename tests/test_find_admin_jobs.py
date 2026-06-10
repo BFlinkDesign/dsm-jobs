@@ -443,3 +443,36 @@ def test_template_has_no_legacy_theme_leftovers():
     assert "Fraunces" not in t  # serif from the pre-Relume theme
     for warm in ("#fff3e2", "#ecd2a8", "#7a5417", "#9aa39e"):
         assert warm not in t, f"legacy warm color {warm} still in template"
+
+
+# --- US-only hard guard (no European / foreign trash) ---
+
+def test_looks_non_us_flags_foreign_not_us_lookalikes():
+    assert fa.looks_non_us("London, United Kingdom") is True
+    assert fa.looks_non_us("Bangalore, India") is True
+    assert fa.looks_non_us("Toronto, ON, Canada") is True
+    assert fa.looks_non_us("Remote - EMEA") is True
+    # US lookalikes must NOT trip foreign markers:
+    assert fa.looks_non_us("Indianapolis, Indiana") is False   # 'india' inside 'indiana'
+    assert fa.looks_non_us("Des Moines, IA") is False
+    assert fa.looks_non_us("Paris, Texas") is False             # US Paris, has 'texas'
+
+
+def test_is_us_location_positive_signals():
+    assert fa.is_us_location("Des Moines, IA") is True
+    assert fa.is_us_location("Remote - United States") is True
+    assert fa.is_us_location("Austin, Texas") is True
+    assert fa.is_us_location("Bangalore, India") is False
+
+
+def test_passes_us_filter_drops_foreign_remote_keeps_us():
+    def row(loc, source="remote"):
+        return {"location": loc, "source": source, "title": "Admin"}
+    assert fa.passes_us_filter(row("London, United Kingdom")) is False
+    assert fa.passes_us_filter(row("Paris, France")) is False
+    assert fa.passes_us_filter(row("Remote - United States")) is True
+    assert fa.passes_us_filter(row("Phoenix, Arizona")) is True
+    assert fa.passes_us_filter(row("Remote")) is True                       # bare remote allowed
+    # A foreign marker overrides even a 'local' source (defensive):
+    assert fa.passes_us_filter(row("Des Moines, IA", source="local")) is True
+    assert fa.passes_us_filter(row("London, UK", source="local")) is False
