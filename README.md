@@ -34,11 +34,11 @@ python find_admin_jobs.py --min-hourly 20          # raise the wage floor
 
 ## Safety / scam shield (important)
 
-This tool is built for a job-seeker who **can't always spot a scam**, so it does the
-vetting for them:
+Job boards are full of scams targeting entry-level applicants, so this tool does the
+vetting **up front** — the published list is safe by default:
 
 - **Scams are hidden, not just labeled.** Postings with scam tells are removed from the
-  page entirely — the friend never sees them, so they can't fall for them.
+  page entirely; a warning label still invites a click, removal doesn't.
 - **What gets hidden:** advance-fee / check-cashing / gift-card / wire language; off-platform
   "interviews" (Telegram/WhatsApp); the same employer+role spammed across many cities;
   unknown-employer **remote** roles (remote admin/data-entry is the #1 scam category);

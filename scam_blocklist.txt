@@ -1,15 +1,16 @@
-# Scam/spam blocklist — employers or domains that are ALWAYS hidden.
+# Filtered-employers list — postings matching these are always excluded from results.
 # One entry per line, case-insensitive substring match against the employer name
 # AND the apply URL/domain. Lines starting with # are comments.
 #
-# Seeded from confirmed mass-spam / job-scam patterns found in live scans
-# (same fake role posted across dozens of cities, travel-MLM recruiters, etc.).
-# Add new confirmed scams here; the daily scanner hard-hides them with no
-# other signal needed. Keep entries specific to avoid hiding legit employers.
+# Entries reflect THIS PROJECT'S screening criteria only (observed posting patterns
+# such as the same role posted across dozens of cities at once, recruiting-funnel
+# postings, or repeated mismatches with our entry-level scope). Inclusion is not a
+# legal determination or an allegation of wrongdoing by any company.
+# Keep entries specific to avoid filtering legitimate employers.
 
 maxion corp
 turbomachinery latin america
 traveling with mchaila
 travelwmissy
 ao globe life
-# --- add Malwarebytes/WHOIS-confirmed scam domains below (in-session enrichment) ---
+# --- add reputation/WHOIS-screened domains below (in-session enrichment) ---
