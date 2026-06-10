@@ -197,6 +197,49 @@ POLK_DALLAS_PLACES = {
     "linden", "bouton",
 }
 
+# Positive US signals (state names + USPS abbrevs + nation tags). A remote
+# posting must carry one of these to survive the US-only guard.
+US_STATE_NAMES = {
+    "alabama", "alaska", "arizona", "arkansas", "california", "colorado",
+    "connecticut", "delaware", "florida", "georgia", "hawaii", "idaho",
+    "illinois", "indiana", "iowa", "kansas", "kentucky", "louisiana", "maine",
+    "maryland", "massachusetts", "michigan", "minnesota", "mississippi",
+    "missouri", "montana", "nebraska", "nevada", "new hampshire", "new jersey",
+    "new mexico", "new york", "north carolina", "north dakota", "ohio",
+    "oklahoma", "oregon", "pennsylvania", "rhode island", "south carolina",
+    "south dakota", "tennessee", "texas", "utah", "vermont", "virginia",
+    "washington", "west virginia", "wisconsin", "wyoming",
+    "district of columbia",
+}
+US_STATE_ABBREVS = {
+    "al", "ak", "az", "ar", "ca", "co", "ct", "de", "fl", "ga", "hi", "id",
+    "il", "in", "ia", "ks", "ky", "la", "me", "md", "ma", "mi", "mn", "ms",
+    "mo", "mt", "ne", "nv", "nh", "nj", "nm", "ny", "nc", "nd", "oh", "ok",
+    "or", "pa", "ri", "sc", "sd", "tn", "tx", "ut", "vt", "va", "wa", "wv",
+    "wi", "wy", "dc",
+}
+US_NATION_TAGS = {"us", "usa", "u s", "u s a", "united states", "america",
+                  "stateside", "nationwide", "contiguous", "anywhere in the us"}
+US_LOCATION_TOKENS = US_STATE_NAMES | US_STATE_ABBREVS | US_NATION_TAGS
+
+# Clear non-US markers — countries + a few foreign remote-job hub cities. Word-
+# boundaried so 'india' can't match 'Indiana' nor 'uk' match 'Paducah'. Kept
+# focused on what actually shows up in aggregator location strings.
+NON_US_MARKERS = {
+    "united kingdom", "uk", "england", "scotland", "wales", "ireland",
+    "london", "manchester", "canada", "ontario", "toronto", "quebec",
+    "vancouver", "alberta", "india", "bangalore", "bengaluru", "mumbai",
+    "delhi", "hyderabad", "pune", "chennai", "philippines", "manila",
+    "germany", "berlin", "france", "paris", "spain", "madrid", "barcelona",
+    "italy", "rome", "netherlands", "amsterdam", "poland", "warsaw",
+    "portugal", "lisbon", "romania", "ukraine", "kyiv", "australia",
+    "sydney", "melbourne", "singapore", "malaysia", "mexico", "brazil",
+    "argentina", "colombia", "nigeria", "lagos", "kenya", "south africa",
+    "pakistan", "bangladesh", "indonesia", "vietnam", "thailand", "japan",
+    "tokyo", "china", "shanghai", "hong kong", "dubai", "uae", "europe",
+    "emea", "apac", "latam",
+}
+
 # Rough drive times from Grimes (the user's home base) to each metro suburb,
 # in minutes. Matched as a substring of the posting's location, longest first
 # ("west des moines" before "des moines"). Coarse on purpose — it only needs
@@ -450,6 +493,41 @@ def in_polk_or_dallas(location):
     return any(t in POLK_DALLAS_PLACES for t in tokens)
 
 
+def is_us_location(location):
+    """Positive US signal: a US state name/abbrev, an explicit US / 'United
+    States' / 'USA' tag, or a Polk/Dallas place. Lets a genuinely-US remote row
+    through while foreign-leaning ones are dropped."""
+    if in_polk_or_dallas(location):
+        return True
+    blob = " " + re.sub(r"[^a-z ]+", " ", (location or "").lower()) + " "
+    return any(f" {s} " in blob for s in US_LOCATION_TOKENS)
+
+
+def looks_non_us(location):
+    """True when a location clearly names a non-US place. HARD guard: this is a
+    US-only board — no European (or other foreign) postings, ever. A foreign
+    marker only counts when there is NO US signal, so US cities that share a
+    foreign name pass ('Paris, Texas', 'London, KY'). Word-boundaried so
+    'Indiana' can't trip 'india'."""
+    blob = " " + re.sub(r"[^a-z ]+", " ", (location or "").lower()) + " "
+    if not any(f" {m} " in blob for m in NON_US_MARKERS):
+        return False
+    return not is_us_location(location)
+
+
+def passes_us_filter(row):
+    """Allow a row only if it is unambiguously US. Local rows are already
+    county-filtered (definitionally US). Remote rows must carry a US signal and
+    must NOT read as foreign — this kills European/other foreign trash a
+    provider's country pin might miss."""
+    loc = row.get("location") or ""
+    if looks_non_us(loc):
+        return False
+    if row.get("source") == "local":
+        return True
+    return is_us_location(loc) or "remote" in loc.lower()
+
+
 def commute_text(location):
     """'~15 min drive' for a known metro suburb, else ''. Longest match wins
     so 'West Des Moines' doesn't get Des Moines' time."""
@@ -652,6 +730,7 @@ def collect(verbose=True):
             and is_attainable(r["title"])
             and not title_excluded(r["title"])
             and not requires_degree(r)
+            and passes_us_filter(r)
             and (r["source"] != "local" or in_polk_or_dallas(r["location"]))]
     dropped = len(all_rows) - len(rows)
     if verbose and dropped:
