@@ -37,6 +37,8 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
+import providers
+
 # Windows-safe console output (avoid cp1252 crashes); keep print() text ASCII.
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -565,6 +567,20 @@ def scam_assessment(row, spam_index):
     return {"level": "safe", "reasons": []}
 
 
+def salary_verdict(hourly_min, hourly_max, *, stated):
+    """The ONE place a wage becomes a verdict (shared with providers.py).
+    SAFETY: providers *predict* pay when the employer didn't post it (Adzuna
+    flags it; Jooble doesn't even say). A non-stated wage NEVER earns a number
+    or a $19+ badge. Wage FLOOR test: the LOW end of a stated range must clear
+    $19 ("$16-$23" does not count)."""
+    floor = hourly_min if hourly_min is not None else hourly_max
+    if floor is None or not stated:
+        return "unlisted"               # no pay, or only a guess
+    if floor >= MIN_HOURLY:
+        return "meets"
+    return "below"
+
+
 def normalize(job, source):
     """Flatten an Adzuna result into the row we care about + a salary verdict."""
     title = job.get("title") or ""
@@ -576,18 +592,7 @@ def normalize(job, source):
 
     hourly_min = to_hourly(smin)
     hourly_max = to_hourly(smax)
-    # SAFETY: Adzuna *predicts* pay when the employer didn't post it. Those guesses
-    # are unreliable per-listing, so we NEVER promise a number from them. Only an
-    # employer-STATED salary earns a dollar figure / a $19+ badge. Wage FLOOR test:
-    # the LOW end of a stated range must clear $19 ("$16-$23" does not count).
-    floor = hourly_min if hourly_min is not None else hourly_max
-
-    if floor is None or predicted:
-        verdict = "unlisted"            # no pay, or only an Adzuna guess
-    elif floor >= MIN_HOURLY:
-        verdict = "meets"
-    else:
-        verdict = "below"
+    verdict = salary_verdict(hourly_min, hourly_max, stated=not predicted)
 
     return {
         "id": job.get("id"),
@@ -633,6 +638,13 @@ def collect(verbose=True):
                 if jid and jid not in seen:
                     seen[jid] = normalize(j, "remote")
         time.sleep(0.3)
+
+    # Extra providers (USAJobs/Jooble/...; each active only when its keys
+    # exist). Same filters + scam shield apply to every source.
+    for r in providers.collect_extra(TITLES, LOCATION, salary_verdict,
+                                     log=(print if verbose else (lambda *_: None))):
+        if r["id"] and r["id"] not in seen:
+            seen[r["id"]] = r
 
     all_rows = list(seen.values())
     rows = [r for r in all_rows
