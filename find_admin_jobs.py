@@ -29,6 +29,7 @@ import argparse
 import csv
 import json
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -89,24 +90,42 @@ EXCLUDE_TITLE_WORDS = [
     "it administrator", "engineer", "developer", "registered nurse", "pharmacy",
     "phlebotom", "therapist", "physician", "attorney", "paralegal director",
 ]
+# Entries matched as prefixes (no trailing word boundary): cybersecurity,
+# phlebotomist/phlebotomy.
+EXCLUDE_PREFIX_WORDS = {"cyber", "phlebotom"}
 
 # Words that, if present in the title, mark a job as REMOTE.
 REMOTE_HINTS = ["remote", "work from home", "wfh", "telecommute", "virtual"]
 
 # ── Scam shield + attainability (the end user cannot self-vet) ─────────────
 
-# Description phrases that are strong job-scam tells (advance-fee, check fraud,
-# off-platform "interviews", PII harvesting). Any hit => LIKELY SCAM, hidden.
-SCAM_DESCRIPTION_FLAGS = [
-    "wire transfer", "cashier's check", "cashier check", "cash a check", "money order",
-    "gift card", "bitcoin", "crypto", "venmo", "cash app", "zelle",
+# Description phrases that are unambiguous job-scam tells (advance-fee,
+# off-platform "interviews", reshipping, PII harvesting). Fatal for EVERY
+# employer — a spoofed listing can carry a trusted name.
+SCAM_HARD_FLAGS = [
     "purchase your own equipment", "buy equipment", "equipment fee", "startup fee",
     "registration fee", "application fee", "pay a fee", "upfront payment", "send money",
-    "process payments", "payment processing", "reship", "repackage", "package forwarding",
+    "reship", "repackage", "package forwarding",
     "mystery shopper", "secret shopper", "telegram", "whatsapp", "google hangouts",
     "signal app", "text us at", "no experience needed and earn", "weekly pay of $",
     "social security number to apply", "ssn to apply", "bank details to apply",
     "immediate start no interview", "hiring asap no interview",
+    "bitcoin", "crypto",
+    # Mule-script shapes: legit postings say "cashing checks"/"wire transfers
+    # processing" as duties, but the scam script says "cash a check" / "wire
+    # transfer the balance". Keep these fatal even under a trusted name —
+    # spoofed listings borrow real employers.
+    "wire transfer", "cash a check",
+]
+
+# Phrases that are scam-shaped from an UNKNOWN employer but are ordinary job
+# duties at a bank / credit union / retailer (teller, cashier, AP/AR work):
+# "process payments", "money order", "gift card"... A trusted employer match
+# rescues these; an unknown employer does not.
+SCAM_FINANCIAL_DUTY_FLAGS = [
+    "cashier's check", "cashier check", "money order",
+    "gift card", "venmo", "cash app", "zelle",
+    "process payments", "payment processing",
 ]
 
 # Title phrases that are scam-prone roles for this profile (esp. remote).
@@ -239,6 +258,13 @@ DEGREE_REQUIRED_HINTS = [
     "4-year degree", "four-year degree", "b.s. degree", "b.a. degree",
     "degree required", "degree is required", "college degree required",
 ]
+# If one of these appears near a degree mention, it is NOT a hard requirement
+# ("bachelor's preferred", "no degree required", "or equivalent experience").
+DEGREE_SOFTENERS = [
+    "preferred", "a plus", "is a plus", "nice to have", "not required",
+    "no degree", "without a degree", "or equivalent", "desired", "bonus",
+    "helpful", "ideal but",
+]
 
 ADZUNA_BASE = "https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
 ADZUNA_ALLOWED_PREFIX = "https://api.adzuna.com/"
@@ -360,8 +386,15 @@ def to_hourly(annual):
 
 
 def title_excluded(title):
+    """Word-boundary match so 'engineer' can't kill 'Engineering Office
+    Assistant'. A few entries are deliberate prefixes (cyber->cybersecurity,
+    phlebotom->phlebotomist/phlebotomy)."""
     t = (title or "").lower()
-    return any(word in t for word in EXCLUDE_TITLE_WORDS)
+    for word in EXCLUDE_TITLE_WORDS:
+        tail = r"" if word in EXCLUDE_PREFIX_WORDS else r"\b"
+        if re.search(r"\b" + re.escape(word) + tail, t):
+            return True
+    return False
 
 
 def looks_remote(job):
@@ -370,8 +403,16 @@ def looks_remote(job):
 
 
 def requires_degree(job):
+    """True only when a degree mention reads as a hard requirement. 'Bachelor's
+    preferred but not required' / 'no degree required' must NOT drop a posting —
+    those are exactly the jobs this user can get."""
     blob = ((job.get("title") or "") + " " + (job.get("description") or "")).lower()
-    return any(h in blob for h in DEGREE_REQUIRED_HINTS)
+    for h in DEGREE_REQUIRED_HINTS:
+        for m in re.finditer(re.escape(h), blob):
+            window = blob[max(0, m.start() - 30): m.end() + 80]
+            if not any(s in window for s in DEGREE_SOFTENERS):
+                return True
+    return False
 
 
 def is_admin_title(title):
@@ -479,13 +520,19 @@ def scam_assessment(row, spam_index):
     remote = row["source"] == "remote" or title_is_remote(row)
     hourly = row["hourly_max"] if row["hourly_max"] is not None else row["hourly_min"]
 
-    # Hard scam tells in the description -> always scam.
-    for p in SCAM_DESCRIPTION_FLAGS:
+    # Hard scam tells in the description -> always scam, even for trusted names.
+    for p in SCAM_HARD_FLAGS:
         if p in desc:
             reasons.append(f"description mentions '{p}'")
     for p in SCAM_TITLE_FLAGS:
         if p in title:
             reasons.append(f"scam-prone title ('{p}')")
+    # Financial-duty phrases: ordinary teller/cashier/AP work at a trusted
+    # employer, scam-shaped anywhere else.
+    if not trusted:
+        for p in SCAM_FINANCIAL_DUTY_FLAGS:
+            if p in desc:
+                reasons.append(f"description mentions '{p}'")
 
     # Same employer + role spammed across 3+ cities.
     key = (_norm_company(company), title[:25])
@@ -818,11 +865,11 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
 .foot{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--ink2);font-size:13px;
  text-align:center;margin:30px 0 0;line-height:1.6;border-top:1px solid var(--line);padding-top:18px}
 /* Enhancements */
-.stale{background:#fff3e2;border:1px solid #ecd2a8;color:#7a5417;border-radius:12px;
+.stale{background:#fdf1f0;border:1px solid #f2d3d0;color:#8f2f2a;border-radius:12px;
  padding:12px 14px;margin:14px 0 0;font-size:15px;line-height:1.45}
 .coach{background:var(--green-soft);border:1px solid #cfe3da;border-radius:14px;
  padding:14px 44px 12px 16px;margin:18px 0;position:relative}
-.coach h2{margin:0 0 4px;font-family:'Fraunces',Georgia,serif;font-size:18px;font-weight:600;color:var(--green-d)}
+.coach h2{margin:0 0 4px;font-size:18px;font-weight:700;color:var(--green-d)}
 .coach ul{margin:6px 0 2px;padding-left:20px}
 .coach li{margin:5px 0;font-size:15px}
 .coach .dismiss{position:absolute;top:8px;right:8px;background:none;border:0;font:inherit;
@@ -833,14 +880,14 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
 .about{margin-top:10px;font-size:15px;color:var(--ink2)}
 .about summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
 .about p{margin:6px 0 0}
-.nudge{margin-top:10px;background:#fff3e2;border-left:3px solid var(--gold);padding:8px 11px;
- font-size:14px;color:#7a5417;border-radius:7px}
+.nudge{margin-top:10px;background:var(--green-soft);border-left:3px solid var(--gold);padding:8px 11px;
+ font-size:14px;color:var(--green-d);border-radius:7px}
 .notes{display:none;margin-top:9px}
 .notes.open{display:block}
 .notes textarea{width:100%;min-height:84px;font:inherit;font-size:15px;border:1.5px solid var(--line);
  border-radius:11px;padding:10px 12px;background:#fff;color:var(--ink);resize:vertical}
 .notes textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
-.old{color:#9aa39e}
+.old{color:var(--ink2)}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.card{animation:none}}
 </style>
