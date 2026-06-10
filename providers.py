@@ -20,6 +20,24 @@ Sources + the doc facts each fetcher is written against:
   surface it as a number; verdict stays 'unlisted'), source, link, company,
   updated, id (number). (help.jooble.org REST API documentation)
 - JSearch  (RapidAPI) -- wired when JSEARCH_API_KEY exists; see fetch_jsearch.
+- Greenhouse  GET https://boards-api.greenhouse.io/v1/boards/{token}/jobs
+  (no auth). absolute_url = REAL employer apply page. pay_input_ranges has no
+  reliable period field on the public board API, so its pay is treated as
+  unlisted (never guessed). Per-company only (board token list).
+- Lever  GET https://api.lever.co/v0/postings/{company}?mode=json (no auth).
+  applyUrl = real ATS apply page. salaryRange {min,max,currency,interval};
+  interval 'per-hour-wage' used directly, 'per-year-salary' /2080, else skip.
+  Per-company only.
+- Careerjet  GET https://search.api.careerjet.net/v4/query (key = affid).
+  Fields title/company/locations/description/url/date + salary_min/_max/
+  salary_type (Y/M/W/D/H, employer-stated). Wired when CAREERJET_AFFID set.
+  (careerjet.com/partners/api)
+- CareerOneStop (USDOL) -- key-gated stub; response envelope not verifiable
+  from the official doc in this pass (bot-blocked), left unimplemented rather
+  than guessed. See fetch_careeronestop.
+
+Field shapes for Greenhouse/Lever/Careerjet were verified live / against
+official docs on 2026-06-10. Re-verify before changing the mappings.
 """
 
 import json
@@ -33,11 +51,25 @@ import urllib.request
 USAJOBS_HOST = "https://data.usajobs.gov/api/search"
 JOOBLE_HOST = "https://jooble.org/api/"
 JSEARCH_HOST = "https://jsearch.p.rapidapi.com/search"
+GREENHOUSE_HOST = "https://boards-api.greenhouse.io/v1/boards/"
+LEVER_HOST = "https://api.lever.co/v0/postings/"
+CAREERJET_HOST = "https://search.api.careerjet.net/v4/query"
+
+# Per-company ATS boards, verified live 2026-06-10 to return real jobs. These
+# are trusted DSM-area employers (in TRUSTED_EMPLOYER_GROUPS). Operator-
+# extensible: add a board token only after confirming it returns 200 + jobs.
+ATS_BOARDS = {
+    "greenhouse": ["businessolver"],
+    "lever": ["telligen"],
+}
 
 _ALLOWED_PREFIXES = (
     "https://data.usajobs.gov/",
     "https://jooble.org/",
     "https://jsearch.p.rapidapi.com/",
+    "https://boards-api.greenhouse.io/",
+    "https://api.lever.co/",
+    "https://search.api.careerjet.net/",
 )
 
 
@@ -293,12 +325,195 @@ def fetch_jsearch(titles, location, verdict_fn, log):
     return rows
 
 
+# ── ATS boards (Greenhouse / Lever) — no auth, real employer apply URLs ─────
+# These are the highest-trust source: a known employer's own application page.
+# Per-company (not metro-searchable), so they run off ATS_BOARDS. The scanner's
+# own filters (in_polk_or_dallas, is_admin_title, scam shield) then keep only
+# DSM-area admin postings — a remote/out-of-area ATS row is dropped downstream.
+
+_REMOTE_LOC_HINTS = ("remote", "work from home", "work remotely", "anywhere", "wfh")
+
+
+def _ats_source(location):
+    """ATS rows carry a freeform location. Mark remote ones 'remote' so the
+    county filter doesn't drop them (a trusted employer survives the remote
+    scam check); everything else is 'local' and gets county-filtered."""
+    loc = (location or "").lower()
+    return "remote" if any(h in loc for h in _REMOTE_LOC_HINTS) else "local"
+
+
+def ats_enabled():
+    return bool(ATS_BOARDS.get("greenhouse") or ATS_BOARDS.get("lever"))
+
+
+def _greenhouse_rows(payload, verdict_fn):
+    rows = []
+    for j in payload.get("jobs") or []:
+        loc = (j.get("location") or {}).get("name") or ""
+        # pay_input_ranges has no reliable period on the public board API ->
+        # never converted to a number (invariant #1); pay stays unlisted.
+        rows.append({
+            "id": "gh-" + str(j.get("id") or ""),
+            "title": j.get("title") or "",
+            "company": j.get("company_name") or "(company not listed)",
+            "location": loc,
+            "hourly_min": None,
+            "hourly_max": None,
+            "predicted": True,                 # no usable stated number here
+            "verdict": verdict_fn(None, None, stated=False),
+            "created": (j.get("updated_at") or "")[:10],
+            "url": j.get("absolute_url") or "",
+            "source": _ats_source(loc),
+            "description": "",
+        })
+    return rows
+
+
+_LEVER_INTERVAL = {"per-hour-wage": 1.0, "per-year-salary": 1.0 / 2080}
+
+
+def _lever_hourly(sr):
+    if not sr:
+        return None, None
+    factor = _LEVER_INTERVAL.get((sr.get("interval") or "").lower())
+    if factor is None:
+        return None, None
+    try:
+        lo = float(sr["min"]) * factor if sr.get("min") is not None else None
+        hi = float(sr["max"]) * factor if sr.get("max") is not None else None
+    except (TypeError, ValueError):
+        return None, None
+    return (round(lo, 2) if lo else None), (round(hi, 2) if hi else None)
+
+
+def _lever_rows(payload, verdict_fn):
+    rows = []
+    for j in payload or []:
+        loc = (j.get("categories") or {}).get("location") or ""
+        lo, hi = _lever_hourly(j.get("salaryRange"))
+        stated = lo is not None or hi is not None
+        rows.append({
+            "id": "lvr-" + str(j.get("id") or ""),
+            "title": j.get("text") or "",
+            "company": "",                     # Lever board is single-company; filled by caller
+            "location": loc,
+            "hourly_min": lo,
+            "hourly_max": hi,
+            "predicted": not stated,
+            "verdict": verdict_fn(lo, hi, stated=stated),
+            "created": "",                     # createdAt is epoch ms; left blank (freshness optional)
+            "url": j.get("applyUrl") or j.get("hostedUrl") or "",
+            "source": _ats_source(loc),
+            "description": (j.get("descriptionPlain") or "")[:2000].strip(),
+        })
+    return rows
+
+
+def fetch_ats(titles, location, verdict_fn, log):
+    del titles, location
+    rows = []
+    for token in ATS_BOARDS.get("greenhouse", []):
+        try:
+            payload = _request_json(f"{GREENHOUSE_HOST}{token}/jobs?pay_transparency=true")
+            rows.extend(_greenhouse_rows(payload, verdict_fn))
+        except Exception as err:  # noqa: BLE001 - per-board isolation
+            print(f"  WARNING: greenhouse board '{token}' failed: {err}", file=sys.stderr)
+    for token in ATS_BOARDS.get("lever", []):
+        try:
+            payload = _request_json(f"{LEVER_HOST}{token}?mode=json")
+            board_rows = _lever_rows(payload, verdict_fn)
+            for r in board_rows:               # Lever omits company on the row; it's the board token
+                r["company"] = token
+            rows.extend(board_rows)
+        except Exception as err:  # noqa: BLE001
+            print(f"  WARNING: lever board '{token}' failed: {err}", file=sys.stderr)
+    log(f"  ats    : {len(rows)} postings")
+    return rows
+
+
+# ── Careerjet (key = affid) ────────────────────────────────────────────────
+
+_CAREERJET_TYPE_TO_HOURLY = {"H": 1.0, "Y": 1.0 / 2080}
+
+
+def careerjet_enabled():
+    return bool(os.environ.get("CAREERJET_AFFID"))
+
+
+def _careerjet_hourly(j):
+    factor = _CAREERJET_TYPE_TO_HOURLY.get((j.get("salary_type") or "").upper())
+    if factor is None:
+        return None, None
+    try:
+        lo = float(j["salary_min"]) * factor if j.get("salary_min") else None
+        hi = float(j["salary_max"]) * factor if j.get("salary_max") else None
+    except (TypeError, ValueError):
+        return None, None
+    return (round(lo, 2) if lo else None), (round(hi, 2) if hi else None)
+
+
+def _careerjet_rows(payload, verdict_fn):
+    rows = []
+    for j in payload.get("jobs") or []:
+        lo, hi = _careerjet_hourly(j)
+        stated = lo is not None or hi is not None
+        rows.append({
+            "id": "cj-" + str(j.get("url") or "")[-40:],
+            "title": j.get("title") or "",
+            "company": j.get("company") or "(company not listed)",
+            "location": j.get("locations") or "",
+            "hourly_min": lo,
+            "hourly_max": hi,
+            "predicted": not stated,
+            "verdict": verdict_fn(lo, hi, stated=stated),
+            "created": (j.get("date") or "")[:10],
+            "url": j.get("url") or "",
+            "source": _ats_source(j.get("locations") or ""),
+            "description": (j.get("description") or "").strip(),
+        })
+    return rows
+
+
+def fetch_careerjet(titles, location, verdict_fn, log):
+    affid = os.environ["CAREERJET_AFFID"]
+    rows = []
+    for kw in titles:
+        params = urllib.parse.urlencode({
+            "affid": affid, "keywords": kw, "location": location,
+            "locale_code": "en_US", "page": "1", "pagesize": "50",
+            "user_ip": "127.0.0.1", "user_agent": "admin-job-finder/1.0",
+        })
+        payload = _request_json(CAREERJET_HOST + "?" + params)
+        rows.extend(_careerjet_rows(payload, verdict_fn))
+        time.sleep(0.4)
+    log(f"  careerjet: {len(rows)} postings")
+    return rows
+
+
+# ── CareerOneStop (USDOL) — key-gated stub ─────────────────────────────────
+
+def careeronestop_enabled():
+    return bool(os.environ.get("CAREERONESTOP_TOKEN") and os.environ.get("CAREERONESTOP_USERID"))
+
+
+def fetch_careeronestop(titles, location, verdict_fn, log):
+    """USDOL List Jobs API (api.careeronestop.org). Lowest scam baseline
+    (govt + state workforce boards). NOT wired: the official response envelope
+    could not be verified from the doc in this pass, and fabricating a field
+    map would risk silent data loss. Wire after confirming the JSON shape
+    against a live authed call. Docs: careeronestop.org/Developers/WebAPI."""
+    raise NotImplementedError("CareerOneStop field map unverified — confirm envelope before enabling")
+
+
 # ── registry ───────────────────────────────────────────────────────────────
 
 PROVIDERS = [
     ("usajobs", usajobs_enabled, fetch_usajobs),
     ("jooble", jooble_enabled, fetch_jooble),
     ("jsearch", jsearch_enabled, fetch_jsearch),
+    ("ats", ats_enabled, fetch_ats),
+    ("careerjet", careerjet_enabled, fetch_careerjet),
+    # ("careeronestop", careeronestop_enabled, fetch_careeronestop),  # stub
 ]
 
 
