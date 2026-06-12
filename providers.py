@@ -55,12 +55,17 @@ GREENHOUSE_HOST = "https://boards-api.greenhouse.io/v1/boards/"
 LEVER_HOST = "https://api.lever.co/v0/postings/"
 CAREERJET_HOST = "https://search.api.careerjet.net/v4/query"
 
-# Per-company ATS boards, verified live 2026-06-10 to return real jobs. These
-# are trusted DSM-area employers (in TRUSTED_EMPLOYER_GROUPS). Operator-
-# extensible: add a board token only after confirming it returns 200 + jobs.
+# Per-company ATS boards, each verified live (HTTP 200 + postings) before
+# listing. Operator-extensible: add a board token only after confirming it
+# returns 200 + jobs AND its Iowa titles can pass the title allowlist.
+# 2026-06-12 probe: olsson 332 jobs (56 IA, DSM office); aloyoga 641 (Jordan
+# Creek WDM retail, "sales associate" passes); momsmeals 33 (12 IA, DSM/Ankeny
+# customer-service titles). Probed + skipped: boxlunch (2.6k payload, only
+# manager titles in IA), tsmg (same-title-across-cities spam shape),
+# dwolla (live board, 0 postings — recheck later).
 ATS_BOARDS = {
-    "greenhouse": ["businessolver"],
-    "lever": ["telligen"],
+    "greenhouse": ["businessolver", "olsson", "aloyoga"],
+    "lever": ["telligen", "momsmeals"],
 }
 
 _ALLOWED_PREFIXES = (
@@ -355,7 +360,7 @@ def _greenhouse_rows(payload, verdict_fn):
         rows.append({
             "id": "gh-" + str(j.get("id") or ""),
             "title": j.get("title") or "",
-            "company": j.get("company_name") or "(company not listed)",
+            "company": (j.get("company_name") or "").strip() or "(company not listed)",
             "location": loc,
             "hourly_min": None,
             "hourly_max": None,

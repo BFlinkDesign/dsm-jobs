@@ -164,6 +164,7 @@ TRUSTED_EMPLOYER_GROUPS = {
         "hy-vee", "hyvee", "fareway", "casey's", "caseys", "john deere", "corteva",
         "pella", "vermeer", "kum & go", "kwik", "meredith", "businessolver",
         "dotdash", "ruan", "kemin", "pioneer", "telligen", "gartner",
+        "olsson", "mom's meals", "momsmeals",
     ],
     "National company": [
         "ups", "fedex", "target", "walmart", "amazon", "concentrix",
