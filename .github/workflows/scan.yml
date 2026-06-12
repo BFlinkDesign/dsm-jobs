@@ -6,6 +6,12 @@ name: Daily Job Scan (CD)
 #
 # Secrets (Settings -> Secrets -> Actions):
 #   ADZUNA_APP_ID, ADZUNA_APP_KEY  -- required for live scans
+#   JSEARCH_API_KEY                -- optional (Google-for-Jobs via RapidAPI)
+#   USAJOBS_API_KEY, USAJOBS_EMAIL -- optional (federal; employer-stated pay)
+#   JOOBLE_API_KEY                 -- optional
+#   CAREERJET_AFFID                -- optional (affiliate ID)
+# Provider keys are optional: each provider self-gates on its env var and the
+# scan runs with whatever is configured (Adzuna remains the required base).
 # Publishing uses the built-in GITHUB_TOKEN (contents: write below); no PAT.
 
 on:
@@ -23,6 +29,11 @@ jobs:
     env:
       ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
       ADZUNA_APP_KEY: ${{ secrets.ADZUNA_APP_KEY }}
+      JSEARCH_API_KEY: ${{ secrets.JSEARCH_API_KEY }}
+      USAJOBS_API_KEY: ${{ secrets.USAJOBS_API_KEY }}
+      USAJOBS_EMAIL: ${{ secrets.USAJOBS_EMAIL }}
+      JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
+      CAREERJET_AFFID: ${{ secrets.CAREERJET_AFFID }}
     steps:
       - uses: actions/checkout@v4
 
