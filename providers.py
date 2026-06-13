@@ -88,6 +88,9 @@ _ALLOWED_PREFIXES = (
     "https://api.lever.co/",
     "https://search.api.careerjet.net/",
     "https://www.governmentjobs.com/",
+    "https://api.smartrecruiters.com/",
+    # Workday hosts are per-tenant subdomains ({tenant}.{dc}.myworkdayjobs.com);
+    # fetch_workday passes each board's own host via allowed_prefixes per call.
 )
 
 
@@ -654,6 +657,131 @@ def fetch_neogov(titles, location, verdict_fn, log):
     return rows
 
 
+# ── Workday (keyless CxS public endpoint; big DSM enterprise employers) ─────
+# POST {base}/wday/cxs/{tenant}/{site}/jobs with a JSON search body. No salary
+# on the list endpoint -> pay stays "Pay not listed" (never guessed). Each board
+# was verified live 2026-06-13 (tenant.dc/site read from the employer's real
+# careers URL; admin roles confirmed present). Workday is THE enterprise ATS for
+# DSM insurers/financials, so this is high admin-role density.
+WORKDAY_BOARDS = [
+    # (tenant, datacenter, site, company label)
+    ("athene", "wd5", "athene_careers", "Athene"),          # West Des Moines HQ
+    ("corteva", "wd5", "Corteva", "Corteva Agriscience"),   # Johnston HQ
+    ("nationwide", "wd1", "Nationwide_Career", "Nationwide"),
+    ("godirect", "wd5", "voya_jobs", "Voya Financial"),
+]
+# CxS searchText matches title+description; a few admin terms keep volume low
+# and precision high vs. pulling every posting from these large employers.
+_WORKDAY_QUERIES = ["administrative", "office", "receptionist"]
+
+
+def workday_enabled():
+    return bool(WORKDAY_BOARDS)  # keyless; always on unless the list is emptied
+
+
+def _workday_rows(payload, base, company, verdict_fn):
+    rows = []
+    for j in (payload or {}).get("jobPostings") or []:
+        title = j.get("title") or ""
+        path = j.get("externalPath") or ""
+        if not title or not path:
+            continue
+        bullets = j.get("bulletFields") or []
+        jid = bullets[0] if bullets else path
+        loc = j.get("locationsText") or ""   # may be "N Locations" (vague -> drops in metro filter)
+        rows.append({
+            "id": "wd-" + str(jid),
+            "title": title,
+            "company": company,
+            "location": loc,
+            "hourly_min": None,
+            "hourly_max": None,
+            "predicted": True,                # no salary on the CxS list endpoint
+            "verdict": verdict_fn(None, None, stated=False),
+            "created": "",                    # postedOn is relative text, not a date
+            "url": base + path,
+            "source": _ats_source(loc),
+            "description": "",
+        })
+    return rows
+
+
+def fetch_workday(titles, location, verdict_fn, log):
+    del titles, location
+    rows, seen = [], set()
+    for tenant, dc, site, company in WORKDAY_BOARDS:
+        host = f"https://{tenant}.{dc}.myworkdayjobs.com"
+        api = f"{host}/wday/cxs/{tenant}/{site}/jobs"
+        base = f"{host}/{site}"
+        for q in _WORKDAY_QUERIES:
+            try:
+                payload = _request_json(
+                    api, headers={"Accept": "application/json"},
+                    body={"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": q},
+                    allowed_prefixes=(host + "/",))
+                for r in _workday_rows(payload, base, company, verdict_fn):
+                    if r["id"] not in seen:
+                        seen.add(r["id"])
+                        rows.append(r)
+            except Exception as err:  # noqa: BLE001 - per-board/query isolation
+                print(f"  WARNING: workday '{tenant}/{q}' failed: {err}", file=sys.stderr)
+    log(f"  workday: {len(rows)} postings")
+    return rows
+
+
+# ── SmartRecruiters (keyless Posting API) ───────────────────────────────────
+SMARTRECRUITERS_HOST = "https://api.smartrecruiters.com/v1/companies/"
+SMARTRECRUITERS_COMPANIES = [
+    ("wellmarkinc", "Wellmark"),   # Des Moines HQ (Blue Cross Blue Shield)
+]
+
+
+def smartrecruiters_enabled():
+    return bool(SMARTRECRUITERS_COMPANIES)
+
+
+def _smartrecruiters_rows(payload, company, verdict_fn):
+    rows = []
+    for j in (payload or {}).get("content") or []:
+        title = j.get("name") or ""
+        ident = (j.get("company") or {}).get("identifier") or ""
+        jid = j.get("id") or ""
+        if not title or not ident or not jid:
+            continue
+        loc = j.get("location") or {}
+        loc_str = ", ".join(p for p in (loc.get("city"), loc.get("region")) if p) \
+            or (loc.get("fullLocation") or "")
+        rows.append({
+            "id": "sr-" + str(jid),
+            "title": title,
+            "company": company,
+            "location": loc_str,
+            "hourly_min": None,
+            "hourly_max": None,
+            "predicted": True,            # no reliable salary on the list endpoint
+            "verdict": verdict_fn(None, None, stated=False),
+            "created": (j.get("releasedDate") or "")[:10],
+            # Real public apply page; identifier is per-posting (correct casing).
+            "url": f"https://jobs.smartrecruiters.com/{ident}/{jid}",
+            "source": "remote" if loc.get("remote") else _ats_source(loc_str),
+            "description": "",
+        })
+    return rows
+
+
+def fetch_smartrecruiters(titles, location, verdict_fn, log):
+    del titles, location
+    rows = []
+    for ident, company in SMARTRECRUITERS_COMPANIES:
+        try:
+            payload = _request_json(f"{SMARTRECRUITERS_HOST}{ident}/postings?limit=100")
+            rows.extend(_smartrecruiters_rows(payload, company, verdict_fn))
+        except Exception as err:  # noqa: BLE001 - per-company isolation
+            print(f"  WARNING: smartrecruiters '{ident}' failed: {err}", file=sys.stderr)
+    log(f"  smartrec: {len(rows)} postings")
+    return rows
+
+
 # ── registry ───────────────────────────────────────────────────────────────
 
 PROVIDERS = [
@@ -663,6 +791,8 @@ PROVIDERS = [
     ("ats", ats_enabled, fetch_ats),
     ("careerjet", careerjet_enabled, fetch_careerjet),
     ("neogov", neogov_enabled, fetch_neogov),  # keyless gov feeds — always on
+    ("workday", workday_enabled, fetch_workday),  # keyless enterprise ATS — always on
+    ("smartrecruiters", smartrecruiters_enabled, fetch_smartrecruiters),  # keyless — always on
     # ("careeronestop", careeronestop_enabled, fetch_careeronestop),  # stub
 ]
 
