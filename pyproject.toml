@@ -25,3 +25,15 @@ timeout = 30
 timeout_method = "thread"
 addopts = "-q"
 testpaths = ["tests"]
+
+[tool.mypy]
+# Scoped to the typed transport module. find_admin_jobs.py is a
+# template-heavy script typed incrementally — not worth mypy noise yet.
+files = ["portal/push.py"]
+python_version = "3.11"
+strict = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = "providers"
+follow_imports = "silent"   # legacy module: imported, not yet strict-typed

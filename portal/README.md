@@ -49,3 +49,29 @@ exists. The static PWA keeps working unchanged — the portal is additive.
    CDN to stay build-free; pin the version).
 3. localStorage → portal import on first sign-in.
 4. AI chat Edge Function (Anthropic API; per-user rate cap; AFTER the above).
+
+## Status update (2026-06-12): 1–3 are BUILT, 4 is staged
+
+All three build-order items now live in the app template (`find_admin_jobs.py`):
+sign-in bar (magic link + Google), pull/merge/push sync with union semantics,
+and the implicit localStorage import (first sync pushes everything local the
+server didn't have). The scanner upsert is `--push-supabase` (transport in
+`push.py`), already passed by the daily CD — it self-disables until secrets
+exist. The page embeds supabase-js 2.108.1 pinned + SRI-locked, only when
+`SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` are set at build time.
+
+The companion (item 4) is staged at `functions/companion/index.ts` — see the
+header comment for deploy + the guardrails baked into its system prompt
+(support tool, NOT therapy; verified crisis numbers; profile learning via a
+`save_profile` tool that feeds the app's For-you ranking).
+
+### Activation checklist (one sitting, off the office network — the firewall
+### geo-blocks auth.supabase.io)
+
+1. Create the Supabase project, apply `schema.sql` (now also creates
+   `user_profile` + `chat_messages`), run the Advisors.
+2. Auth: disable public sign-ups (invite-only), invite emails, enable Google.
+3. GitHub secrets (stdin only): `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`,
+   `SUPABASE_PUBLISHABLE_KEY` — next daily run lights up sign-in + jobs push.
+4. Companion: `supabase functions deploy companion` +
+   `supabase secrets set ANTHROPIC_API_KEY=...` (masked dialog, never chat).

@@ -78,11 +78,14 @@ _ALLOWED_PREFIXES = (
 )
 
 
-def _request_json(url, *, headers=None, body=None, attempts=3):
+def _request_json(url: str, *, headers: "dict[str, str] | None" = None, body: object = None,
+                  attempts: int = 3, allowed_prefixes: "tuple[str, ...] | None" = None) -> object:
     """GET (or POST when body is not None) returning parsed JSON.
     Bounded retry on 5xx/network errors, fail-fast on 4xx — same policy as
-    the Adzuna fetcher."""
-    if not url.startswith(_ALLOWED_PREFIXES):  # defense-in-depth, CWE-939
+    the Adzuna fetcher. allowed_prefixes overrides the provider allowlist for
+    callers with their own pinned base URL (portal.push validates the Supabase
+    project URL shape before passing it here)."""
+    if not url.startswith(allowed_prefixes or _ALLOWED_PREFIXES):  # defense-in-depth, CWE-939
         raise RuntimeError("refusing non-allowlisted provider URL")
     data = json.dumps(body).encode("utf-8") if body is not None else None
     hdrs = {"User-Agent": "admin-job-finder/1.0"}

@@ -34,6 +34,11 @@ jobs:
       USAJOBS_EMAIL: ${{ secrets.USAJOBS_EMAIL }}
       JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
       CAREERJET_AFFID: ${{ secrets.CAREERJET_AFFID }}
+      # Portal (all optional; push + sign-in UI self-disable when unset).
+      # SUPABASE_SERVICE_KEY never reaches the page; PUBLISHABLE is browser-safe.
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@v4
 
@@ -54,7 +59,7 @@ jobs:
 
       - name: Build mobile job app
         if: steps.gate.outputs.run == 'true'
-        run: python find_admin_jobs.py --contact "Brady"
+        run: python find_admin_jobs.py --contact "Brady" --push-supabase
 
       # Artifact = the site bundle only. The audit CSV (operator-only scam
       # reasons) is NOT uploaded: on a public repo, artifacts are downloadable

@@ -18,6 +18,7 @@ create table public.jobs (
   pay_text    text,                             -- display string only
   verdict     text check (verdict in ('meets', 'unlisted', 'below')),
   category    text,
+  trains      boolean not null default false,  -- employer-stated "will train / no experience"
   trust_label text,
   commute     text,
   url         text,
@@ -107,10 +108,45 @@ create policy "own notes: delete"
   to authenticated
   using ((select auth.uid()) = user_id);
 
+-- ── user_profile: quiz answers + what the companion learns (one row/user) ──
+create table public.user_profile (
+  user_id    uuid primary key default auth.uid() references auth.users (id) on delete cascade,
+  profile    jsonb not null default '{}'::jsonb,   -- quiz keys + companion-learned prefs
+  updated_at timestamptz not null default now()
+);
+alter table public.user_profile enable row level security;
+create policy "own profile: select" on public.user_profile for select
+  to authenticated using ((select auth.uid()) = user_id);
+create policy "own profile: insert" on public.user_profile for insert
+  to authenticated with check ((select auth.uid()) = user_id);
+create policy "own profile: update" on public.user_profile for update
+  to authenticated using ((select auth.uid()) = user_id)
+  with check ((select auth.uid()) = user_id);
+
+-- ── chat_messages: the companion conversation (hers; operator never reads
+--    it through the app — transparency note lives in the UI) ───────────────
+create table public.chat_messages (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  role       text not null check (role in ('user', 'assistant')),
+  body       text not null check (char_length(body) between 1 and 8000),
+  created_at timestamptz not null default now()
+);
+alter table public.chat_messages enable row level security;
+create policy "own chat: select" on public.chat_messages for select
+  to authenticated using ((select auth.uid()) = user_id);
+create policy "own chat: insert" on public.chat_messages for insert
+  to authenticated with check ((select auth.uid()) = user_id);
+create policy "own chat: delete" on public.chat_messages for delete
+  to authenticated using ((select auth.uid()) = user_id);
+create index chat_messages_user_idx on public.chat_messages (user_id, created_at desc);
+
 -- ── Data API exposure (required since 2026-04-28 for new tables) ───────────
 grant select on public.jobs to authenticated;
 grant select, insert, update, delete on public.user_job_status to authenticated;
 grant select, insert, update, delete on public.job_notes to authenticated;
+grant select, insert, update on public.user_profile to authenticated;
+grant select, insert, delete on public.chat_messages to authenticated;
 -- Deliberately NOTHING granted to anon: the portal is invite-only.
 
 -- ── indexes for the obvious access paths ───────────────────────────────────

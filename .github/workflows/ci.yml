@@ -34,8 +34,11 @@ jobs:
       - name: Lint (ruff)
         run: ruff check .
 
+      - name: Type check (mypy, strict on portal transport)
+        run: mypy
+
       - name: Compile check (syntax)
-        run: python -m compileall -q find_admin_jobs.py tests
+        run: python -m compileall -q find_admin_jobs.py providers.py portal tests
 
       - name: Unit + smoke tests (mock, no network)
         run: pytest --timeout=30 --timeout-method=thread
@@ -53,8 +56,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Each alternation requires trailing chars so this rule never matches itself.
-          PATTERN='(sk-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36,}|gho_[a-zA-Z0-9]{36,}|xox[bp]-[a-zA-Z0-9-]{20,}|AKIA[A-Z0-9]{16}|AIza[a-zA-Z0-9_-]{35}|-----BEGIN [A-Z]+ PRIVATE KEY-----)'
+          # Shapes of the secrets THIS project actually handles + common ones.
+          # Each alternation requires trailing chars so this rule never matches
+          # itself. JWT alternation catches legacy Supabase anon/service_role
+          # keys; sk-ant catches Anthropic; sb_secret catches Supabase secret.
+          PATTERN='(sk-ant-[a-zA-Z0-9_-]{20,}|sk-[a-zA-Z0-9]{20,}|sb_secret_[a-zA-Z0-9]{20,}|eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}|ghp_[a-zA-Z0-9]{36,}|gho_[a-zA-Z0-9]{36,}|xox[bp]-[a-zA-Z0-9-]{20,}|AKIA[A-Z0-9]{16}|AIza[a-zA-Z0-9_-]{35}|-----BEGIN [A-Z]+ PRIVATE KEY-----)'
+          # Generic provider keys (Adzuna/JSearch) have no distinctive shape and
+          # cannot be regex-matched; they are protected by .gitignore (.env,
+          # web/index.html) — enable GitHub push-protection for belt-and-braces.
           if git grep -nE "$PATTERN" -- . ':!*.lock' ; then
             echo "::error::Potential secret detected (see matches above)"; exit 1
           fi
