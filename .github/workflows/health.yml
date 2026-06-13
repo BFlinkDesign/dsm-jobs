@@ -38,7 +38,12 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
         run: |
-          set -o pipefail   # NOT -u: an unset var must not silently kill the run
+          # The runner invokes this as `bash -e -o pipefail {0}`. That injected
+          # -e (errexit) is the real trap: a grep with no match (exit 1) inside a
+          # command substitution would abort the whole step BEFORE the summary is
+          # written — reading as an opaque empty failure. We track failures
+          # explicitly via FAILED, so turn errexit OFF and keep pipefail.
+          set +e -o pipefail
           S=""; FAILED=0
           ok()  { echo "OK:  $1"; S="${S}- ✅ ${1}"$'\n'; }
           bad() { echo "::error::$1"; S="${S}- ❌ ${1}"$'\n'; FAILED=1; }
@@ -49,8 +54,10 @@ jobs:
           if [ -f "$PAGE" ] && grep -q "Job Board" "$PAGE"; then ok "published build has the app"
           else bad "published build missing 'Job Board' (file: $([ -f "$PAGE" ] && echo present || echo MISSING))"; fi
 
-          # 2) Freshness: the daily scan stamps 'updated YYYY-MM-DD'
-          updated="$(grep -oE 'updated [0-9]{4}-[0-9]{2}-[0-9]{2}' "$PAGE" 2>/dev/null | head -1 | awk '{print $2}')"
+          # 2) Freshness: the daily scan embeds the build date in the inline JSON
+          #    as  "generated": "YYYY-MM-DD HH:MM"  (the visible "· updated ..."
+          #    text is built in JS at runtime, so it is NOT in the static HTML).
+          updated="$(grep -oE '"generated": *"[0-9]{4}-[0-9]{2}-[0-9]{2}' "$PAGE" 2>/dev/null | head -1 | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}')"
           if [ -n "$updated" ]; then
             age=$(( ( $(date +%s) - $(date -d "$updated" +%s) ) / 86400 ))
             if [ "$age" -le 3 ]; then ok "fresh ($updated, ${age}d ago)"; else bad "stale build ($updated, ${age}d ago) — daily scan may be failing"; fi
