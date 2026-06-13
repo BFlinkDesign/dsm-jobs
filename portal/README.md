@@ -60,7 +60,8 @@ server didn't have). The scanner upsert is `--push-supabase` (transport in
 exist. The page embeds supabase-js 2.108.1 pinned + SRI-locked, only when
 `SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` are set at build time.
 
-The companion (item 4) is staged at `functions/companion/index.ts` — see the
+The companion (item 4) lives at `../supabase/functions/companion/index.ts`
+(the Supabase-CLI standard path, deployed with `supabase functions deploy`) — see the
 header comment for deploy + the guardrails baked into its system prompt
 (support tool, NOT therapy; verified crisis numbers; profile learning via a
 `save_profile` tool that feeds the app's For-you ranking).

@@ -7,3 +7,7 @@ __pycache__/
 .add_secret_status.json
 push_secrets_to_github.py
 web/index.html
+
+# Supabase CLI local state (keep config.toml + functions/ tracked)
+supabase/.temp/
+supabase/.branches/
