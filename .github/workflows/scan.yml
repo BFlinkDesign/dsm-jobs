@@ -94,7 +94,7 @@ jobs:
       # loud by opening/refreshing an issue instead of a silent red X.
       - name: Open/refresh an issue if the daily scan failed
         if: failure()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const body = `The daily job scan failed at ${new Date().toISOString()}. ` +
