@@ -34,7 +34,7 @@ python find_admin_jobs.py --min-hourly 20          # raise the wage floor
 
 ## Safety / scam shield (important)
 
-Job boards are full of scams targeting entry-level applicants, so this tool does the
+Job boards are full of scams targeting job seekers, so this tool does the
 vetting **up front** — the published list is safe by default:
 
 - **Scams are hidden, not just labeled.** Postings with scam tells are removed from the
@@ -42,9 +42,10 @@ vetting **up front** — the published list is safe by default:
 - **What gets hidden:** advance-fee / check-cashing / gift-card / wire language; off-platform
   "interviews" (Telegram/WhatsApp); the same employer+role spammed across many cities;
   unknown-employer **remote** roles (remote admin/data-entry is the #1 scam category);
-  remote pay that's too good to be true for entry admin.
-- **Attainable only.** Senior/lead/manager/competitive titles are dropped — only realistic
-  entry-level admin/reception/clerical roles are shown.
+  remote pay that's too good to be true for an admin role.
+- **Real admin work, her level.** Admin / office / executive-assistant / office-manager /
+  clerical / customer-service roles across the experience range (she has years behind her);
+  only true executive tiers (director/VP/chief) are dropped as out-of-scope.
 - **Known employers first.** Recognizable local/government employers are sorted to the top.
 - **You get the audit.** The CSV lists *every* posting with a `safety` column and the exact
   `scam_reasons`, so you can spot-check what was hidden.

@@ -2,8 +2,9 @@
 """
 find_admin_jobs.py - Find admin / clerical jobs near a location, via the Adzuna API.
 
-Built for: entry-level office/admin roles, high-school-diploma friendly, >= $19/hr,
-within driving distance of Grimes, IA (Des Moines metro) PLUS remote roles.
+Built for: office/admin roles (entry through experienced — Lilly has years of
+admin behind her), no-degree-required friendly, >= $19/hr, within driving
+distance of Grimes, IA (Des Moines metro) PLUS remote roles.
 
 Why Adzuna (not scraping Indeed/LinkedIn):
   - Adzuna is a sanctioned job-aggregator API that RE-publishes Indeed/Reed/etc.
@@ -63,17 +64,20 @@ RESULTS_PER_PAGE = 50             # Adzuna max per page
 
 # Job titles to search (each is a separate query for relevance, then de-duped).
 # Search queries (each is one API call per source). Grouped: admin/clerical,
-# light office-adjacent, and entry-level general (no-degree, $19+ paths).
+# experienced admin (Lilly's level), light office-adjacent, general no-degree.
 TITLES = [
     # admin / clerical
     "administrative assistant", "office assistant", "receptionist", "front desk",
     "data entry", "office clerk", "administrative coordinator", "secretary",
     "clerical", "file clerk",
+    # experienced admin — years of admin experience, no degree needed
+    "executive assistant", "office manager", "administrative manager",
+    "senior administrative assistant", "operations assistant",
     # light office-adjacent
     "scheduler", "medical receptionist", "billing clerk", "accounts payable clerk",
     "medical records clerk", "bank teller", "customer service representative",
     "call center representative", "mail clerk",
-    # entry-level general (no degree)
+    # general (no degree)
     "retail associate", "cashier", "stocker",
     "food service worker", "caregiver", "housekeeper", "production associate",
     "general laborer",
@@ -84,10 +88,11 @@ REMOTE_TITLES = [
     "administrative assistant", "data entry", "receptionist", "scheduler",
     "customer service representative", "call center representative",
     "billing clerk", "medical records clerk",
+    "executive assistant", "administrative coordinator", "operations assistant",
 ]
 
-# Titles that LOOK like admin but are actually skilled/licensed roles a HS-diploma
-# entry-level applicant should not be funneled into. Matched against the job title.
+# Titles that LOOK like admin but are actually skilled/licensed roles that need
+# credentials she doesn't have. Matched against the job title.
 EXCLUDE_TITLE_WORDS = [
     "network", "systems", "system administrator", "database", "salesforce",
     "devops", "sql", "linux", "server", "cyber", "security administrator",
@@ -255,16 +260,20 @@ COMMUTE_MINUTES_FROM_GRIMES = {
     "perry": 30, "van meter": 25, "woodward": 25, "mitchellville": 30,
 }
 
-# Seniority / competitiveness markers -> not attainable for this user; dropped.
+# Genuinely out-of-scope EXECUTIVE / non-admin tiers -> dropped. NOTE: we do
+# NOT drop "senior", "lead", "manager", "supervisor", or "executive assistant"
+# anymore — Lilly has years of admin experience ("basically a master's degree"),
+# so experienced-admin roles (Office Manager, Executive Assistant, Senior Admin,
+# Admin Supervisor) belong in her feed. The is_admin_title() gate still keeps
+# everything to real admin/clerical work, so a "Sales Manager" is dropped there.
 SENIORITY_DROP_TERMS = [
-    "senior ", "sr. ", "sr ", " lead", "lead ", "manager", "director", "supervisor",
-    "head of", "chief", "vp ", "vice president", "executive ", " iii", " iv",
-    "level 3", "level iii", "principal admin",
+    "director", "head of", "chief", "vp ", "vice president",
+    "ceo", "cfo", "coo", "c.e.o", " president ",
 ]
 
 # A job is kept only if its TITLE contains one of these admin/clerical terms.
 # This is the precision gate: Adzuna fuzzy-matches queries and returns lots of
-# "Coordinator/Manager/Specialist/Investigator" roles that are not entry-level
+# "Coordinator/Manager/Specialist/Investigator" roles that are not real
 # admin/reception work. Requiring an admin term in the title drops that noise.
 # Grouped by the plain-language category shown as a filter chip in the app.
 # First matching group wins, so "front desk" lands in Office, not elsewhere.
@@ -278,6 +287,11 @@ CATEGORY_TERMS = {
         "scheduling coordinator", "scheduler", "office associate", "admin coordinator",
         "billing", "accounts payable", "accounts receivable", "medical records",
         "mail clerk", "patient access", "records clerk", "data clerk", "intake",
+        # Experienced-admin roles (Lilly's level — years of admin = a master's):
+        "executive assistant", "executive administrative", "office manager",
+        "administrative manager", "admin manager", "administrative supervisor",
+        "office supervisor", "senior administrative", "lead administrative",
+        "administrative officer", "operations assistant", "executive coordinator",
     ],
     "Customer service": [
         "customer service", "call center", "bank teller", "teller",
@@ -1722,18 +1736,20 @@ document.getElementById("foot").innerHTML =
 /* ── Gentle engine: encouragement, celebration, toast ─────────────────── */
 function dayHash(){ const d=today(); let h=0; for(let i=0;i<d.length;i++) h=(h*31+d.charCodeAt(i))>>>0; return h; }
 const ENC_LINES = [
-  "Job ads are wish lists. If you can do about half of it, apply.",
-  "Job searching is real work. You showed up today — that counts.",
-  "Entry-level postings get fewer real applicants than you'd think. Yours matters.",
-  "One application today beats five you never send. Small is fine.",
-  "“Pay not listed” isn't a no — it's a question you get to ask.",
-  "Rough day? The jobs will still be here tomorrow. Be kind to yourself.",
+  "Job ads are wish lists. If you can do half of it, apply — you're more qualified than you let yourself believe. — Daddy",
+  "You showed up today. That's the whole battle, and you won it. — Daddy",
+  "All that admin experience? You basically have your master's degree. Go show them. — Daddy",
+  "One application beats five you never send. Small is enough. I'm proud of you. — Daddy",
+  "“Pay not listed” isn't a no — it's just a question you get to ask. — Daddy",
+  "Rough day? The jobs will keep. Be as kind to yourself as I am to you. — Daddy",
+  "You are not behind. You're exactly where the next right step starts. — Daddy",
 ];
 const KIND_LINES = [
-  "That took effort. Nice work. ✦",
-  "Applied! That's a real step forward. ✦",
-  "Look at you go. One more out the door. ✦",
-  "Done and counted — it's in your weekly log too. ✦",
+  "That took real effort. Proud of you. ✦ — Daddy",
+  "Applied! That's a genuine step forward. ✦ — Daddy",
+  "Look at you go. One more out the door. ✦ — Daddy",
+  "Done — and it's in your weekly log too. ✦ — Daddy",
+  "That's my girl. Keep that momentum. ✦ — Daddy",
 ];
 let toastTimer = null;
 function showToast(text, label, fn){

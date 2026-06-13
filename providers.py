@@ -255,7 +255,7 @@ JSEARCH_LOCAL_QUERIES = [
     "office assistant jobs in des moines iowa",
     "data entry clerk jobs in des moines iowa",
 ]
-JSEARCH_REMOTE_QUERY = "remote administrative assistant entry level"
+JSEARCH_REMOTE_QUERY = "remote administrative assistant no degree"
 
 _JSEARCH_PERIOD_TO_HOURLY = {"HOUR": 1.0, "YEAR": 1.0 / 2080}
 

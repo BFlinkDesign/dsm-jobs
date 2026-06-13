@@ -288,11 +288,18 @@ def test_blocklist_hides_even_trusted(monkeypatch):
     monkeypatch.setattr(fa, "BLOCKLIST", [])
 
 
-def test_attainability_drops_senior_roles():
+def test_attainability_keeps_experienced_admin_drops_exec_tiers():
+    # Lilly has years of admin experience — experienced-admin roles are KEPT.
     assert fa.is_attainable("Administrative Assistant") is True
-    assert fa.is_attainable("Senior Administrative Assistant") is False
-    assert fa.is_attainable("Office Manager") is False
+    assert fa.is_attainable("Senior Administrative Assistant") is True
+    assert fa.is_attainable("Office Manager") is True
+    assert fa.is_attainable("Executive Assistant") is True
+    assert fa.is_attainable("Administrative Supervisor") is True
     assert fa.is_attainable("Receptionist") is True
+    # Only true executive / non-admin tiers are dropped as out-of-scope.
+    assert fa.is_attainable("Director of Operations") is False
+    assert fa.is_attainable("VP of Finance") is False
+    assert fa.is_attainable("Chief of Staff") is False
 
 
 # --- transient-5xx retry (scheduled scan failed on a one-off Adzuna 503) ---
@@ -447,15 +454,16 @@ def test_template_has_no_legacy_theme_leftovers():
 
 # --- US-only hard guard (no European / foreign trash) ---
 
+
 def test_looks_non_us_flags_foreign_not_us_lookalikes():
     assert fa.looks_non_us("London, United Kingdom") is True
     assert fa.looks_non_us("Bangalore, India") is True
     assert fa.looks_non_us("Toronto, ON, Canada") is True
     assert fa.looks_non_us("Remote - EMEA") is True
     # US lookalikes must NOT trip foreign markers:
-    assert fa.looks_non_us("Indianapolis, Indiana") is False   # 'india' inside 'indiana'
+    assert fa.looks_non_us("Indianapolis, Indiana") is False  # 'india' inside 'indiana'
     assert fa.looks_non_us("Des Moines, IA") is False
-    assert fa.looks_non_us("Paris, Texas") is False             # US Paris, has 'texas'
+    assert fa.looks_non_us("Paris, Texas") is False  # US Paris, has 'texas'
 
 
 def test_is_us_location_positive_signals():
@@ -468,11 +476,12 @@ def test_is_us_location_positive_signals():
 def test_passes_us_filter_drops_foreign_remote_keeps_us():
     def row(loc, source="remote"):
         return {"location": loc, "source": source, "title": "Admin"}
+
     assert fa.passes_us_filter(row("London, United Kingdom")) is False
     assert fa.passes_us_filter(row("Paris, France")) is False
     assert fa.passes_us_filter(row("Remote - United States")) is True
     assert fa.passes_us_filter(row("Phoenix, Arizona")) is True
-    assert fa.passes_us_filter(row("Remote")) is True                       # bare remote allowed
+    assert fa.passes_us_filter(row("Remote")) is True  # bare remote allowed
     # A foreign marker overrides even a 'local' source (defensive):
     assert fa.passes_us_filter(row("Des Moines, IA", source="local")) is True
     assert fa.passes_us_filter(row("London, UK", source="local")) is False
