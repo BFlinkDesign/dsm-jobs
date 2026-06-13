@@ -1,0 +1,1352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e0a16">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Job Board">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Job Board — Grimes &amp; Des Moines</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<script id="sbjs" defer crossorigin="anonymous" integrity="sha384-EjUdIVmzWliPzdzhxZ9ZoO0etXLKWuUPUftAGxP6qH6Lm4oLwoLaJR0Ba4pIDiDL" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.108.1/dist/umd/supabase.js"></script>
+<style>
+:root{
+ /* Goth violet system. Variable names kept from the light theme so every
+    component re-skins in one place: --green IS the primary (violet) now. */
+ --paper:#0e0a16; --card:#171022; --surface:#1e1530; --ink:#f1eaff; --ink2:#b8a8da; --line:#2e2347;
+ --green:#9333ea; --green-d:#c9a8ff; --green-soft:rgba(147,51,234,.16);
+ --gold:#e9d5ff; --red:#ff7b72; --shadow:0 10px 28px rgba(0,0,0,.35);
+ --glow:0 0 16px rgba(168,85,247,.45);
+}
+*{box-sizing:border-box}
+[hidden]{display:none !important}   /* beat component display rules (flex etc.) */
+html{-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--paper);color:var(--ink);
+ font-family:'Atkinson Hyperlegible',-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+ font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased}
+/* Star field: pure CSS, fixed, behind everything; gentle twinkle. */
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+ background:
+  radial-gradient(1.5px 1.5px at 12% 18%, rgba(233,213,255,.55) 50%, transparent 51%),
+  radial-gradient(1px 1px at 78% 9%,  rgba(192,132,252,.5) 50%, transparent 51%),
+  radial-gradient(1.5px 1.5px at 64% 32%, rgba(233,213,255,.35) 50%, transparent 51%),
+  radial-gradient(1px 1px at 31% 56%, rgba(192,132,252,.4) 50%, transparent 51%),
+  radial-gradient(1.5px 1.5px at 88% 64%, rgba(233,213,255,.45) 50%, transparent 51%),
+  radial-gradient(1px 1px at 9% 83%,  rgba(192,132,252,.4) 50%, transparent 51%),
+  radial-gradient(1.5px 1.5px at 47% 92%, rgba(233,213,255,.3) 50%, transparent 51%),
+  radial-gradient(ellipse 120% 60% at 50% -10%, rgba(88,28,135,.28), transparent 60%);
+ animation:twinkle 7s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.55}to{opacity:1}}
+.app{max-width:640px;margin:0 auto;padding:0 16px 120px}
+svg{display:inline-block;vertical-align:-2px}
+/* App bar */
+header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
+ backdrop-filter:saturate(1.2) blur(12px);margin:0 -16px;padding:16px;
+ border-bottom:1px solid var(--line)}
+.brandrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+.word{font-family:inherit;font-weight:700;font-size:26px;line-height:1.05;letter-spacing:-.01em;
+ background:linear-gradient(100deg,#f1eaff 20%,#c084fc 50%,#e9d5ff 80%);
+ -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+ position:relative;display:inline-block;padding-right:20px}
+.word::after{content:"\2726";position:absolute;right:0;top:-4px;font-size:14px;
+ -webkit-text-fill-color:#c084fc;animation:spark 2.6s ease-in-out infinite}
+@keyframes spark{0%,100%{opacity:.35;transform:scale(.8) rotate(0deg)}50%{opacity:1;transform:scale(1.15) rotate(18deg)}}
+.safebadge{display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);color:var(--green-d);
+ font-size:12px;font-weight:700;padding:6px 10px;border-radius:999px;white-space:nowrap;
+ border:1px solid rgba(192,132,252,.35)}
+.summary{color:var(--ink2);font-size:14px;margin-top:6px}
+/* Safety */
+.safety{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--red);
+ border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
+.safety h2{margin:0 0 4px;font-family:inherit;font-size:19px;font-weight:600;
+ display:flex;align-items:center;gap:8px}
+.safety h2 svg{color:var(--red)}
+.safety ul{margin:8px 0;padding-left:20px}
+.safety li{margin:5px 0}
+.safety .note{color:var(--ink2);font-size:15px;margin-top:6px}
+.callbtn{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;
+ background:var(--card);border:2px solid var(--red);color:var(--red);text-decoration:none;font-weight:700;
+ padding:13px;border-radius:11px;font-size:16px;min-height:52px}
+/* Controls */
+.controls{position:sticky;top:62px;z-index:15;background:var(--paper);padding:10px 0 2px}
+.searchwrap{position:relative}
+.searchwrap svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--ink2)}
+.search{width:100%;font:inherit;font-size:17px;padding:14px 16px 14px 44px;border:1.5px solid var(--line);
+ border-radius:12px;background:var(--card);min-height:52px;color:var(--ink)}
+.search:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:11px 0 5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;background:var(--card);border:1.5px solid var(--line);border-radius:999px;
+ padding:9px 15px;font:inherit;font-size:15px;font-weight:700;color:var(--ink2);min-height:44px;white-space:nowrap;transition:.15s}
+.chip[aria-pressed="true"]{background:var(--green);color:#fff;border-color:var(--green)}
+/* Lists */
+.progress{display:flex;align-items:center;gap:7px;color:var(--green-d);font-weight:700;font-size:14px;margin:8px 2px 0}
+.count{color:var(--ink2);font-size:13px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin:14px 2px 4px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 14px;margin:12px 0;
+ box-shadow:var(--shadow);animation:rise .3s cubic-bezier(.2,.7,.3,1) both}
+.cardtop{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.pill{display:inline-flex;align-items:center;font-size:13px;font-weight:700;padding:5px 11px;border-radius:8px}
+.pill.good{background:var(--green);color:#fff}
+.pill.none{background:var(--surface);color:var(--ink2)}
+.verified{display:inline-flex;align-items:center;gap:5px;color:var(--gold);font-size:13px;font-weight:700}
+.title{font-family:inherit;font-size:20px;font-weight:600;line-height:1.18;margin:0 0 3px}
+.co{font-size:16px;font-weight:700;color:var(--ink)}
+.meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--ink2);font-size:14px;margin-top:9px}
+.meta span{display:inline-flex;align-items:center;gap:6px}
+.apply{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;
+ background:linear-gradient(135deg,#9333ea,#7e22ce);color:#fff;box-shadow:var(--glow);
+ text-decoration:none;font-weight:700;padding:15px;border-radius:11px;font-size:17px;min-height:54px;transition:.12s}
+.apply:active{transform:scale(.985);background:#6b21a8}
+.actions{display:flex;gap:8px;margin-top:9px}
+.act{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--card);
+ border:1.5px solid var(--line);border-radius:11px;padding:11px 6px;font:inherit;font-size:14px;font-weight:700;
+ min-height:48px;color:var(--ink2);transition:.12s}
+.act:active{transform:scale(.97)}
+.act.on{background:var(--green);color:#fff;border-color:var(--green)}
+.act.applied.on{background:var(--green-d);border-color:var(--green-d)}
+.empty{text-align:center;color:var(--ink2);padding:52px 16px;font-size:17px}
+.empty svg{color:var(--line);margin-bottom:10px}
+.foot{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--ink2);font-size:13px;
+ text-align:center;margin:30px 0 0;line-height:1.6;border-top:1px solid var(--line);padding-top:18px}
+/* Enhancements */
+.stale{background:rgba(255,123,114,.1);border:1px solid rgba(255,123,114,.35);color:#ffb4ae;border-radius:12px;
+ padding:12px 14px;margin:14px 0 0;font-size:15px;line-height:1.45}
+.coach{background:var(--green-soft);border:1px solid rgba(192,132,252,.3);border-radius:14px;
+ padding:14px 44px 12px 16px;margin:18px 0;position:relative}
+.coach h2{margin:0 0 4px;font-size:18px;font-weight:700;color:var(--green-d)}
+.coach ul{margin:6px 0 2px;padding-left:20px}
+.coach li{margin:5px 0;font-size:15px}
+.coach .dismiss{position:absolute;top:8px;right:8px;background:none;border:0;font:inherit;
+ font-size:22px;line-height:1;color:var(--green-d);padding:8px;cursor:pointer}
+.newtag{display:inline-flex;align-items:center;background:var(--gold);color:#2e1065;font-size:12px;
+ font-weight:700;padding:4px 9px;border-radius:999px}
+.traintag{display:inline-flex;align-items:center;gap:4px;background:rgba(192,132,252,.18);color:var(--green-d);
+ font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;border:1px solid rgba(192,132,252,.4)}
+.pillrow{display:inline-flex;align-items:center;gap:7px}
+.about{margin-top:10px;font-size:15px;color:var(--ink2)}
+.about summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
+.about p{margin:6px 0 0}
+.nudge{margin-top:10px;background:var(--green-soft);border-left:3px solid var(--gold);padding:8px 11px;
+ font-size:14px;color:var(--green-d);border-radius:7px}
+.notes{display:none;margin-top:9px}
+.notes.open{display:block}
+.notes textarea{width:100%;min-height:84px;font:inherit;font-size:15px;border:1.5px solid var(--line);
+ border-radius:11px;padding:10px 12px;background:var(--card);color:var(--ink);resize:vertical}
+.notes textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+.old{color:var(--ink2)}
+/* Portal sync bar (hidden entirely unless the portal is configured) */
+.sync{background:var(--green-soft);border:1px solid rgba(192,132,252,.3);border-radius:14px;padding:13px 16px;margin:14px 0 0}
+.syncrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.synccopy{font-size:15px;color:var(--green-d);line-height:1.45}
+.synccopy .who{font-weight:700}
+.syncbtn{flex:0 0 auto;background:var(--green);color:#fff;border:0;border-radius:11px;font:inherit;
+ font-weight:700;font-size:15px;padding:11px 18px;min-height:48px;cursor:pointer}
+.syncbtn:active{transform:scale(.97)}
+.syncform{margin-top:4px}
+.syncform label{display:block;font-size:14px;font-weight:700;color:var(--green-d);margin:2px 0 6px}
+.syncform .search{padding-left:16px}
+.syncform .apply{margin-top:10px;width:100%;border:0;font:inherit;cursor:pointer}
+.syncform .act{margin-top:8px;width:100%;background:var(--card);cursor:pointer}
+.syncform .cancel{margin-top:8px;width:100%;background:none;border:0;color:var(--ink2);
+ font:inherit;font-size:14px;font-weight:700;padding:8px;cursor:pointer}
+.syncmsg{margin-top:9px;font-size:14px;color:var(--green-d);font-weight:700}
+.syncmsg.err{color:var(--red)}
+.syncout{flex:0 0 auto;max-width:120px}
+/* Full-screen auth modal */
+.authov{position:fixed;inset:0;z-index:60;background:rgba(8,5,14,.86);backdrop-filter:blur(8px);
+ display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 14px calc(24px + env(safe-area-inset-bottom))}
+.authcard{background:var(--card);border:1px solid var(--line);border-radius:20px;width:100%;max-width:420px;
+ margin:auto;padding:22px 20px;box-shadow:var(--glow);animation:rise .25s ease both}
+.authcard h2{margin:0 0 2px;font-size:23px;font-weight:700}
+.authcard .sub{color:var(--ink2);font-size:14px;margin:0 0 16px;line-height:1.45}
+.authx{position:absolute;top:14px;right:16px;background:none;border:0;color:var(--ink2);font-size:26px;
+ line-height:1;cursor:pointer;padding:6px}
+.pkbtn{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;
+ background:linear-gradient(135deg,#9333ea,#7e22ce);color:#fff;box-shadow:var(--glow);
+ border:0;border-radius:13px;font:inherit;font-weight:700;font-size:16px;padding:15px;min-height:54px;cursor:pointer}
+.pkbtn:active{transform:scale(.985)}
+.authdiv{display:flex;align-items:center;gap:10px;color:var(--ink2);font-size:12px;
+ letter-spacing:.1em;text-transform:uppercase;margin:16px 0}
+.authdiv::before,.authdiv::after{content:"";flex:1;height:1px;background:var(--line)}
+.authfield{display:block;width:100%;font:inherit;font-size:16px;padding:13px 14px;margin:8px 0 0;
+ border:1.5px solid var(--line);border-radius:11px;background:var(--surface);color:var(--ink);min-height:50px}
+.authfield:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+.authprimary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:10px;
+ background:var(--green);color:#fff;border:0;border-radius:11px;font:inherit;font-weight:700;font-size:16px;
+ padding:14px;min-height:52px;cursor:pointer}
+.authprimary:active{transform:scale(.985);background:var(--green-d)}
+.authsecondary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:9px;
+ background:var(--card);color:var(--ink);border:1.5px solid var(--line);border-radius:11px;font:inherit;
+ font-weight:700;font-size:15px;padding:12px;min-height:50px;cursor:pointer}
+.authsecondary:active{transform:scale(.97)}
+.authlink{background:none;border:0;color:var(--green-d);font:inherit;font-size:14px;font-weight:700;
+ cursor:pointer;padding:8px 2px;text-decoration:underline}
+.authrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;flex-wrap:wrap}
+.authmsg{margin-top:12px;font-size:14px;font-weight:700;color:var(--green-d);line-height:1.45}
+.authmsg.err{color:var(--red)}
+.authnote{margin-top:14px;font-size:12px;color:var(--ink2);line-height:1.5;text-align:center}
+/* Bottom tab bar */
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:space-around;
+ background:rgba(14,10,22,.92);backdrop-filter:blur(14px);border-top:1px solid var(--line);
+ padding:6px 4px calc(8px + env(safe-area-inset-bottom))}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;
+ color:var(--ink2);font:inherit;font-size:11px;font-weight:700;padding:7px 2px;min-height:52px;cursor:pointer;
+ border-radius:10px;transition:.15s}
+.tab[aria-current="true"]{color:#c084fc;text-shadow:0 0 14px rgba(192,132,252,.6)}
+.tab:active{transform:scale(.94)}
+/* Section intros, encouragement, cards */
+.picksintro h2{margin:18px 0 4px;font-size:22px;font-weight:700}
+.picksintro p{margin:0 0 6px;color:var(--ink2);font-size:15px;line-height:1.5}
+.weekline{font-weight:700;color:var(--green-d)}
+.sparkle{color:#c084fc;animation:spark 2.6s ease-in-out infinite;display:inline-block}
+.enc{margin:18px 2px 0;color:var(--green-d);font-size:15px;font-weight:700;text-align:center}
+.logbtns{display:flex;gap:8px;margin:6px 0 8px}
+.logbtns .act{flex:1}
+.lognote{color:var(--ink2);font-size:14px;line-height:1.5;margin:4px 2px 10px}
+.rescard{background:rgba(255,123,114,.07);border:1px solid rgba(255,123,114,.3);border-radius:14px;
+ padding:14px 16px;margin:14px 0}
+.rescard h3{margin:0 0 8px;font-size:17px;color:#ffb4ae}
+.resline{margin:7px 0;font-size:15px;line-height:1.5}
+.resline a{color:var(--green-d);font-weight:700;text-decoration:none;border-bottom:1px solid rgba(192,132,252,.4)}
+.resnote{margin:10px 0 0;color:var(--ink2);font-size:14px;line-height:1.5}
+.resnote a{color:var(--green-d)}
+.quizcard,.chatcard{background:var(--card);border:1px solid var(--line);border-radius:16px;
+ padding:16px;margin:14px 0;box-shadow:var(--shadow)}
+.quizcard h3,.chatcard h3{margin:0 0 6px;font-size:18px}
+.quizcard p,.chatcard p{margin:0 0 10px;color:var(--ink2);font-size:15px;line-height:1.5}
+.qq{margin:12px 0 4px;font-weight:700;font-size:16px}
+.qopts{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.qopt{background:var(--surface);border:1.5px solid var(--line);border-radius:999px;color:var(--ink2);
+ font:inherit;font-size:14px;font-weight:700;padding:10px 14px;min-height:44px;cursor:pointer;transition:.12s}
+.qopt[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#fff;box-shadow:var(--glow)}
+.qdone{color:var(--green-d);font-weight:700;font-size:14px;margin-top:8px}
+/* Companion chat (signed-in only) */
+.chatlog{display:flex;flex-direction:column;gap:8px;margin:10px 0;max-height:50vh;overflow-y:auto}
+.bub{max-width:85%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.5;white-space:pre-wrap}
+.bub.me{align-self:flex-end;background:var(--green);color:#fff;border-bottom-right-radius:6px}
+.bub.ai{align-self:flex-start;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-bottom-left-radius:6px}
+.chatrow{display:flex;gap:8px;margin-top:8px}
+.chatrow .search{flex:1;min-height:48px}
+.chatrow .syncbtn{min-width:74px}
+.chatnote{font-size:12px;color:var(--ink2);margin-top:8px;line-height:1.45}
+/* FAQ */
+.faq{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px 16px;margin:10px 0}
+.faq summary{font-weight:700;cursor:pointer;font-size:16px;color:var(--ink)}
+.faq p{color:var(--ink2);font-size:15px;line-height:1.55;margin:8px 0 2px}
+/* Toast + applied celebration */
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + env(safe-area-inset-bottom));
+ z-index:40;display:flex;align-items:center;gap:10px;background:#241738;border:1px solid rgba(192,132,252,.5);
+ color:var(--ink);font-size:15px;font-weight:700;padding:12px 18px;border-radius:999px;box-shadow:var(--glow);
+ max-width:92vw;animation:rise .25s ease both}
+.toast button{background:none;border:0;color:#c084fc;font:inherit;font-weight:700;cursor:pointer;padding:4px}
+.burst{position:fixed;z-index:50;pointer-events:none;color:#c084fc;font-size:16px;animation:burst 1s ease-out forwards}
+@keyframes burst{0%{opacity:1;transform:translate(0,0) scale(.6) rotate(0)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(1.3) rotate(120deg)}}
+/* Snooze (Not today) */
+.act.snz.on{background:var(--surface);color:var(--green-d);border-color:rgba(192,132,252,.4)}
+/* Call script */
+.script{margin-top:9px}
+.script summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
+.script blockquote{margin:8px 0 0;padding:10px 12px;background:var(--surface);border-left:3px solid var(--green);
+ border-radius:8px;color:var(--ink);font-size:15px;line-height:1.55}
+/* Work-search log: print only */
+@media print{
+ body{background:#fff;color:#000}
+ body::before{display:none}
+ .app>*:not(#worklog),.tabbar,.toast{display:none !important}
+ #worklog{display:block !important;color:#000}
+ #worklog h1{font-size:18px;margin:0 0 2px}
+ #worklog p{font-size:12px;margin:2px 0 10px}
+ #worklog table{width:100%;border-collapse:collapse;font-size:12px}
+ #worklog th,#worklog td{border:1px solid #444;padding:6px 8px;text-align:left;vertical-align:top}
+}
+@keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.card{animation:none}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="bar">
+    <div class="brandrow">
+      <div>
+        <div class="eyebrow">Grimes &middot; Des Moines metro</div>
+        <div class="word">Job Board</div>
+      </div>
+      <span class="safebadge"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Scam-checked</span>
+    </div>
+    <div class="summary" id="summary"></div>
+  </header>
+
+  <div class="stale" id="stale" hidden></div>
+
+  <section class="sync" id="syncbar" hidden>
+    <div class="syncrow" id="syncrow-out" hidden>
+      <div class="synccopy"><span class="who">Got a new phone, or use a tablet too?</span><br>
+        Sign in and your Applied, Saved, notes &amp; chats follow you everywhere.</div>
+      <button class="syncbtn" id="syncopen">Sign in</button>
+    </div>
+    <div class="syncrow" id="syncrow-in" hidden>
+      <div class="synccopy" id="syncwho"></div>
+      <button class="act syncout" id="syncout">Sign out</button>
+    </div>
+  </section>
+
+  <!-- Full-screen auth modal (all modern sign-in methods) -->
+  <div class="authov" id="authmodal" hidden>
+    <div class="authcard" style="position:relative">
+      <button class="authx" id="authclose" aria-label="Close">&times;</button>
+
+      <!-- main sign-in / sign-up panel -->
+      <div id="authmain">
+        <h2 id="authtitle">Welcome back <span class="sparkle">&#10022;</span></h2>
+        <p class="sub" id="authsub">Sign in so your jobs, notes and chats follow you to any device.</p>
+
+        <button class="pkbtn" id="authpasskey">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.6-3 3-4.5 5.5-4.5"/><path d="M14 10.5c2 0 3.5 1.5 3.5 3.5 0 1.2-.6 2.2-1.4 2.9V21l-1.3-1-1.3 1v-4.1a3.5 3.5 0 01-1-2.4c0-2 1.5-3.5 3.5-3.5z"/></svg>
+          Sign in with Face ID / fingerprint
+        </button>
+
+        <div class="authdiv">or</div>
+
+        <input class="authfield" id="authemail" type="email" inputmode="email" autocomplete="email"
+          placeholder="Your email address" aria-label="Email">
+        <input class="authfield" id="authpass" type="password" autocomplete="current-password"
+          placeholder="Password" aria-label="Password" hidden>
+        <button class="authprimary" id="authprimarybtn">Continue</button>
+        <button class="authsecondary" id="authmagic">Email me a sign-in link instead</button>
+        <button class="authsecondary" id="authgoogle">
+          <svg viewBox="0 0 24 24" width="17" height="17"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 01-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 01-10.8-3.8H1.2v3.1A12 12 0 0012 24z"/><path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 010-4.6V6.6H1.2a12 12 0 000 10.8z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4A12 12 0 001.2 6.6l4.1 3.1A7.2 7.2 0 0112 4.8z"/></svg>
+          Continue with Google
+        </button>
+
+        <div class="authrow">
+          <button class="authlink" id="authtoggle">New here? Create an account</button>
+          <button class="authlink" id="authforgot" hidden>Forgot password?</button>
+        </div>
+        <div class="authmsg" id="authmsg" role="status"></div>
+        <p class="authnote">Passkeys use your phone&rsquo;s Face ID or fingerprint &mdash; nothing to remember,
+        nothing to steal. Your info is private and never shared.</p>
+      </div>
+
+      <!-- set-new-password panel (shown after a reset link) -->
+      <div id="authrecover" hidden>
+        <h2>Set a new password <span class="sparkle">&#10022;</span></h2>
+        <p class="sub">Pick a new password for your account.</p>
+        <input class="authfield" id="authnewpass" type="password" autocomplete="new-password"
+          placeholder="New password (8+ characters)" aria-label="New password">
+        <button class="authprimary" id="authsetpass">Save new password</button>
+        <div class="authmsg" id="authrecmsg" role="status"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TODAY view: 3 curated picks, one small win at a time -->
+  <section id="todaywrap" hidden>
+    <div class="picksintro">
+      <h2>Today&rsquo;s 3 picks <span class="sparkle">&#10022;</span></h2>
+      <p>You don&rsquo;t have to look at every job. Here are 3 good ones for today &mdash;
+      checked, no degree needed. Apply to one and you&rsquo;ve done today&rsquo;s job search.</p>
+    </div>
+    <div id="picks"></div>
+    <div class="enc" id="todayenc"></div>
+  </section>
+
+  <!-- MY APPS view: applications + the Iowa work-search log -->
+  <section id="appswrap" hidden>
+    <div class="picksintro">
+      <h2>My applications</h2>
+      <p class="weekline" id="weekline"></p>
+    </div>
+    <div class="logbtns">
+      <button class="act" id="printlog">Print my work-search log</button>
+      <button class="act" id="copylog">Copy as text</button>
+    </div>
+    <p class="lognote">Iowa unemployment asks for <b>4 work-search activities each week</b>
+    (Sunday&ndash;Saturday), and at least 3 must be job applications. This log keeps
+    them for you &mdash; print it or copy it into your weekly claim.</p>
+    <div id="applist"></div>
+  </section>
+
+  <!-- MY CORNER view: companion, quiz, resources -->
+  <section id="cornerwrap" hidden>
+    <div class="picksintro">
+      <h2 id="cornerhi">My corner <span class="sparkle">&#10022;</span></h2>
+      <p id="cornergreet"></p>
+    </div>
+
+    <div class="rescard">
+      <h3>Need help right now?</h3>
+      <p class="resline"><b>988</b> &mdash; call or text, free, 24/7 (Suicide &amp; Crisis Lifeline)</p>
+      <p class="resline"><b>Your Life Iowa</b> &mdash; call <a href="tel:8555818111">855-581-8111</a>
+        or text <a href="sms:8558958398">855-895-8398</a>, free, 24/7</p>
+      <p class="resline"><b>Iowa Warm Line</b> &mdash; <a href="tel:8447759276">844-775-9276</a>
+        &mdash; just want someone kind to talk to? That&rsquo;s what this one is for.</p>
+      <p class="resnote">All free. No insurance needed. No questions asked.
+        More help (food, rent, free clinics): dial <b>2-1-1</b> or visit
+        <a href="https://www.211iowa.org" target="_blank" rel="noopener">211iowa.org</a>.</p>
+    </div>
+
+    <div class="quizcard" id="quizcard">
+      <h3>About me <span class="sparkle">&#10022;</span></h3>
+      <p id="quizintro">Answer a few easy questions and the Jobs page starts putting
+      the right ones first. No wrong answers. Change them any time.</p>
+      <div id="quizbody"></div>
+    </div>
+
+    <div class="chatcard" id="chatcard">
+      <h3>Your companion</h3>
+      <p id="chatstate">A friendly check-in chat that gets to know you and helps with
+      the search &mdash; it turns on once sign-in is set up. Your quiz answers above
+      already make the app smarter today.</p>
+    </div>
+  </section>
+
+  <section class="safety">
+    <h2><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/></svg>Before you apply</h2>
+    <div>These jobs were checked and look real. Read the posting, then apply.</div>
+    <div class="note"><b>It's a scam if a job ever asks you to:</b></div>
+    <ul>
+      <li>Pay money or buy equipment to start</li>
+      <li>Cash a check and send part back, or buy gift cards</li>
+      <li>Give your Social Security or bank number before a real interview</li>
+      <li>Only talk by text, Telegram, or WhatsApp</li>
+    </ul>
+    <div class="note"><b>“Pay not listed”</b> means the employer didn't post the wage — ask what it pays when you apply.</div>
+    <a class="callbtn" id="callbtn" href="#"></a>
+  </section>
+
+  <section class="coach" id="coach" hidden>
+    <button class="dismiss" id="coachoff" aria-label="Dismiss tips">&times;</button>
+    <h2>Tips for applying</h2>
+    <ul>
+      <li><b>"Pay not listed" is normal</b> — ask what it pays when you apply.</li>
+      <li>Applying in person? Bring your ID and a list of past jobs with dates.</li>
+      <li>A real employer will invite you to a phone call or an in-person interview — never just texting.</li>
+      <li>No answer after a week? It's okay to call and ask about your application.</li>
+    </ul>
+  </section>
+
+  <div id="faqwrap" hidden>
+    <div class="picksintro"><h2>Questions people ask</h2></div>
+    <details class="faq"><summary>Are these jobs real?</summary>
+      <p>Every job here came from the employer's own hiring system or a checked job site,
+      and each one was screened for scams before you ever see it. Jobs that looked wrong
+      were removed &mdash; the number we removed is shown at the bottom of the Jobs page.</p></details>
+    <details class="faq"><summary>What does &ldquo;Will train&rdquo; mean?</summary>
+      <p>The employer wrote in their own posting that no experience is needed or that they
+      provide training. Those are great ones to try even if you don&rsquo;t feel qualified.</p></details>
+    <details class="faq"><summary>What if I don't meet everything they ask for?</summary>
+      <p>Job ads are wish lists. If you can do about half of what they list, apply anyway &mdash;
+      that's normal and employers expect it.</p></details>
+    <details class="faq"><summary>Why does it say &ldquo;Pay not listed&rdquo;?</summary>
+      <p>The employer didn&rsquo;t post the wage. That&rsquo;s common and not a bad sign &mdash;
+      ask what it pays when they contact you.</p></details>
+    <details class="faq"><summary>How does the work-search log work?</summary>
+      <p>When you mark a job Applied, it's saved with the date automatically. The
+      <b>My apps</b> tab can print or copy your weekly list for your Iowa unemployment claim.</p></details>
+    <details class="faq"><summary>Is my information private?</summary>
+      <p>Everything stays on your phone unless you choose to sign in. Signing in saves your
+      jobs, notes and chats to a private account so a new phone doesn&rsquo;t lose them. It&rsquo;s
+      never sold, never shown to employers, and never used for ads. The only person who could
+      ever see what&rsquo;s saved is the person who set this up for you &mdash; nobody else.</p></details>
+  </div>
+
+  <div class="controls">
+    <div class="searchwrap">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
+      <input class="search" id="search" type="search" inputmode="search"
+        placeholder="Search job or employer" aria-label="Search jobs">
+    </div>
+    <div class="chips" id="chips"></div>
+    <div class="chips" id="catchips"></div>
+  </div>
+
+  <div class="progress" id="progress"></div>
+  <div class="count" id="count"></div>
+  <div id="list"></div>
+  <div class="empty" id="empty" hidden></div>
+  <div class="enc" id="footenc"></div>
+  <div class="foot" id="foot"></div>
+
+  <!-- Print-only: the Iowa work-search log -->
+  <div id="worklog" hidden></div>
+</div>
+
+<div class="toast" id="toast" hidden>
+  <span id="toasttext"></span><button id="toastact" hidden></button>
+</div>
+
+<nav class="tabbar" aria-label="App sections">
+  <button class="tab" id="nav-jobs" aria-current="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/></svg><span>Jobs</span></button>
+  <button class="tab" id="nav-today" aria-current="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.2 5.4L20 9l-4.4 3.9L17 19l-5-3.2L7 19l1.4-6.1L4 9l5.8-.6z"/></svg><span>Today</span></button>
+  <button class="tab" id="nav-apps" aria-current="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg><span>My apps</span></button>
+  <button class="tab" id="nav-corner" aria-current="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21s-7-4.6-9.3-9A5.4 5.4 0 0112 6.3 5.4 5.4 0 0121.3 12c-2.3 4.4-9.3 9-9.3 9z"/></svg><span>My corner</span></button>
+  <button class="tab" id="nav-help" aria-current="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 114.1 1.9c-.8.7-1.6 1.2-1.6 2.3"/><circle cx="12" cy="16.8" r=".5"/></svg><span>Help</span></button>
+</nav>
+
+<script>
+const JOBS = [{"id": "5750539944", "title": "Customer Service Rep- 2nd Shift", "company": "Remedy Intelligent Staffing", "location": "Des Moines, Polk County", "pay": "$20/hr", "payNum": 19.75, "remote": false, "trusted": true, "trustLabel": "Major local company", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-03", "url": "https://www.adzuna.com/details/5750539944?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "Customer Service Representative. Our client is a national known company. Lots of opportunity for advancement. Located on the north east side of Des Moines. Starting Pay: $19.75/hr Hours: 3:00pm - 12:00am (Monday-Friday) Duties: Processes…", "trains": false}, {"id": "gov-5368225", "title": "Administrative Support Assistant 3", "company": "State of Iowa", "location": "Woodward, 50276, Boone County", "pay": "$20-$29/hr", "payNum": 19.76, "remote": false, "trusted": true, "trustLabel": "Government", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-05", "url": "https://www.governmentjobs.com/careers/iowa/jobs/5368225", "category": "Office", "commute": "~25 min drive", "about": "Applicants must meet at least one of the following minimum requirements to qualify for positions in this job classification: Two years of full-time work experience in general office, clerical, data entry/processing, or related work.A total…", "trains": false}, {"id": "5754261596", "title": "Receptionist", "company": "Dallas County", "location": "Adel, Dallas County", "pay": "$24-$26/hr", "payNum": 23.92, "remote": false, "trusted": true, "trustLabel": "Government", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-06", "url": "https://www.adzuna.com/details/5754261596?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~15 min drive", "about": "Job Description This position is responsible for welcoming visitors to the Dallas County Administrative building and assisting members of the public in finding the departments, offices, services, and/or programs they are seeking. Job…", "trains": false}, {"id": "5755454556", "title": "Administrative Support Assistant 3", "company": "State of Iowa", "location": "The Meadows, Dallas County", "pay": "$20-$29/hr", "payNum": 19.76, "remote": false, "trusted": true, "trustLabel": "Government", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-07", "url": "https://www.adzuna.com/details/5755454556?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "", "about": "Job Description The Iowa Department of Health and Human Services (HHS), Division of State-Operated Specialty Care, Bureau of Woodward Resource Center (WRC) is seeking an Administrative Support Assistant 3 to join our Staffing Unit. This is…", "trains": false}, {"id": "gov-5369307", "title": "Administrative Assistant to the Majority Leader", "company": "State of Iowa", "location": "Des Moines, 50319, Polk County", "pay": "$27/hr", "payNum": 27.48, "remote": false, "trusted": true, "trustLabel": "Government", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-08", "url": "https://www.governmentjobs.com/careers/iowa/jobs/5369307", "category": "Office", "commute": "~20 min drive", "about": "1. Associate or bachelor’s degree preferred from an accredited university or college with major in Political Science, Public Administration, Business, Economics, or related program preferred.2. Previous professional employment in the…", "trains": false}, {"id": "gov-5371540", "title": "Administrative Support Assistant 3 – Field Operations", "company": "State of Iowa", "location": "Des Moines, 50315, Polk County", "pay": "$20-$29/hr", "payNum": 19.76, "remote": false, "trusted": true, "trustLabel": "Government", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-09", "url": "https://www.governmentjobs.com/careers/iowa/jobs/5371540", "category": "Office", "commute": "~20 min drive", "about": "Applicants must meet at least one of the following minimum requirements to qualify for positions in this job classification: Two years of full-time work experience in general office, clerical, data entry/processing, or related work.A total…", "trains": false}, {"id": "5759820131", "title": "Administrative Support Assistant 3 – Field Operations", "company": "State of Iowa", "location": "Des Moines, Polk County", "pay": "$20-$29/hr", "payNum": 19.76, "remote": false, "trusted": true, "trustLabel": "Government", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759820131?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "Job Description Only applicants who meet the Minimum Qualification Requirements and meet all selective requirements (listed below) will be placed on the eligible list. Administrative Support Assistant 3 – Field Operations Iowa Department…", "trains": false}, {"id": "5759817076", "title": "Customer Service Representative", "company": "Bankers Trust Company", "location": "Des Moines, Polk County", "pay": "$20-$23/hr", "payNum": 20.0, "remote": false, "trusted": true, "trustLabel": "Bank or insurance", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759817076?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "There are important qualities you look for in an employer – meaningful work, community engagement, competitive benefits, commitment to employee development, and so many more. At Bankers Trust, our team members experience an inclusive and…", "trains": false}, {"id": "5762039732", "title": "Administrative Assistant 1", "company": "State of Iowa", "location": "Des Moines, Polk County", "pay": "$21-$30/hr", "payNum": 20.62, "remote": false, "trusted": true, "trustLabel": "Government", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-13", "url": "https://www.adzuna.com/details/5762039732?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "Job Description The Iowa Department of Health and Human Services (HHS), Division of Community Access, Bureau of Child Support Services is seeking an Administrative Assistant 1 to join our team! At Child Support Services, we help the…", "trains": false}, {"id": "sr-744000126738119", "title": "Administrative Assistant III - Marketing and Corporate Communications", "company": "Wellmark", "location": "Des Moines, IA", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Bank or insurance", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-15", "url": "https://jobs.smartrecruiters.com/WellmarkInc/744000126738119", "category": "Office", "commute": "~20 min drive", "about": "", "trains": false}, {"id": "5739622908", "title": "Office Clerk/Receptionist - Valerius Elementary", "company": "Urbandale Community School District", "location": "Urbandale, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "School or college", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-24", "url": "https://www.adzuna.com/details/5739622908?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~12 min drive", "about": "JOB TITLE - Office Clerk/Receptionist CLASSIFICATION - Classified FLSA STATUS - Non-Exempt IMMEDIATE SUPERVISOR - Building Principal RECEIVES GUIDANCE FROM - Building administrators, district leadership PURPOSE OF THE POSITION - Under…", "trains": false}, {"id": "5742995691", "title": "Building-Level Secretary (9 month) - Rock Creek Elementary (Part Time)", "company": "Ankeny Community School District", "location": "Ankeny, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "School or college", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-28", "url": "https://www.adzuna.com/details/5742995691?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~18 min drive", "about": "The Ankeny Community School District (CSD) is renowned for its excellence across academics, athletics, the arts, and various activities. Situated in central Iowa, just 6 miles from Des Moines, Ankeny CSD caters to over 12,800 students from…", "trains": false}, {"id": "5751349462", "title": "General Laborer", "company": "Aerotek", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Staffing agency", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-03", "url": "https://www.adzuna.com/land/ad/5751349462?se=1uwImCNn8RGhB4OIQ4b5DQ&utm_medium=api&utm_source=acd4afcf&v=8D07CBCAAC7EADD4C9C94C38D6ACCE6A025FF207", "category": "Production & labor", "commute": "~20 min drive", "about": "Job Title: Construction Demolition General Laborer Location: Des Moines Role Summary: This position supports interior and exterior demolition projects by handling debris removal, site cleanup, and general labor tasks. Work is physical…", "trains": false}, {"id": "5751886307", "title": "Substitute Secretary 2026-2027", "company": "Southeast Polk Community School District", "location": "Pleasant Hill, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "School or college", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-04", "url": "https://www.adzuna.com/details/5751886307?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~25 min drive", "about": "Position Type: Substitute Date Posted: 6/2/2026 Location: District-Wide This is a general position listing and there may or may not be a specific opening at this time. If a position becomes available, your application materials may be…", "trains": false}, {"id": "5752942269", "title": "Student Services Secretary - Timberline Middle", "company": "Waukee Community School District", "location": "Waukee, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "School or college", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-05", "url": "https://www.adzuna.com/details/5752942269?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~15 min drive", "about": "Position Criteria: High school diploma or equivalent and/or specialized training or similar work experience, required 2 or 4 year degree or equivalent work experience in a similar field, preferred Background experience using school-related…", "trains": false}, {"id": "5753800339", "title": "General Laborer", "company": "Aerotek", "location": "West Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Staffing agency", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-05", "url": "https://www.adzuna.com/land/ad/5753800339?se=1uwImCNn8RGhB4OIQ4b5DQ&utm_medium=api&utm_source=acd4afcf&v=02407BD74ABCD45E1C7CA871B246A0F5ACE5C5FE", "category": "Production & labor", "commute": "~18 min drive", "about": "Job Title: General Production Laborer - Precast Concrete Job Description This role supports general production in a precast concrete facility, working across dry cast, wet cast, and panel intake areas to manufacture concrete structures…", "trains": false}, {"id": "5754085062", "title": "Administrative Assistant - District Office & Student Programs", "company": "Johnston Community School District", "location": "Johnston, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "School or college", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-06", "url": "https://www.adzuna.com/details/5754085062?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~12 min drive", "about": "JOB SUMMARY : The Administrative Assistant - District Office & Student Programs provides comprehensive administrative and operational support for the District Office reception area and alternative learning programs to ensure safe…", "trains": false}, {"id": "5754940274", "title": "General Laborer", "company": "Aerotek", "location": "Johnston, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Staffing agency", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-06", "url": "https://www.adzuna.com/land/ad/5754940274?se=1uwImCNn8RGhB4OIQ4b5DQ&utm_medium=api&utm_source=acd4afcf&v=3CD41426AAB9405DE3B2AAD9AA07284F2CED236B", "category": "Production & labor", "commute": "~12 min drive", "about": "Job Title: General Laborer Job Description As a General Laborer, you will be responsible for the installation of insulation materials on pipes, ducts, and other mechanical systems to control temperature and prevent energy loss. You will…", "trains": false}, {"id": "5756127023", "title": "Night Stocker", "company": "Hy-Vee", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Major local company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-08", "url": "https://www.adzuna.com/details/5756127023?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~20 min drive", "about": "Additional Considerations (if any): Overnight Shifts, Must be 18 - At Hy-Vee our people are our strength. We promise “a helpful smile in every aisle” and those smiles can only come from a workforce that is fully engaged and committed to…", "trains": false}, {"id": "5757860477", "title": "Administrative Assistant", "company": "Robert Half", "location": "West Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Staffing agency", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-09", "url": "https://www.adzuna.com/land/ad/5757860477?se=7gdrhSNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=DD0D72275F0C263CCC213D730A63C22A6161D610", "category": "Office", "commute": "~18 min drive", "about": "Description We're seeking a highly organized and detail-driven Administrative Assistant to join a collaborative team in West Des Moines! This long-term contract opportunity is perfect for someone who thrives in a fast-paced office, enjoys…", "trains": false}, {"id": "5757058845", "title": "Administrative Assistant II-Med Ed Consortium", "company": "UnityPoint Health", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Healthcare", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-09", "url": "https://www.adzuna.com/details/5757058845?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "The Administrative Assistant II is responsible for supporting departments and healthcare teams with administrative tasks of medium complexity. The role manages communication, scheduling, and travel arrangements. The role orders office…", "trains": false}, {"id": "5757058961", "title": "Experience Specialist/Receptionist: DSM Pediatrics", "company": "UnityPoint Health", "location": "South Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Healthcare", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-09", "url": "https://www.adzuna.com/details/5757058961?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "UnityPoint Clinic Experience Specialist/Receptionist Des Moines Pediatrics Monday-Friday 8:00AM-5:00PM, with some flexibility to adjust hours as needed Full Time Benefits As an Experience Specialist/Receptionist, you are the first point of…", "trains": false}, {"id": "5757860089", "title": "Full Time - Receiver/Stocker - Day", "company": "Lowe's", "location": "West Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "National company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-09", "url": "https://www.adzuna.com/land/ad/5757860089?se=3tQWlSNn8RGPL9oNLTnS9Q&utm_medium=api&utm_source=acd4afcf&v=496BE010955682B85DAE19366BE9A61A71B3320D", "category": "Store & retail", "commute": "~18 min drive", "about": "Your Impact at Lowe's As a Receiver/Stocker, you help keep the store clean, safe, and ready for customers by accurately receiving freight, stocking shelves, and organizing merchandise and top stock. You'll unload deliveries, handle…", "trains": false}, {"id": "5759283617", "title": "Full Time - Head Cashier - Day", "company": "Lowe's", "location": "West Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "National company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/land/ad/5759283617?se=KBmJlCNn8RG0btGxqHH3qw&utm_medium=api&utm_source=acd4afcf&v=2BFC06D44309AB83AE24338BDA109A848CA3648A", "category": "Store & retail", "commute": "~18 min drive", "about": "Key Responsibilities Provides SMART customer service at all times through the daily execution of Lowe's customer service policies, procedures and programs Seeks out customers to understand his/her needs and assists in locating…", "trains": false}, {"id": "5758855854", "title": "Seasonal: Guest Advocate (Cashier), General Merchandise, Fulfillment, Food & Beverage, Front of Store Attendant (Cart Attendant), Style, Inbound (Stocking) (T1791)", "company": "Target", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "National company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758855854?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~15 min drive", "about": "Starting Hourly Rate / Salario por Hora Inicial: $15.75 USD per hour ALL ABOUT TARGET Working at Target means helping all families discover the joy of everyday life. We bring that vision to life through our values and culture. Learn more…", "trains": false}, {"id": "5758825090", "title": "Seasonal: Guest Advocate (Cashier), General Merchandise, Fulfillment, Food & Beverage, Front of Store Attendant (Cart Attendant), Style, Inbound (Stocking) (T2909)", "company": "Target", "location": "Waukee, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "National company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758825090?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~15 min drive", "about": "Starting Hourly Rate / Salario por Hora Inicial: $15.75 USD per hour ALL ABOUT TARGET Working at Target means helping all families discover the joy of everyday life. We bring that vision to life through our values and culture. Learn more…", "trains": false}, {"id": "5758790220", "title": "Guest Advocate (Cashier or Front of Store Attendant/Cart Attendant) (T0069)", "company": "Target", "location": "Windsor Heights, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "National company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758790220?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~18 min drive", "about": "Starting Hourly Rate / Salario por Hora Inicial: $15.50 USD per hour ALL ABOUT TARGET Working at Target means helping all families discover the joy of everyday life. We bring that vision to life through our values and culture. Learn more…", "trains": false}, {"id": "5758762184", "title": "Guest Advocate (Cashier or Front of Store Attendant/Cart Attendant) (T2041)", "company": "Target", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "National company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758762184?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~20 min drive", "about": "Starting Hourly Rate / Salario por Hora Inicial: $15.75 USD per hour ALL ABOUT TARGET Working at Target means helping all families discover the joy of everyday life. We bring that vision to life through our values and culture. Learn more…", "trains": false}, {"id": "5758744247", "title": "Cashier (Front End)", "company": "Costco Wholesale Corporation", "location": "Windsor Heights, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "National company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758744247?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~18 min drive", "about": "California applicants: Please click here to review the Costco Applicant Privacy Notice. The jobs listed are examples of the typical kinds of positions that Costco may hire for when openings exist. The listing does not mean that any…", "trains": false}, {"id": "5760748927", "title": "Sr Administrative Assistant", "company": "Principal Financial Group", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Bank or insurance", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/land/ad/5760748927?se=7gdrhSNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=5ABA94C8E2979CCBAFA94DFB18E8E9FFE5FCEE9C", "category": "Office", "commute": "~20 min drive", "about": "What You'll Do The Sr Administrative Assistant on the RIS - Administrative Team, is responsible for providing mid-level leaders with a broad range of administrative support. This individual will have regular interactions with a variety of…", "trains": false}, {"id": "5760749075", "title": "Customer Service Representative", "company": "Wells Fargo", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Bank or insurance", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/land/ad/5760749075?se=fjo3kiNn8RGfB72z_DrYeQ&utm_medium=api&utm_source=acd4afcf&v=ABAD159B6C53F2CE325C613D5B7B14B87E7B16DB", "category": "Customer service", "commute": "~20 min drive", "about": "Job Description At Wells Fargo, we are looking for talented people who will put our customers at the center of everything we do. It all begins with outstanding talent. It all begins with you. About this role: Wells Fargo is seeking a…", "trains": false}, {"id": "5760392785", "title": "Part-time Customer Service Representative", "company": "Mom's Meals", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Major local company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5760392785?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "Company Overview Mom’s Meals is a home-delivered meal service providing fully prepared, refrigerated meal solutions direct to homes nationwide since 1999. We provide seniors, patients recovering post-discharge and those managing a chronic…", "trains": false}, {"id": "5760392780", "title": "Customer Service Representative", "company": "Mom's Meals", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Major local company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5760392780?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "Company Overview Mom’s Meals is a home-delivered meal service providing fully prepared, refrigerated meal solutions direct to homes nationwide since 1999. We provide seniors, patients recovering post-discharge and those managing a chronic…", "trains": false}, {"id": "5760392806", "title": "Bilingual Customer Service Representative", "company": "Mom's Meals", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Major local company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5760392806?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "Company Overview Mom’s Meals is a home-delivered meal service providing fully prepared, refrigerated meal solutions direct to homes nationwide since 1999. We provide seniors, patients recovering post-discharge and those managing a chronic…", "trains": false}, {"id": "5760746735", "title": "Assembler", "company": "Aerotek", "location": "Urbandale, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Staffing agency", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/land/ad/5760746735?se=1uwImCNn8RGhB4OIQ4b5DQ&utm_medium=api&utm_source=acd4afcf&v=D6EF2E63AADA39D10DE3A73759FEE631C5716692", "category": "Production & labor", "commute": "~12 min drive", "about": "Job Title: Assembler Job Description This general labor position involves production and assembly tasks. The role includes assisting maintenance technicians with various preventive measures to ensure work orders are completed on time. You…", "trains": false}, {"id": "5761943877", "title": "Administrative Assistant 3_Non-Cleared", "company": "Robert Half", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Staffing agency", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/land/ad/5761943877?se=7gdrhSNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=9E9797C25038C036F6F99FD5E53AA3B1C6704A89", "category": "Office", "commute": "~20 min drive", "about": "Description We are looking for an experienced Administrative Assistant to provide finance-focused operational support for a Global Security Services team. This is a 100% remote long-term contract position (possibility of becoming…", "trains": false}, {"id": "5761943726", "title": "Executive Assistant", "company": "Principal Financial Group", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Bank or insurance", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/land/ad/5761943726?se=ZCZrjCNn8RGihJbKSHh3Mg&utm_medium=api&utm_source=acd4afcf&v=F154F0391EE057E7A6E74A9EB13D8F5F79CE1EB1", "category": "Office", "commute": "~20 min drive", "about": "What You'll Do As an Executive Assistant , you will provide executive-level administrative support to the VP of Financial Risk Management while partnering with the Corporate Actuarial community to support recruiting efforts, manage complex…", "trains": false}, {"id": "5761943180", "title": "General Labor", "company": "Aerotek", "location": "Bondurant, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Staffing agency", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/land/ad/5761943180?se=hN0YjyNn8RGrMLOjlx9mmg&utm_medium=api&utm_source=acd4afcf&v=B8C01A9C271E108E501EB8F13BBA2989D6112336", "category": "Production & labor", "commute": "~25 min drive", "about": "Job Title: General Laborer Job Description The General Laborer supports daily production by helping create custom concrete structures such as panels, flared ends, side walls, and custom forms in a fast-paced precast environment. You will…", "trains": false}, {"id": "5761943855", "title": "Senior Customer Service Representative", "company": "Wells Fargo", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Bank or insurance", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/land/ad/5761943855?se=fjo3kiNn8RGfB72z_DrYeQ&utm_medium=api&utm_source=acd4afcf&v=D28D7103DBDF629651502CB21AA470904A294B33", "category": "Customer service", "commute": "~20 min drive", "about": "About this role: Wells Fargo is seeking a Senior Customer Service Representative in our Commercial Banking Operations Division. Learn more about the career areas and business divisions at wellsfargojobs.com…", "trains": false}, {"id": "5761088438", "title": "Customer Service Representative", "company": "Wells Fargo Bank", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Bank or insurance", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/details/5761088438?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "Job Description At Wells Fargo, we are looking for talented people who will put our customers at the center of everything we do. It all begins with outstanding talent. It all begins with you. About this role: Wells Fargo is seeking a…", "trains": false}, {"id": "5761848630", "title": "Customer - Food Service - Overnight", "company": "Kwik Trip Inc", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Major local company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/details/5761848630?utm_medium=api&utm_source=acd4afcf", "category": "Food & cleaning", "commute": "~20 min drive", "about": "Already a Kwik Trip Coworker? Follow this link to apply: myapps.kwiktrip.com Location: Kwik Star 1086 Pay Range: $16.00 to $21.70 Shift: Overnights Actual pay will be based on various factors, such as a candidate’s qualifications, skills…", "trains": false}, {"id": "5762438912", "title": "Experience Specialist/Receptionist: Waukee Pediatrics", "company": "UnityPoint Health", "location": "Waukee, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Healthcare", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-13", "url": "https://www.adzuna.com/details/5762438912?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~15 min drive", "about": "UnityPoint Clinic Experience Specialist/Receptionist Waukee Pediatrics Monday 8:00AM-4:30PM, Tuesday OFF, Wednesday 7:30AM-4:30PM, Thursday 7:00AM-4:30PM, Friday 8:00AM-5:00PM Full Time Benefits As an Experience Specialist/Receptionist…", "trains": false}, {"id": "lvr-6e6f428f-f9e9-4b77-9c1c-cff93f5ab435", "title": "Bilingual Customer Service Representative", "company": "momsmeals", "location": "Des Moines, IA", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Major local company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "", "url": "https://jobs.lever.co/momsmeals/6e6f428f-f9e9-4b77-9c1c-cff93f5ab435/apply", "category": "Customer service", "commute": "~20 min drive", "about": "Mom’s Meals, the leading national provider of refrigerated home-delivered meals in the healthcare market, is looking for upbeat, people-first individuals to join our team as Bilingual Customer Service Representatives. In this role, you’ll…", "trains": false}, {"id": "lvr-d25e55f1-abc4-485f-8894-4a9fede50af6", "title": "Customer Service Representative", "company": "momsmeals", "location": "Des Moines, IA", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Major local company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "", "url": "https://jobs.lever.co/momsmeals/d25e55f1-abc4-485f-8894-4a9fede50af6/apply", "category": "Customer service", "commute": "~20 min drive", "about": "Mom’s Meals, the leading national provider of refrigerated home-delivered meals in the healthcare market, is looking for upbeat, people-first individuals to join our team as Customer Service Representatives. In this role, you’ll be one of…", "trains": false}, {"id": "lvr-03f0feb5-d720-402f-9d2e-153ec5a1c91c", "title": "Part-time Customer Service Representative", "company": "momsmeals", "location": "Des Moines, IA", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Major local company", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "", "url": "https://jobs.lever.co/momsmeals/03f0feb5-d720-402f-9d2e-153ec5a1c91c/apply", "category": "Customer service", "commute": "~20 min drive", "about": "Mom’s Meals, the leading national provider of refrigerated home-delivered meals in the healthcare market, is looking for upbeat, people-first individuals to join our team as Part-time Customer Service Representatives. In this role, you’ll…", "trains": false}, {"id": "wd-R254629", "title": "Sr Executive Assistant", "company": "Athene", "location": "West Des Moines, Iowa", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": true, "trustLabel": "Bank or insurance", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "", "url": "https://athene.wd5.myworkdayjobs.com/athene_careers/job/West-Des-Moines-Iowa/Sr-Executive-Assistant_R254629", "category": "Office", "commute": "~18 min drive", "about": "", "trains": false}, {"id": "gov-5365804", "title": "Administrative Support Assistant 2", "company": "State of Iowa", "location": "Des Moines, 50310, Polk County", "pay": "$17-$25/hr", "payNum": 17.29, "remote": false, "trusted": true, "trustLabel": "Government", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-04", "url": "https://www.governmentjobs.com/careers/iowa/jobs/5365804", "category": "Office", "commute": "~20 min drive", "about": "Applicants must meet at least one of the following minimum requirements to qualify for positions in this job classification: One year of full-time work experience in general office, clerical, data entry/processing, or related work.A total…", "trains": false}, {"id": "gov-5155731", "title": "Seasonal Cashier", "company": "City of Des Moines", "location": "Des Moines", "pay": "$14-$14/hr", "payNum": 13.5, "remote": false, "trusted": true, "trustLabel": "Government", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-04", "url": "https://www.governmentjobs.com/careers/desmoines/jobs/5155731", "category": "Store & retail", "commute": "~20 min drive", "about": "CPR and first aid certification required.Requires satisfactory criminal, sex offender and if applicable driving record background checks.Passing a pre-employment physical and drug screen is required prior to employment.", "trains": false}, {"id": "5753903852", "title": "Administrative Support Assistant 2", "company": "State of Iowa", "location": "Beaverdale, Polk County", "pay": "$17-$25/hr", "payNum": 17.29, "remote": false, "trusted": true, "trustLabel": "Government", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-05", "url": "https://www.adzuna.com/details/5753903852?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "", "about": "Job Description The Iowa Department of Health and Human Services (HHS), Division of Community Access, Bureau of Eligibility Determinations is seeking an Administrative Support Assistant 2 to join our team! Are you organized…", "trains": false}, {"id": "5739713264", "title": "Installer - Construction General Laborer", "company": "Groundworks", "location": "Des Moines, Polk County", "pay": "$19-$24/hr", "payNum": 19.23, "remote": false, "trusted": false, "trustLabel": "", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-05-24", "url": "https://www.adzuna.com/details/5739713264?utm_medium=api&utm_source=acd4afcf", "category": "Production & labor", "commute": "~20 min drive", "about": "Do you take pride in hands ‑ on work that delivers results you can see and stand behind? At Groundworks, North America's leader in foundation solutions, our Installers play a critical role in transforming homes and protecting what matters…", "trains": false}, {"id": "5742385564", "title": "Receptionist - State Farm Agent Team Member", "company": "Terry Taylor - State Farm Agent", "location": "Beaverdale, Polk County", "pay": "$19-$29/hr", "payNum": 19.23, "remote": false, "trusted": false, "trustLabel": "", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-05-27", "url": "https://www.adzuna.com/details/5742385564?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "", "about": "Benefits: Salary plus commission/bonus Group Life Insurance Benefits 401(k) Bonus based on performance Competitive salary Flexible schedule Health insurance Opportunity for advancement Paid time off Signing bonus Training & development…", "trains": false}, {"id": "5752937744", "title": "Executive Assistant", "company": "Federal Home Loan Bank of Des Moines", "location": "Des Moines, Polk County", "pay": "$32-$37/hr", "payNum": 31.51, "remote": false, "trusted": false, "trustLabel": "", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-05", "url": "https://www.adzuna.com/details/5752937744?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "At FHLB Des Moines, we work each day to develop an inclusive culture that supports and leverages the complexity of a diverse workforce. This enables us to effectively serve the needs of our members and help them succeed. Provide…", "trains": false}, {"id": "5761147231", "title": "Front Desk - Cosmetic Surgery Center (Training Provided!)", "company": "Sono Bello", "location": "Des Moines, Polk County", "pay": "$22-$27/hr", "payNum": 21.63, "remote": false, "trusted": false, "trustLabel": "", "good": true, "tagLabel": "Pays $19+/hr", "tagColor": "#1a7f37", "posted": "2026-06-12", "url": "https://www.adzuna.com/details/5761147231?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "Sono Bello is America's top cosmetic surgery specialist, with 185 board-certified surgeons who have performed over 300,000 laser liposuction and body contouring procedures. A career at Sono Bello means being part of a dynamic and…", "trains": false}, {"id": "5730047874", "title": "Customer Service Representative - Part-Time", "company": "XPO", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-15", "url": "https://www.adzuna.com/details/5730047874?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "What you’ll need to succeed as a Customer Service Representative at XPO Minimum qualifications: 2 years of customer service experience Strong computer, typing and 10-key skills Experience with Microsoft Office Available to work a variety…", "trains": false}, {"id": "5730929618", "title": "LEAD SALES ASSOCIATE-PT in URBANDALE, IA S21061", "company": "Dollar General", "location": "Urbandale, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-15", "url": "https://www.adzuna.com/land/ad/5730929618?se=3tQWlSNn8RGPL9oNLTnS9Q&utm_medium=api&utm_source=acd4afcf&v=00B1CBEEDB87C0D89F32BBBA3696EA4128772293", "category": "Store & retail", "commute": "~12 min drive", "about": "Work Where You Matter At Dollar General, our mission is Serving Others! We value each and every one of our employees. Whether you are looking to launch a new career in one of our many convenient Store locations, Distribution Centers, Store…", "trains": false}, {"id": "5731958434", "title": "Customer Service Representative - Part-Time", "company": "XPO, Inc.", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-16", "url": "https://www.adzuna.com/land/ad/5731958434?se=XEXNkCNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=2563C18B476C7440ACB9875AC1B435D69C5E925A", "category": "Customer service", "commute": "~20 min drive", "about": "Customer Service Representative - Part-Time Requisition Id: 387560 Business Unit: LTL Location: Des Moines, IA, US, 50313 What you'll need to succeed as a Customer Service Representative at XPO Minimum qualifications: 2 years of customer…", "trains": false}, {"id": "5731955225", "title": "LEAD SALES ASSOCIATE-FT in WEST DES MOINES, IA S24593", "company": "Dollar General", "location": "West Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-16", "url": "https://www.adzuna.com/land/ad/5731955225?se=3tQWlSNn8RGPL9oNLTnS9Q&utm_medium=api&utm_source=acd4afcf&v=9DB328356AFC44FD4CE65C4F7742F2DE6A1D8670", "category": "Store & retail", "commute": "~18 min drive", "about": "Work Where You Matter At Dollar General, our mission is Serving Others! We value each and every one of our employees. Whether you are looking to launch a new career in one of our many convenient Store locations, Distribution Centers, Store…", "trains": false}, {"id": "5736698959", "title": "Front Office Medical Phone Receptionist", "company": "West Des Moines OBGYN Associates, PC", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-21", "url": "https://www.adzuna.com/details/5736698959?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~15 min drive", "about": "Warm, outgoing, authentic, passionate and inspiring? Come join our team! OVERVIEW Answering phones in a professional manner, and routing calls as necessary Provide excellent customer service Schedule/Reschedule appointments for patients…", "trains": false}, {"id": "5735981783", "title": "Customer Service Representative - Des Moines, IA", "company": "Archer Daniels Midland Company ", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-21", "url": "https://www.adzuna.com/details/5735981783?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "Customer Service Representative - Des Moines, IA ADM Oilseeds This is a full time, non-exempt position MAIN FUNCTION: This individual will report to the Office Supervisor and is part of the commercial merchandising team at the location…", "trains": false}, {"id": "5737074987", "title": "Production Associate - Garment/Linen/Bulk Product Folder", "company": "Cintas", "location": "Carbondale, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-21", "url": "https://www.adzuna.com/land/ad/5737074987?se=6uSElyNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=4026107CC3B2441D870A7BB7D13E2F07074A53F9", "category": "Production & labor", "commute": "", "about": "Requisition Number: 226512 Job Description Cintas is seeking a Production Associate - Garment/Linen/Bulk Product Folder to support the Rental Division. The Product Folder is responsible for folding customer product manually or through the…", "trains": false}, {"id": "5737309729", "title": "Alterations Customer Service Representative", "company": "Davids Bridal", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-22", "url": "https://www.adzuna.com/land/ad/5737309729?se=fjo3kiNn8RGfB72z_DrYeQ&utm_medium=api&utm_source=acd4afcf&v=8ED17C26AFBE63C6A9ADFA4AA2627FC603D5DC7D", "category": "Customer service", "commute": "~15 min drive", "about": "The Alterations Customer Service Representative (CSR) is a critical role for the successful operation of the Alterations department and completing tasks that contribute to providing superior customer service. The (CSR) is responsible for…", "trains": false}, {"id": "5739293908", "title": "Production Associate - Mat Roller", "company": "Cintas", "location": "Carbondale, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-23", "url": "https://www.adzuna.com/land/ad/5739293908?se=6uSElyNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=184B99E6F232DC332529002CA9666CD1F123A665", "category": "Production & labor", "commute": "", "about": "Requisition Number: 226704 Job Description Cintas is seeking a Production Associate - Mat Roller support the Rental Division. The Mat Roller is responsible for evaluating the quality of cleaned customer floor mats, then safely placing into…", "trains": false}, {"id": "5739464341", "title": "Customer Service Representative", "company": "Composites One", "location": "Grimes, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-24", "url": "https://www.adzuna.com/details/5739464341?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~5 min drive", "about": "Begin your Composites One career today! Position Overview: As a Customer Service Representative, you will provide excellent care for our customers by serving as their primary point of contact. You will respond to customer inquiries, ensure…", "trains": false}, {"id": "5742836504", "title": "Cashier/Food Service Worker", "company": "Sodexo", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-27", "url": "https://www.adzuna.com/land/ad/5742836504?se=eFGHlSNn8RGfB72z_DrYeQ&utm_medium=api&utm_source=acd4afcf&v=C39D5B1F07AE5D8AFCFC1981D840FE8F2E304D7F", "category": "Store & retail", "commute": "~20 min drive", "about": "Cashier/Food Service Worker Location: BROADLAWNS MEDICAL CENTER - 56111001 Workdays/shifts _:_ Varying shifts, days/hours, and rotating weekends. More details will be provided during the interview process. Employment Type: Full-Time or…", "trains": false}, {"id": "5744084463", "title": "Executive Assistant", "company": "Oracle", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-28", "url": "https://www.adzuna.com/land/ad/5744084463?se=ZCZrjCNn8RGihJbKSHh3Mg&utm_medium=api&utm_source=acd4afcf&v=F567495C717B7085DC171536D4E510D5830F930E", "category": "Office", "commute": "~20 min drive", "about": "Job Description We are hiring a Senior Executive Assistant to support four Vice Presidents in a dynamic, fast-paced environment. The successful candidate will be a highly organized and proactive individual who can manage a wide range of…", "trains": false}, {"id": "5743333492", "title": "Customer Service Representative (Dispute Resolution)- Urbandale, IA", "company": "Msccn", "location": "Urbandale, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-28", "url": "https://www.adzuna.com/land/ad/5743333492?se=fjo3kiNn8RGfB72z_DrYeQ&utm_medium=api&utm_source=acd4afcf&v=9C115CFF218324A24D8C50671813B74CDA2C7253", "category": "Customer service", "commute": "~12 min drive", "about": "ATTENTION MILITARY AFFILIATED JOB SEEKERS - Our organization works with partner companies to source qualified talent for their open roles. The following position is available to Veterans, Transitioning Military, National Guard and Reserve…", "trains": false}, {"id": "5745077769", "title": "Part-Time Store Cashier/Stocker", "company": "ALDI", "location": "Ankeny, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-05-29", "url": "https://www.adzuna.com/land/ad/5745077769?se=3tQWlSNn8RGPL9oNLTnS9Q&utm_medium=api&utm_source=acd4afcf&v=60AA6CDB63A2DF8F02F4E3B68B6E4714B44AAEF8", "category": "Store & retail", "commute": "~18 min drive", "about": "ALDI is looking for enthusiastic part-time cashiers and stockers. As a cashier, you'll provide friendly, efficient checkout service, while as a stocker, you'll help keep shelves stocked and organized to ensure a great shopping experience…", "trains": false}, {"id": "gh-6007566004", "title": "Sales Associate (Part-Time) - Jordan Creek", "company": "ALO", "location": "Des Moines, Iowa, United States", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-02", "url": "https://boards.greenhouse.io/aloyoga/jobs/6007566004?gh_jid=6007566004", "category": "Store & retail", "commute": "~20 min drive", "about": "", "trains": false}, {"id": "5750344331", "title": "Medical Records Clerk", "company": "PainPoint Health", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-03", "url": "https://www.adzuna.com/details/5750344331?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~15 min drive", "about": "Medical Records Clerk Full-Time Schedule: Monday-Thursday, 7am-4pm & Friday 8am-1pm Location: West Des Moines, IA 50266 About Central States Pain Central States Pain Clinic (CSP) provides advanced interventional pain care across West Des…", "trains": false}, {"id": "5751604379", "title": "Substitute Secretary 2026-2027", "company": "Teach Iowa", "location": "Pleasant Hill, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-04", "url": "https://www.adzuna.com/details/5751604379?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~25 min drive", "about": "Position Type: Substitute Date Posted: 6/2/2026 Location: District-Wide District: Southeast Polk Community School District This is a general position listing and there may or may not be a specific opening at this time. If a position…", "trains": false}, {"id": "5752875337", "title": "1st Shift Loading General Labor", "company": "PDM Precast", "location": "Norwoodville, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-05", "url": "https://www.adzuna.com/details/5752875337?utm_medium=api&utm_source=acd4afcf", "category": "Production & labor", "commute": "", "about": "Reports to: Raw Materials Supervisor Position Summary: The loading crew’s primary responsibility is loading product for shipment. Adhere to PDM’s Core Values: Relationship Building: We foster long-term positive relationships with fellow…", "trains": false}, {"id": "5754940529", "title": "Executive Assistant", "company": "Cognizant", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-06", "url": "https://www.adzuna.com/land/ad/5754940529?se=7gdrhSNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=873B17DFE9F1285069634DF394D073A6EA5578DE", "category": "Office", "commute": "~20 min drive", "about": "About Cognizant Cognizant Corporate is a global community united by a shared purpose: to make a meaningful impact. We are committed to excellence and driven by outcomes that matter. Collaboration is at the heart of how we work, and our…", "trains": false}, {"id": "5754199024", "title": "Receptionist", "company": "FDI", "location": "Ankeny, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-06", "url": "https://www.adzuna.com/details/5754199024?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~18 min drive", "about": "Additional Considerations (if any): - At FDI, our small team atmosphere creates a great environment for our employees. Our team members are the key to our success by providing outstanding customer service. Florist Distributing, Inc. Job…", "trains": false}, {"id": "5754941692", "title": "Representative II, Customer Service - New Patient Care", "company": "Cardinal Health", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-06", "url": "https://www.adzuna.com/land/ad/5754941692?se=fjo3kiNn8RGfB72z_DrYeQ&utm_medium=api&utm_source=acd4afcf&v=A2C3E4BE189A41729A069B331E49704FD076AF23", "category": "Customer service", "commute": "~20 min drive", "about": "SHIFT: Monday-Friday, 8:30am-5pm EST, mandatory attendance daily for training is required. Once you have completed new hire training, you will take part in a shift bid to determine your permanent schedule moving forward. Shift bid schedule…", "trains": false}, {"id": "5754111730", "title": "Automotive BDC Customer Service Representative", "company": "Deery Brothers Chrysler Dodge Jeep Ram Waukee", "location": "Waukee, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-06", "url": "https://www.adzuna.com/details/5754111730?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~15 min drive", "about": "About Deery Brothers Chrysler Dodge Jeep Ram Waukee Deery Brothers Chrysler Dodge Jeep Ram Waukee is dedicated to delivering exceptional automotive experiences through outstanding customer service and professional sales support. Join our…", "trains": false}, {"id": "5754942046", "title": "Claims Call Center Representative", "company": "Zurich NA", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-06", "url": "https://www.adzuna.com/land/ad/5754942046?se=nm3ekiNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=21A835564321F70AFF829BB642E192E592C16EE9", "category": "Customer service", "commute": "~20 min drive", "about": "Claims Call Center Representative 134383 Zurich is a leading multi-line insurer that serves its customers in global and local markets. Zurich's customers include individuals, small businesses, and mid-sized and large companies, as well as…", "trains": false}, {"id": "5755358383", "title": "Regional Administrative Assistant", "company": "Autozone", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-07", "url": "https://www.adzuna.com/details/5755358383?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "Description As a Regional Administrative Assistant, you’ll be the organizational anchor for the Regional Team—streamlining operations, coordinating daily activities, and ensuring the team stays productive and aligned. This role requires…", "trains": false}, {"id": "5756855119", "title": "Retail Sales Associates", "company": "Verizon", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-08", "url": "https://www.adzuna.com/land/ad/5756855119?se=LvKRkyNn8RGihJbKSHh3Mg&utm_medium=api&utm_source=acd4afcf&v=DE9E4D7EDA1E0E8062923659F5E6D93A9E502516", "category": "Store & retail", "commute": "~20 min drive", "about": "When you join Verizon You want more out of a career. A place to share your ideas freely — even if they’re daring or different. Where the true you can learn, grow, and thrive. At Verizon, we power and empower how people live, work and play…", "trains": false}, {"id": "5756943289", "title": "Operations/Transportation Administrative Assistant", "company": "Teach Iowa", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-09", "url": "https://www.adzuna.com/details/5756943289?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "Position Type: Secretarial/Clerical/ Secretary Date Posted: 6/8/2026 Location: Transportation/Maintenance District: Marion Independent School District Marion Independent School District JOB TITLE: Administrative Assistant - Operations…", "trains": false}, {"id": "5757167788", "title": "Part Time Receptionist", "company": "Bob Brown Chevrolet", "location": "Urbandale, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-09", "url": "https://www.adzuna.com/details/5757167788?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~12 min drive", "about": "Bob Brown Auto is seeking a Part-Time Receptionist. Pay starting at $14.00/hour Hours are Tuesdays & Thursdays 4:00pm - 7:00pm and rotating Saturdays 8:00am - 6:00pm RESPONSIBILITIES Answer dealership group phones Greet and receive…", "trains": false}, {"id": "5757860380", "title": "Representative II, Customer Service Order Processing", "company": "Cardinal Health", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-09", "url": "https://www.adzuna.com/land/ad/5757860380?se=fjo3kiNn8RGfB72z_DrYeQ&utm_medium=api&utm_source=acd4afcf&v=73C210D0FBE1E668C876F1EE1CB1EBD2C1599123", "category": "Customer service", "commute": "~20 min drive", "about": "Shift Hours: Monday- Friday 11:30 am - 8:00 pm EST (remote) rotate Saturday's based on business need. _What Customer Service Operations contributes to Cardinal Health_ Customer Service is responsible for establishing, maintaining and…", "trains": false}, {"id": "5757860394", "title": "Production Associate - Builder/Material Handler", "company": "Cintas", "location": "Carbondale, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-09", "url": "https://www.adzuna.com/land/ad/5757860394?se=6uSElyNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=B430D422B20554BD696C589DDCEE56CF49130656", "category": "Production & labor", "commute": "", "about": "Requisition Number: 227919 Job Description Cintas is seeking a Production Associate - Builder/Material Handler to support the Rental Division. The Builder/Material Handler is responsible for accurately locating, counting, sorting and…", "trains": false}, {"id": "5757918044", "title": "General Laborer", "company": "Absolute Group", "location": "Granger, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-09", "url": "https://www.adzuna.com/details/5757918044?utm_medium=api&utm_source=acd4afcf", "category": "Production & labor", "commute": "~12 min drive", "about": "We are looking for General Laborers to join our Erosion Control Division. Laborers are responsible for a variety of labor duties, basic functions include jobsite preparation for soil erosion control and prevention, general landscaping…", "trains": false}, {"id": "5759381532", "title": "Front Desk Supervisor, Summer Seasonal, Jackson Lake Lodge, Grand Teton Lodge Co, WY", "company": "Vail Resorts", "location": "Moran, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5759381532?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "", "about": "Description This position is perfect for someone who has excellent customer service experience, is flexible and has a desire to learn and grow their career. Supervises and assists Front Desk Agents in helping guests with their stay at…", "trains": false}, {"id": "5758752539", "title": "Housekeeper", "company": "Merry Maids", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758752539?utm_medium=api&utm_source=acd4afcf", "category": "Food & cleaning", "commute": "~20 min drive", "about": "Company and Culture Merry Maids is a professional housecleaning company that offers the best cleaning solutions and customer service to our clients. As trusted in-home professionals, we form strong relationships with our clients and are…", "trains": true}, {"id": "5758168531", "title": "Customer Service Representative", "company": "SRS Distribution", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758168531?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "Position Purpose: The Customer Service Representative ensures customer satisfaction through effective service, strong relationship-building, and sales support. This role engages directly with walk-in customers, coordinates with sales…", "trains": false}, {"id": "5759474072", "title": "Campground Front Desk Agent, Summer Seasonal, Headwaters Lodge & Cabins at Flagg Ranch, WY", "company": "Vail Resorts", "location": "Moran, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5759474072?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "", "about": "Description Campground Front Desk Agent – Headwaters Campground at Flagg Ranch This job is great for someone who enjoys living, working, and camping in the National Parks and wants to share their passion with our guests. This position is…", "trains": false}, {"id": "5759438021", "title": "Front Desk Agent, Summer Seasonal, Jackson Lake Lodge, Grand Teton Lodge Company, WY", "company": "Vail Resorts", "location": "Moran, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5759438021?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "", "about": "Description This is a great job for those who enjoy working directly with guests to make their vacation in Grand Teton National Park an experience of a lifetime! RESPONSIBLE FOR: Providing a warm welcome to guests entering the Lodge…", "trains": false}, {"id": "5758855374", "title": "Retail Sales Associate-Southridge Plaza", "company": "Bath and Body Works", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758855374?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~20 min drive", "about": "Description Career Development | Medical, Dental and Vision Benefits | 40% Discount | Daily or Weekly Pay | Fun Stores At Bath & Body Works, everyone belongs. We are committed to creating a culture of belonging focused on delivering…", "trains": false}, {"id": "5758789246", "title": "Retail Sales Associate-Water Tower Place Shopping C", "company": "Bath and Body Works", "location": "Windsor Heights, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758789246?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~18 min drive", "about": "Description Career Development | Medical, Dental and Vision Benefits | 40% Discount | Daily or Weekly Pay | Fun Stores At Bath & Body Works, everyone belongs. We are committed to creating a culture of belonging focused on delivering…", "trains": false}, {"id": "5758897825", "title": "Customer Service Representative", "company": "U-Haul International, Inc.", "location": "Norwoodville, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758897825?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "", "about": "Assist customers inside and outside a U-Haul center with U-Haul products and services. Use smartphone-based U-Scan technology to manage rentals and inventory. Move and hook up U-Haul trucks and trailers. Clean and inspect equipment on the…", "trains": false}, {"id": "5758832785", "title": "Customer Service Representative", "company": "U-Haul", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758832785?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~15 min drive", "about": "Return to Job Search Customer Service Representative Are you a people person? Do you love helping others? U-Haul is in search of friendly, motivated people for the position of Customer Service Representative. As a Customer Service…", "trains": false}, {"id": "5758809582", "title": "Customer Service Representative", "company": "Housby Mack, Inc.", "location": "Saydel, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758809582?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "", "about": "FLSA STATUS: Non-E xempt DEPARTMENT: Body & Paint Shop PRIMARY PURPOSE: The Customer Service Representative is responsible for communicating between customers and the Housby team, ensuring a smooth process from initial contact to…", "trains": false}, {"id": "5758754408", "title": "Customer Service Rep(1712) Adel Iowa", "company": "Domino's Pizza", "location": "Adel, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758754408?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~15 min drive", "about": "Company Description Large Brand with a small Franchise building stores in towns of Iowa. looking for part-time, full-time or a career, we have positions for you. Job Description ABOUT THE JOB You got game? You got spring in your step? You…", "trains": false}, {"id": "5759295294", "title": "Retail Sales Associate", "company": "Best Buy", "location": "West Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5759295294?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~18 min drive", "about": "As a Retail Sales Associate, you'll be the face of Best Buy for customers who visits our stores. We'll train you with the skills and knowledge you need to confidently recommend the right tech products and services to meet each person's…", "trains": true}, {"id": "5759282716", "title": "Retail Sales Associate - Part Time", "company": "AutoZone, Inc.", "location": "Waukee, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/land/ad/5759282716?se=LvKRkyNn8RGihJbKSHh3Mg&utm_medium=api&utm_source=acd4afcf&v=6AFE8A8EED8AC4DDDB62DE24F6554A947E302036", "category": "Store & retail", "commute": "~15 min drive", "about": "Job Description AutoZone's store teams are the frontline of WOW! Customer Service, ensuring that customers find the right parts and solutions for their automotive needs. Store employees maintain well-stocked inventory, assist customers…", "trains": false}, {"id": "5758962320", "title": "Retail Sales Associate Full Time", "company": "PetSmart", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758962320?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~15 min drive", "about": "PetSmart does Anything for Pets - JOIN OUR TEAM! Retail Sales Associate Full Time About Life at PetSmart At PetSmart, Anything for Pets begins with our people. Every associate plays a vital role in creating meaningful experiences for pets…", "trains": false}, {"id": "5758946566", "title": "Retail Sales Associate - Part Time", "company": "Burlington", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758946566?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~20 min drive", "about": "If you want an exciting job with one of the largest off-price retail stores in the nation, join the Burlington Stores, Inc. as a Retail Sales Associate! Are you an outgoing, upbeat, people-person with great organizational skills? Would you…", "trains": false}, {"id": "5758824190", "title": "Retail Sales Associate - Part Time", "company": "Autozone", "location": "Waukee, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758824190?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~15 min drive", "about": "Job Description \\n AutoZone's store teams are the frontline of WOW! Customer Service, ensuring that customers find the right parts and solutions for their automotive needs. Store employees maintain well-stocked inventory, assist customers…", "trains": false}, {"id": "5758779449", "title": "Retail Sales Associate Full Time", "company": "PetSmart", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758779449?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~20 min drive", "about": "PetSmart does Anything for Pets - JOIN OUR TEAM! Retail Sales Associate Full Time About Life at PetSmart At PetSmart, Anything for Pets begins with our people. Every associate plays a vital role in creating meaningful experiences for pets…", "trains": false}, {"id": "5758755157", "title": "Retail Sales Associate - Part Time", "company": "AutoZone, Inc.", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758755157?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~15 min drive", "about": "AutoZone's store teams are the frontline of WOW! Customer Service, ensuring that customers find the right parts and solutions for their automotive needs. Store employees maintain well-stocked inventory, assist customers with product…", "trains": false}, {"id": "5759282385", "title": "Part-Time Parking Cashier", "company": "ABM Industries", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/land/ad/5759282385?se=KBmJlCNn8RG0btGxqHH3qw&utm_medium=api&utm_source=acd4afcf&v=3CB5813375B3ED7A9E7E9CA795600C83D09CCB09", "category": "Store & retail", "commute": "~20 min drive", "about": "Overview REQNUMBER: 156657 ABM is proud to be an Equal Opportunity Employer qualified applicants without regard race, color, religion, sex, sexual orientation, gender identity, national origin, disability, or status as a protected veteran…", "trains": false}, {"id": "5759239019", "title": "Retail Customer Service Cashier", "company": "Loves Travel Stops & Country Store", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5759239019?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "Req ID: 483747 Benefits: * Fuel Your Growth with Love's - company funded tuition assistance program * Paid Time Off * Flexible Scheduling * 401(k) – 100% Match up to 5% * Medical/Dental/Vision Insurance after 30 days * Competitive Pay *…", "trains": false}, {"id": "5759282864", "title": "FOOD SERVICE WORKER (PART TIME)", "company": "Compass Group, North America", "location": "Grimes, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/land/ad/5759282864?se=eFGHlSNn8RGfB72z_DrYeQ&utm_medium=api&utm_source=acd4afcf&v=2040E75122DDC3D4550938971C8F73371BCA8779", "category": "Food & cleaning", "commute": "~5 min drive", "about": "Chartwells K12 We are hiring immediately for part time FOOD SERVICE WORKER positions. Location : Dallas Center Grimes - 2405 West 1st Street, Grimes, IA 50111. _Note: online applications accepted_ _only_ _._ Schedule : Part time schedules…", "trains": false}, {"id": "5758892807", "title": "Housekeeper House Cleaner", "company": "The Cleaning Authority", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758892807?utm_medium=api&utm_source=acd4afcf", "category": "Food & cleaning", "commute": "~15 min drive", "about": "The Cleaning Authority is hiring for immediate FULL or PART time residential cleaning housekeeping positions. $380 to $460 Per Week (Plus Tips) - Pay May Be Higher Based on Experience - Full Time Hours Available - Paid Weekly. This is a…", "trains": false}, {"id": "5758319894", "title": "Housekeeper", "company": "Healthcare Services Group, Inc.", "location": "South Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758319894?utm_medium=api&utm_source=acd4afcf", "category": "Food & cleaning", "commute": "~20 min drive", "about": "Role: Housekeeper Join Healthcare Services Group (HCSG) as a Housekeeper, where you will play a vital role in maintaining a clean and safe environment in a long-term care facility. At HCSG, we are passionate about positively impacting the…", "trains": false}, {"id": "5758035711", "title": "Plant Sweeper/Janitor", "company": "Liberty Tire Recycling", "location": "Saydel, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758035711?utm_medium=api&utm_source=acd4afcf", "category": "Food & cleaning", "commute": "", "about": "About Us: Liberty Tire Recycling is a high-growth company and the premier provider of tire recycling services in North America with operations throughout the United States and Canada. Liberty Tire annually transforms more than 210 million…", "trains": false}, {"id": "5760749133", "title": "Executive Assistant - GM Defense", "company": "General Motors", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/land/ad/5760749133?se=7gdrhSNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=C572E60AABDA4C328B4FC4A97A55956FEB132069", "category": "Office", "commute": "~20 min drive", "about": "Job Description Remote: This role is based remotely from the United States. Must be available and able to travel worldwide, including to Washington DC, Warren, Milford, Michigan and other customer locations as needed. The Role: We are…", "trains": false}, {"id": "5760748896", "title": "Administrative Assistant", "company": "PDS Tech Commercial", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/land/ad/5760748896?se=7gdrhSNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=7D32B2175B1194A05B4F7C04D1723D2D1D8960AC", "category": "Office", "commute": "~20 min drive", "about": "Launch Your Career from Anywhere: Remote Administrative Assistant (Finance-Focused) in Aviation PDS Tech Commercial is partnering with a leading aviation industry organization to identify a detail-oriented and proactive Administrative…", "trains": false}, {"id": "5760748962", "title": "Customer Service Associate", "company": "Raising Cane's", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/land/ad/5760748962?se=LvKRkyNn8RGihJbKSHh3Mg&utm_medium=api&utm_source=acd4afcf&v=D60BCA7352BFDC79D8104F1506FD0EB737A4CB59", "category": "Customer service", "commute": "~20 min drive", "about": "Starting hiring pay at: $15.00 As an important part of our team, Customer Service Associates impact all areas of the customer experience. As the name suggests, your main priority is to provide great customer service. In this role, you will…", "trains": false}, {"id": "5759736152", "title": "Retail Sales Associate – Part Time", "company": "Autozone", "location": "Waukee, Dallas County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759736152?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~15 min drive", "about": "Description AutoZone’s store teams are the frontline of WOW! Customer Service, ensuring that customers find the right parts and solutions for their automotive needs. Store employees maintain well-stocked inventory, assist customers with…", "trains": false}, {"id": "5759639793", "title": "Senior Retail Sales Associate (Full Time)", "company": "AutoZone, Inc.", "location": "South Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759639793?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~20 min drive", "about": "Provides WOW! Customer Service Ensures assigned store tasks are completed in a timely manner on assigned shift Operates cash registers and follows established cash handling procedures Follows company policies and loss prevention procedures…", "trains": false}, {"id": "5759632444", "title": "Retail Associate", "company": "Ross Stores, Inc", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759632444?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~20 min drive", "about": "Our values start with our people, join a team that values you! Bring your talents to Ross, our leading off-price retail chain with over 2,200 stores, and a strong track record of success and growth. Our focus has always been bringing our…", "trains": false}, {"id": "5759618982", "title": "Cashier- Nights/ Weekends", "company": "Scheels All Sports", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759618982?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~15 min drive", "about": "Do you love sports, fitness, fashion or the outdoors? SCHEELS can turn your passion into a rewarding career through our extensive business and product training. SCHEELS is a leader in the sporting goods industry - driven to create the best…", "trains": false}, {"id": "5760749079", "title": "Housekeeper", "company": "Marriott", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/land/ad/5760749079?se=nl3CliNn8RGJNOs5ynNQjw&utm_medium=api&utm_source=acd4afcf&v=0D3B999AAEB468C646AE54B2BF4184207EEB5A83", "category": "Food & cleaning", "commute": "~15 min drive", "about": "Additional Information Must be available Sunday, weekly pay, employee rates at Marriott, Day Shift Job Number 26070959 Job Category Housekeeping & Laundry Location 1520 NW 114th St, Clive, Iowa, United States, 50325 VIEW ON MAP…", "trains": false}, {"id": "5759800680", "title": "Housekeeper - 8 to 12 Week Assignment", "company": "WesleyLife Career", "location": "Beaverdale, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759800680?utm_medium=api&utm_source=acd4afcf", "category": "Food & cleaning", "commute": "", "about": "At WesleyLife, we believe everyone should have the opportunity to live a life of continued growth, experience, and meaning — and to pursue joy, regardless of physical, social, or economic circumstances. That applies to the people we serve…", "trains": false}, {"id": "5759632902", "title": "Warehouse - Laborer", "company": "EFCO Formwork Solutions", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759632902?utm_medium=api&utm_source=acd4afcf", "category": "Production & labor", "commute": "~20 min drive", "about": "Purpose The warehouse laborer cleans, prepares, and maintains EFCO’s equipment and work areas to support efficient painting, assembly, and warehouse operations. EFCO Culture & Safety Statement Act with Integrity by demonstrating honesty…", "trains": false}, {"id": "5759610024", "title": "Hotel Housekeeper/Room Attendant", "company": "Arbor Lodging", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759610024?utm_medium=api&utm_source=acd4afcf", "category": "Food & cleaning", "commute": "~15 min drive", "about": "Arbor Lodging is a leading hotel investment and management company with a growing portfolio of hotels throughout the United States, Mexico, and the Caribbean. We have been entrusted by numerous partners and are approved managers for…", "trains": false}, {"id": "5761206086", "title": "Front Office Manager", "company": "Marriott", "location": "Johnston, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/details/5761206086?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~12 min drive", "about": "TownePlace Suites by Marriott – Urbandale, Iowa TownePlace Suites Urbandale is seeking an enthusiastic and service-driven Front Office Manager to lead our front desk team and ensure every guest receives an exceptional experience from…", "trains": false}, {"id": "5761401471", "title": "Customer Service Rep(01725) - 1002 National Dr", "company": "Domino's Pizza", "location": "Norwoodville, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/details/5761401471?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "", "about": "Company Description Job Description Come Work for 1 Pizza Company in the world! Join our team, apply today! As a Customer Service Representative, you'll ensure positive experiences for Domino's customers by handling calls, online orders…", "trains": false}, {"id": "5761177794", "title": "Mortgage Customer Service Representative- Tax/Escrow/PMI", "company": "Iowa Bankers", "location": "Johnston, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/details/5761177794?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~12 min drive", "about": "The Mortgage Customer Service Representative assists in the Tax/Escrow area by performing the following duties: Tax · Research, review and prepare property tax payment files. · Pay individual property tax parcels. · Responds to emails sent…", "trains": false}, {"id": "5761943959", "title": "Call Center Representative III", "company": "Trustmark", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/land/ad/5761943959?se=nm3ekiNn8RG5GpwkRXC5CA&utm_medium=api&utm_source=acd4afcf&v=D3C82A1A7F716140137D785508858F22878B1809", "category": "Customer service", "commute": "~20 min drive", "about": "Trustmark's mission is to improve wellbeing - for everyone. It is a mission grounded in a belief in equality and born from our caring culture. It is a culture we can only realize by building trust. Trust established by ensuring associates…", "trains": false}, {"id": "5760936232", "title": "Retail Sales Associates Spanish Bilingual", "company": "Verizon", "location": "Des Moines, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/land/ad/5760936232?se=LvKRkyNn8RGihJbKSHh3Mg&utm_medium=api&utm_source=acd4afcf&v=99160FDB6FA961489637C9699EC5085CE534D992", "category": "Store & retail", "commute": "~20 min drive", "about": "When you join Verizon You want more out of a career. A place to share your ideas freely — even if they’re daring or different. Where the true you can learn, grow, and thrive. At Verizon, we power and empower how people live, work and play…", "trains": false}, {"id": "5761146490", "title": "Housekeeper", "company": "Marriott Hotels Resorts", "location": "Clive, Polk County", "pay": "Pay not listed", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Pay not listed", "tagColor": "#5b6470", "posted": "2026-06-12", "url": "https://www.adzuna.com/land/ad/5761146490?se=nl3CliNn8RGJNOs5ynNQjw&utm_medium=api&utm_source=acd4afcf&v=CB796D629D23BF492799CB5AAFD93F68645AAE1B", "category": "Food & cleaning", "commute": "~15 min drive", "about": "Description POSITION SUMMARY Our jobs aren’t just about giving guests a clean room and a freshly made bed. Instead, we want to build an experience that is memorable and unique. Our Guest Environment Experts are skilled in a wide range of…", "trains": false}, {"id": "5730264027", "title": "Part Time Bilingual Patient Access Rep I - University Dental", "company": "Primary Health Care Inc", "location": "Des Moines, Polk County", "pay": "$16-$23/hr", "payNum": 15.5, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-05-15", "url": "https://www.adzuna.com/details/5730264027?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "As a Patient Access Representative I, you will be responsible for ensuring a positive and seamless experience for patients and visitors at the front desk of PHC medical or dental clinics. You will be the first point of contact, providing…", "trains": false}, {"id": "5730197097", "title": "Part Time Bilingual Patient Access Rep I - PHC @ Mercy", "company": "Primary Health Care Inc", "location": "Des Moines, Polk County", "pay": "$16-$23/hr", "payNum": 15.5, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-05-15", "url": "https://www.adzuna.com/details/5730197097?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "As a Patient Access Representative I, you will be responsible for ensuring a positive and seamless experience for patients and visitors at the front desk of PHC medical or dental clinics. You will be the first point of contact, providing…", "trains": false}, {"id": "5734487796", "title": "General Laborer", "company": "ARK Distributing", "location": "Clive, Polk County", "pay": "$19-$37/hr", "payNum": 18.75, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-05-19", "url": "https://www.adzuna.com/details/5734487796?utm_medium=api&utm_source=acd4afcf", "category": "Production & labor", "commute": "~15 min drive", "about": "We are seeking dedicated and hardworking Laborers to join our team in a fast-paced facility. The ideal candidates will be responsible for various tasks that support the setup and display of small modular equipment. This role requires a…", "trains": false}, {"id": "5745466175", "title": "Customer Service Representative", "company": "Apex Service Partners", "location": "Des Moines, Polk County", "pay": "$18-$21/hr", "payNum": 18.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-05-30", "url": "https://www.adzuna.com/details/5745466175?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "At Holt, we believe great work starts with great people. We know our success is powered by the people behind the tools. We focus on creating a culture built on teamwork, trust and pride in a job well done. We work hard and have fun doing…", "trains": false}, {"id": "5753516904", "title": "Receptionist", "company": "Spee-Dee Delivery Service", "location": "Saydel, Polk County", "pay": "$18-$20/hr", "payNum": 18.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-05", "url": "https://www.adzuna.com/details/5753516904?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "", "about": "Company Overview Spee Dee Delivery is a family owned and operated company that was started in 1978 by Donald and Sylvia Weeres. Our core business is in standard, next-day, ground delivery. The corporate headquarters and main sort facility…", "trains": false}, {"id": "5752946538", "title": "Seasonal PT Receptionist", "company": "Willis Automotive", "location": "Clive, Polk County", "pay": "$15-$15/hr", "payNum": 15.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-05", "url": "https://www.adzuna.com/details/5752946538?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~15 min drive", "about": "Weekdays shifts from 11:00am-2:00pm. Monday, Wednesday, and Thursday shifts 4:30pm-8pm. Saturdays 9am-5pm. Willis Automotive is a family and locally owned automotive group located in Des Moines, IA. We carry INFINITI, Cadillac, Lexus, MINI…", "trains": false}, {"id": "5753000247", "title": "Customer Service Representative - Salty Paws Pet Salon", "company": "Best Friends Pet Care", "location": "Ankeny, Polk County", "pay": "$15-$16/hr", "payNum": 15.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-05", "url": "https://www.adzuna.com/details/5753000247?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~18 min drive", "about": "Description Our Customer Service Representatives are passionate animal lovers who provide our human and pet guests with “wow” service. Our CSRs are our first points of contact with our guests and are focused on building great…", "trains": false}, {"id": "5755089629", "title": "Bilingual Call Center Representative - PHC Administrative Office", "company": "Primary Health Care Inc", "location": "Des Moines, Polk County", "pay": "$17-$26/hr", "payNum": 17.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-07", "url": "https://www.adzuna.com/details/5755089629?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~20 min drive", "about": "As a Call Center Representative, you will answer incoming calls to the call center to ensure efficient and effective patient communication and scheduling for PHC’s medical and dental clinics. You will provide excellent customer service…", "trains": false}, {"id": "5756817800", "title": "Customer Service Representative", "company": "SBM Management Services", "location": "Altoona, Polk County", "pay": "$16-$17/hr", "payNum": 16.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-08", "url": "https://www.adzuna.com/details/5756817800?utm_medium=api&utm_source=acd4afcf", "category": "Customer service", "commute": "~25 min drive", "about": "Title: Customer Service Representative Job Description: Job Overview The Customer Service Representative will be responsible for the cleanliness and sanitation of all areas assigned. Roles & Responsibilities To perform this job…", "trains": false}, {"id": "5758297712", "title": "Retail Associates", "company": "Hobby Lobby Careers", "location": "Beaverdale, Polk County", "pay": "$16-$17/hr", "payNum": 16.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-10", "url": "https://www.adzuna.com/details/5758297712?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "", "about": "Immediate Openings! We are currently accepting applications for part-time positions! We offer exciting career opportunities for bright, energetic and talented individuals in a stimulating, fast-paced and team-oriented culture. Hobby Lobby…", "trains": false}, {"id": "5760130692", "title": "Receptionist - State Farm Agent Team Member", "company": "Corey Chancellor - State Farm Agent", "location": "South Des Moines, Polk County", "pay": "$15-$22/hr", "payNum": 15.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5760130692?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "Benefits: Hiring bonus 401(k) Bonus based on performance Competitive salary Health insurance Opportunity for advancement Paid time off Training & development ROLE DESCRIPTION: Corey Chancellor - State Farm Agent is a leading insurance…", "trains": false}, {"id": "5759706180", "title": "Retail Store Sales Associate (Part-Time) - Christopher & Banks", "company": "Simplify Inventions", "location": "Ankeny, Polk County", "pay": "$0-$13/hr", "payNum": 0.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-11", "url": "https://www.adzuna.com/details/5759706180?utm_medium=api&utm_source=acd4afcf", "category": "Store & retail", "commute": "~18 min drive", "about": "Job description Founded in 1956, the Christopher & Banks motto is Effortless Style for Real Life. This Brand specializes in offering women’s value-priced apparel and accessories that cater to women of all sizes…", "trains": false}, {"id": "5760940531", "title": "Dealership Admin Assistant", "company": "Lithia & Driveway", "location": "Des Moines, Polk County", "pay": "$17-$19/hr", "payNum": 17.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-12", "url": "https://www.adzuna.com/details/5760940531?utm_medium=api&utm_source=acd4afcf", "category": "Office", "commute": "~20 min drive", "about": "Dealership: L0652 Iowa Finance Center Dealership Admin Assistant The Dealership Admin performs a variety of administrative tasks for the purpose of supporting financial processing and control efforts. This role reports to the Business…", "trains": false}, {"id": "5762334025", "title": "Housekeeping/Floor Specialist Full-time (3 days 7a-3:30p/2 days 11:30a-8p EOW)", "company": "Trinity Center", "location": "South Des Moines, Polk County", "pay": "$15-$17/hr", "payNum": 15.0, "remote": false, "trusted": false, "trustLabel": "", "good": false, "tagLabel": "Under $19/hr", "tagColor": "#a04100", "posted": "2026-06-13", "url": "https://www.adzuna.com/details/5762334025?utm_medium=api&utm_source=acd4afcf", "category": "Food & cleaning", "commute": "~20 min drive", "about": "Luther Park Community has an opening for a real go-getter, self starter housekeeper that works very well as part of a team but is responsible for their own work. Our Housekeeping crew works independently, each having their own assignments…", "trains": false}];
+const META = {"contact": "Brady", "phone": "", "generated": "2026-06-13 12:30", "hidden": 63, "total": 201};
+const PORTAL = {"url": "https://tcclohxvhmwgjrtdkkuw.supabase.co", "key": "sb_publishable_uO2sa5Zt6FdYq-60gcvl3g_3XYNR6Dj"};   // {url, key(publishable)} or null when not configured
+const LS = "myjobs:v1";
+function load(){ try{return JSON.parse(localStorage.getItem(LS))||{}}catch(e){return {}} }
+function save(s){ try{localStorage.setItem(LS, JSON.stringify(s))}catch(e){} }
+function today(){ return new Date().toISOString().slice(0,10); }
+function daysSince(d){ const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
+  return isNaN(t) ? null : Math.max(0, Math.floor((Date.now()-t)/864e5)); }
+function ago(d){ const n=daysSince(d); if(n==null) return "";
+  if(n===0) return "today"; if(n===1) return "yesterday";
+  if(n<14) return n+" days ago"; return Math.round(n/7)+" weeks ago"; }
+
+let state = load();
+// applied used to be an array of ids; it's now a map id -> date applied.
+if(Array.isArray(state.applied)){ const m={}; state.applied.forEach(id=>m[id]=today()); state.applied=m; }
+state.applied = state.applied || {};
+state.saved   = new Set(state.saved||[]);
+state.hidden  = new Set(state.hidden||[]);
+state.notes   = state.notes || {};
+state.coachOff = !!state.coachOff;
+state.snooze  = state.snooze || {};          // id -> "come back on" date (gentler than Hide)
+state.appliedLog = state.appliedLog || {};   // id -> {t,c,d,u} captured at apply time, so the
+                                             // work-search log survives jobs leaving the feed
+state.profile = state.profile || {};         // quiz answers -> "For you" feed boost
+const prevSeen = new Set(state.seen||[]);
+function persist(){ save({applied:state.applied, saved:[...state.saved], hidden:[...state.hidden],
+  notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff,
+  snooze:state.snooze, appliedLog:state.appliedLog, profile:state.profile}); }
+// Ledger backfill: any applied job still in today's feed gets its details kept.
+JOBS.forEach(j=>{ if(state.applied[j.id] && !state.appliedLog[j.id])
+  state.appliedLog[j.id]={t:j.title,c:j.company,d:state.applied[j.id],u:j.url}; });
+
+// "New since your last visit": anything not on the page they saw last time.
+// On the very first visit nothing is badged (everything would be "new").
+const firstVisit = prevSeen.size===0;
+const isNew = {};
+JOBS.forEach(j=>{ if(!firstVisit && !prevSeen.has(j.id)) isNew[j.id]=true; });
+const newCount = Object.keys(isNew).length;
+persist();
+
+const openNotes = new Set();
+let filters = { q:"", cat:"", pay:false, inperson:false, remote:false, known:false,
+                saved:false, applied:false, showHidden:false, trains:false };
+function snoozedNow(id){
+  const until = state.snooze[id];
+  return until && until > today();           // ISO dates compare as strings
+}
+
+const CHIPS = [
+  ["trains","Will train ✦"], ["pay","$19+/hr"], ["inperson","In person"],
+  ["remote","Work from home"], ["known","Verified employer"], ["saved","Saved"],
+  ["applied","Applied"], ["showHidden","Hidden"],
+];
+const CATS = [...new Set(JOBS.map(j=>j.category).filter(Boolean))];
+const IC = {
+  pin:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21s-6.5-5.7-6.5-10.5a6.5 6.5 0 0113 0C18.5 15.3 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.3"/></svg>',
+  home:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
+  bldg:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2"/></svg>',
+  check:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.5 2.5 5-5"/></svg>',
+  bookmark:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>',
+  eye:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="2.5"/></svg>',
+  arrow:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>',
+  car:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>',
+  pen:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 013 3L8 19z"/></svg>',
+  share:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v8h14v-8"/></svg>',
+};
+
+function esc(s){return String(s==null?"":s).replace(/[&<>"'`]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c];});}
+function safeUrl(u){try{var p=new URL(u,location.href);return (p.protocol==="http:"||p.protocol==="https:")?p.href:"#";}catch(e){return "#";}}
+
+function matches(j){
+  if(!filters.showHidden && state.hidden.has(j.id)) return false;
+  if(filters.showHidden && !state.hidden.has(j.id)) return false;
+  if(!filters.showHidden && snoozedNow(j.id)) return false;   // "Not today" naps
+  if(filters.q){
+    const q=filters.q.toLowerCase();
+    if(!((j.title+" "+j.company+" "+j.location).toLowerCase().includes(q))) return false;
+  }
+  if(filters.cat && j.category!==filters.cat) return false;
+  if(filters.pay && !j.good) return false;
+  if(filters.inperson && j.remote) return false;
+  if(filters.remote && !j.remote) return false;
+  if(filters.known && !j.trusted) return false;
+  if(filters.saved && !state.saved.has(j.id)) return false;
+  if(filters.applied && !(j.id in state.applied)) return false;
+  if(filters.trains && !j.trains) return false;
+  return true;
+}
+
+/* "For you": quiz answers gently float matching jobs upward inside the
+   scanner's trust-first order. A boost, never a burial — base order is kept
+   as the tiebreaker (invariant: never bury "Pay not listed" or low scorers). */
+function forYouScore(j){
+  const p = state.profile; let s = 0;
+  if(p.kind){
+    const k = j.category||"";
+    if(p.kind==="people" && (k==="Customer service"||k==="Store & retail")) s+=2;
+    if(p.kind==="quiet"  && (k==="Office"||k==="Production & labor")) s+=2;
+    if(p.kind==="hands"  && (k==="Production & labor"||k==="Food & cleaning")) s+=2;
+    if(p.kind==="care"   && k==="Caregiving") s+=2;
+  }
+  if(p.where==="home" && j.remote) s+=2;
+  if(p.where==="out" && !j.remote) s+=1;
+  if(p.confidence==="low" && j.trains) s+=2;      // "will train" first when feeling shaky
+  if(p.pay==="must" && j.good) s+=1;
+  return s;
+}
+function orderForYou(list){
+  if(!Object.keys(state.profile).length) return list;
+  return list.map((j,i)=>[forYouScore(j), -i, j])
+             .sort((a,b)=> b[0]-a[0] || b[1]-a[1])
+             .map(x=>x[2]);
+}
+
+function render(){
+  const good = JOBS.filter(j=>j.good).length;
+  document.getElementById("summary").textContent =
+    JOBS.length + " safe jobs · every one scam-checked, no degree needed" +
+    (newCount ? " · " + newCount + " new" : "") +
+    " · updated " + META.generated;
+  const ap = Object.keys(state.applied).length;
+  const wk = appsThisWeek();
+  const prog = document.getElementById("progress");
+  prog.innerHTML = ap ? (IC.check + "You've applied to " + ap + (ap===1?" job":" jobs") +
+    (wk ? " · " + wk + " this week" : "")) : "";
+
+  // Jobs are pre-sorted by the scanner: verified employers first, then $19+,
+  // then newest. "For you" (quiz) only nudges within that — never buries.
+  const list = orderForYou(JOBS.filter(matches));
+
+  document.getElementById("count").textContent =
+    list.length + (filters.showHidden?" hidden ":" ") + (list.length===1?"job":"jobs");
+
+  const wrap = document.getElementById("list");
+  wrap.innerHTML = "";
+  const empty = document.getElementById("empty");
+  empty.hidden = list.length>0;
+  if(!list.length){ empty.innerHTML = IC.eye + "<div>No jobs match. Turn off a filter to see more.</div>"; }
+
+  list.forEach(function(j,i){ wrap.appendChild(cardEl(j,i)); });
+  renderPicks(); renderApps(); renderCorner();
+}
+
+function callScriptHTML(j, appliedOn){
+  // A word-for-word script takes the fear out of the follow-up call.
+  const when = ago(appliedOn) || "recently";
+  return '<details class="script"><summary>'+IC.pen+' What do I say if I call?</summary>'+
+    '<blockquote>&ldquo;Hi! My name is ____. I applied for the '+esc(j.title)+
+    ' job '+esc(when)+', and I wanted to check if it&rsquo;s still open and if you need anything else from me.'+
+    ' Thank you!&rdquo;</blockquote>'+
+    '<p style="margin:6px 0 0;font-size:13px;color:var(--ink2)">That&rsquo;s the whole call. Short is perfect. If voicemail, say the same thing plus your phone number.</p>'+
+    '</details>';
+}
+
+function cardEl(j, i){
+  const appliedOn = state.applied[j.id], applied = !!appliedOn, saved = state.saved.has(j.id);
+  const note = state.notes[j.id] || "";
+  const appliedDays = applied ? daysSince(appliedOn) : null;
+  const payCls = j.good ? "good" : "none";
+  const verified = j.trusted
+    ? '<span class="verified">'+IC.check+'Verified'+(j.trustLabel?' — '+esc(j.trustLabel):' employer')+'</span>'
+    : '<span></span>';
+  const where = j.remote ? (IC.home+"Work from home") : (IC.bldg+"In person");
+  const postedDays = daysSince(j.posted);
+  const snoozed = snoozedNow(j.id);
+  const el = document.createElement("div");
+  el.className = "card";
+  el.style.animationDelay = (Math.min(i,12)*0.025)+"s";
+  el.innerHTML =
+    '<div class="cardtop"><span class="pillrow"><span class="pill '+payCls+'">'+esc(j.pay)+'</span>'+
+      (j.trains?'<span class="traintag">&#10022; Will train</span>':'')+
+      (isNew[j.id]?'<span class="newtag">New</span>':'')+'</span>'+verified+'</div>'+
+    '<div class="title">'+esc(j.title)+'</div>'+
+    '<div class="co">'+esc(j.company)+'</div>'+
+    '<div class="meta">'+
+      '<span>'+IC.pin+esc(j.location)+'</span>'+
+      (j.commute?'<span>'+IC.car+esc(j.commute)+'</span>':'')+
+      '<span>'+where+'</span>'+
+      (j.posted?'<span'+(postedDays!=null&&postedDays>=21?' class="old"':'')+'>posted '+esc(ago(j.posted)||j.posted)+'</span>':'')+
+    '</div>'+
+    (j.about?'<details class="about"><summary>What you\'d do</summary><p>'+esc(j.about)+'</p></details>':'')+
+    (applied&&appliedDays!=null&&appliedDays>=5
+      ?'<div class="nudge">You applied '+esc(ago(appliedOn))+' — it\'s okay to call and ask about your application.'+
+        callScriptHTML(j, appliedOn)+'</div>':'')+
+    '<a class="apply" href="'+esc(safeUrl(j.url))+'" target="_blank" rel="noopener" data-act="open" data-id="'+esc(j.id)+'">Apply'+IC.arrow+'</a>'+
+    '<div class="actions">'+
+      '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+IC.check+(applied?'Applied':'I applied')+'</button>'+
+      '<button class="act'+(saved?' on':'')+'" data-act="saved" data-id="'+esc(j.id)+'">'+IC.bookmark+(saved?'Saved':'Save')+'</button>'+
+      '<button class="act snz'+(snoozed?' on':'')+'" data-act="snooze" data-id="'+esc(j.id)+'">'+IC.eye+(snoozed?'Napping':'Not today')+'</button>'+
+      '<button class="act" data-act="hide" data-id="'+esc(j.id)+'">'+IC.eye+(filters.showHidden?'Unhide':'Hide')+'</button>'+
+    '</div>'+
+    '<div class="actions">'+
+      '<button class="act'+(note?' on':'')+'" data-act="notes" data-id="'+esc(j.id)+'">'+IC.pen+(note?'My notes':'Add note')+'</button>'+
+      (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Send to '+esc(META.contact||"a friend")+'</button>':'')+
+    '</div>'+
+    '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
+      '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — who you talked to, when to follow up">'+esc(note)+'</textarea>'+
+    '</div>';
+  return el;
+}
+
+function buildChips(){
+  const c = document.getElementById("chips"); c.innerHTML="";
+  for(const [key,label] of CHIPS){
+    const b=document.createElement("button");
+    b.className="chip"; b.textContent=label; b.setAttribute("aria-pressed","false");
+    b.onclick=()=>{
+      filters[key]=!filters[key];
+      if(key==="inperson"&&filters.inperson) filters.remote=false;
+      if(key==="remote"&&filters.remote) filters.inperson=false;
+      [...c.children].forEach((ch,i)=>ch.setAttribute("aria-pressed", String(filters[CHIPS[i][0]])));
+      render();
+    };
+    c.appendChild(b);
+  }
+  const cc = document.getElementById("catchips"); cc.innerHTML="";
+  cc.hidden = CATS.length<2;
+  for(const cat of CATS){
+    const b=document.createElement("button");
+    b.className="chip"; b.textContent=cat; b.setAttribute("aria-pressed","false");
+    b.onclick=()=>{
+      filters.cat = (filters.cat===cat) ? "" : cat;
+      [...cc.children].forEach(ch=>ch.setAttribute("aria-pressed", String(ch.textContent===filters.cat)));
+      render();
+    };
+    cc.appendChild(b);
+  }
+}
+
+const jobById = new Map(JOBS.map(j=>[j.id,j]));
+
+function markApplied(id, el){
+  state.appliedLog[id] = state.appliedLog[id] ||
+    (jobById.get(id) ? {t:jobById.get(id).title, c:jobById.get(id).company,
+                        d:today(), u:jobById.get(id).url} : {t:"(job)", c:"", d:today(), u:""});
+  state.appliedLog[id].d = state.applied[id];
+  celebrate(el);
+}
+
+// Delegated on the app container so Jobs, Today's picks and My-apps cards
+// all share one set of handlers.
+document.querySelector(".app").addEventListener("click",(e)=>{
+  const t=e.target.closest("[data-act]"); if(!t) return;
+  const id=t.getAttribute("data-id"), act=t.getAttribute("data-act");
+  if(act==="open"){
+    if(!state.applied[id]){ state.applied[id]=today(); markApplied(id, t); }
+    persist(); setTimeout(render,400); return;
+  }
+  e.preventDefault();
+  if(act==="applied"){
+    if(state.applied[id]){ delete state.applied[id]; }
+    else { state.applied[id]=today(); markApplied(id, t); }
+  }
+  if(act==="saved"){ state.saved.has(id)?state.saved.delete(id):state.saved.add(id); }
+  if(act==="hide"){ state.hidden.has(id)?state.hidden.delete(id):state.hidden.add(id); }
+  if(act==="snooze"){
+    if(snoozedNow(id)){ delete state.snooze[id]; }
+    else {
+      const until=new Date(); until.setDate(until.getDate()+3);
+      state.snooze[id]=until.toISOString().slice(0,10);
+      showToast("Okay — it'll come back in a few days.", "Undo",
+        function(){ delete state.snooze[id]; persist(); render(); });
+    }
+  }
+  if(act==="notes"){
+    const box=t.closest(".card").querySelector(".notes");
+    const open=box.classList.toggle("open");
+    open ? openNotes.add(id) : openNotes.delete(id);
+    if(open) box.querySelector("textarea").focus();
+    return;                       // no re-render; keep the textarea focused
+  }
+  if(act==="share"){
+    const j=jobById.get(id);
+    if(j && navigator.share){ navigator.share({title:j.title+" at "+j.company, url:safeUrl(j.url)}).catch(()=>{}); }
+    return;
+  }
+  if(act==="qopt"){ quizPick(t); return; }
+  persist(); render();
+});
+
+// Auto-save notes as they type (no re-render, so the keyboard stays up).
+document.querySelector(".app").addEventListener("input",(e)=>{
+  const t=e.target.closest("[data-note]"); if(!t) return;
+  const id=t.getAttribute("data-note");
+  const v=t.value;
+  if(v.trim()) state.notes[id]=v; else delete state.notes[id];
+  persist();
+});
+
+document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.target.value; render(); });
+
+(function callBtn(){
+  const b=document.getElementById("callbtn");
+  const who = META.contact || "someone you trust";
+  if(META.phone){ b.href="tel:"+META.phone.replace(/[^0-9+]/g,""); b.textContent="Something feels wrong? Call "+who; }
+  else { b.removeAttribute("href"); b.style.cursor="default"; b.textContent="Something feels wrong? Ask "+who+" before you reply"; }
+})();
+
+// Warn when the list itself is old (offline, or the daily scan stopped).
+(function staleBanner(){
+  const el=document.getElementById("stale");
+  const n=daysSince(META.generated);
+  if(n!=null && n>=3){
+    el.hidden=false;
+    el.innerHTML="These jobs are from <b>"+esc(String(META.generated).slice(0,10))+"</b>. "+
+      "Open this app with internet to get today's list.";
+  }
+})();
+
+// Dismissible "Tips for applying" card.
+(function coach(){
+  const el=document.getElementById("coach");
+  el.hidden = state.coachOff;
+  document.getElementById("coachoff").onclick=()=>{ state.coachOff=true; el.hidden=true; persist(); };
+})();
+
+document.getElementById("foot").innerHTML =
+  "<div>We checked "+META.total+" postings and hid <b>"+META.hidden+"</b> that looked like scams.</div>"+
+  "<div>Tip: tap Share, then <b>Add to Home Screen</b> to keep this on your phone.</div>";
+
+/* ── Gentle engine: encouragement, celebration, toast ─────────────────── */
+function dayHash(){ const d=today(); let h=0; for(let i=0;i<d.length;i++) h=(h*31+d.charCodeAt(i))>>>0; return h; }
+const ENC_LINES = [
+  "Job ads are wish lists. If you can do half of it, apply — you're more qualified than you let yourself believe. — Daddy",
+  "You showed up today. That's the whole battle, and you won it. — Daddy",
+  "All that admin experience? You basically have your master's degree. Go show them. — Daddy",
+  "One application beats five you never send. Small is enough. I'm proud of you. — Daddy",
+  "“Pay not listed” isn't a no — it's just a question you get to ask. — Daddy",
+  "Rough day? The jobs will keep. Be as kind to yourself as I am to you. — Daddy",
+  "You are not behind. You're exactly where the next right step starts. — Daddy",
+];
+const KIND_LINES = [
+  "That took real effort. Proud of you. ✦ — Daddy",
+  "Applied! That's a genuine step forward. ✦ — Daddy",
+  "Look at you go. One more out the door. ✦ — Daddy",
+  "Done — and it's in your weekly log too. ✦ — Daddy",
+  "That's my girl. Keep that momentum. ✦ — Daddy",
+];
+let toastTimer = null;
+function showToast(text, label, fn){
+  const t=document.getElementById("toast"), b=document.getElementById("toastact");
+  document.getElementById("toasttext").textContent = text;
+  if(label && fn){ b.hidden=false; b.textContent=label; b.onclick=function(){ t.hidden=true; fn(); }; }
+  else { b.hidden=true; b.onclick=null; }
+  t.hidden=false;
+  clearTimeout(toastTimer); toastTimer=setTimeout(function(){ t.hidden=true; }, 6000);
+}
+const REDUCED = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+function celebrate(el){
+  const n = Object.keys(state.applied).length;
+  showToast(KIND_LINES[n % KIND_LINES.length]);
+  if(REDUCED || !el || !el.getBoundingClientRect) return;
+  const r = el.getBoundingClientRect();
+  for(let i=0;i<8;i++){
+    const s=document.createElement("span");
+    s.className="burst"; s.textContent="✦";
+    s.style.left=(r.left+r.width/2)+"px"; s.style.top=(r.top+r.height/2)+"px";
+    s.style.setProperty("--bx", (Math.cos(i/8*6.283)*70+(Math.random()*20-10))+"px");
+    s.style.setProperty("--by", (Math.sin(i/8*6.283)*70-30)+"px");
+    document.body.appendChild(s);
+    setTimeout(function(){ s.remove(); }, 1100);
+  }
+}
+
+/* ── Weekly tally (Iowa work-search week runs Sunday–Saturday) ──────────── */
+function weekStart(){
+  const d=new Date(); d.setDate(d.getDate()-d.getDay());   // back to Sunday
+  return d.toISOString().slice(0,10);
+}
+function appsThisWeek(){
+  const ws=weekStart();
+  return Object.values(state.applied).filter(function(d){ return d && d>=ws; }).length;
+}
+
+/* ── Today's 3 picks: deterministic per day, trusted/will-train first ──── */
+function todaysPicks(){
+  const pool = JOBS.filter(function(j){
+    return !state.applied[j.id] && !state.hidden.has(j.id) && !snoozedNow(j.id);
+  });
+  const ranked = orderForYou(pool).map(function(j,i){
+    return [ (j.trusted?2:0)+(j.trains?1:0), -i, j ];
+  }).sort(function(a,b){ return b[0]-a[0] || b[1]-a[1]; }).map(function(x){ return x[2]; });
+  const picks=[], h=dayHash(), top=ranked.slice(0, Math.min(12, ranked.length));
+  for(let k=0; k<top.length && picks.length<3; k++){
+    picks.push(top[(h+k*5) % top.length]);
+    for(let dup=0; dup<picks.length-1; dup++)
+      if(picks[dup]===picks[picks.length-1]){ picks.pop(); break; }
+  }
+  return picks;
+}
+function renderPicks(){
+  const wrap=document.getElementById("picks"); if(!wrap) return;
+  wrap.innerHTML="";
+  const picks=todaysPicks();
+  document.getElementById("todayenc").textContent = ENC_LINES[dayHash()%ENC_LINES.length];
+  if(!picks.length){
+    wrap.innerHTML='<div class="empty">'+IC.check+"<div>You've worked through today's list — genuinely well done. New jobs arrive every morning.</div></div>";
+    return;
+  }
+  picks.forEach(function(j,i){ wrap.appendChild(cardEl(j,i)); });
+}
+
+/* ── My applications + the printable Iowa work-search log ──────────────── */
+function appliedEntries(){
+  return Object.keys(state.applied).map(function(id){
+    const lg = state.appliedLog[id] || {};
+    const j = jobById.get(id);
+    return { id:id, date: state.applied[id] || lg.d || "",
+             title: lg.t || (j&&j.title) || "(job no longer listed)",
+             company: lg.c || (j&&j.company) || "",
+             url: lg.u || (j&&j.url) || "" };
+  }).sort(function(a,b){ return a.date<b.date?1:-1; });
+}
+function renderApps(){
+  const wrap=document.getElementById("applist"); if(!wrap) return;
+  const wk=appsThisWeek();
+  document.getElementById("weekline").innerHTML =
+    wk + (wk===1?" application":" applications") + " this week " +
+    (wk>=3 ? "— that covers the 3 applications Iowa asks for. ✦"
+           : "— Iowa asks for 4 work-search activities a week, 3 of them applications.");
+  wrap.innerHTML="";
+  const rows=appliedEntries();
+  if(!rows.length){
+    wrap.innerHTML='<div class="empty">'+IC.pen+'<div>Nothing here yet — and that\'s okay. When you tap <b>Apply</b> or <b>I applied</b> on a job, it lands here with the date saved.</div></div>';
+    return;
+  }
+  rows.forEach(function(r){
+    const j=jobById.get(r.id);
+    const days=daysSince(r.date);
+    const el=document.createElement("div");
+    el.className="card";
+    el.innerHTML =
+      '<div class="title">'+esc(r.title)+'</div>'+
+      '<div class="co">'+esc(r.company)+'</div>'+
+      '<div class="meta"><span>'+IC.check+'applied '+esc(ago(r.date)||r.date)+'</span></div>'+
+      (days!=null&&days>=5&&j?'<div class="nudge">It\'s been a bit — a quick call shows you\'re serious.'+callScriptHTML(j,r.date)+'</div>':'')+
+      (r.url?'<div class="actions"><a class="act" style="text-decoration:none" href="'+esc(safeUrl(r.url))+'" target="_blank" rel="noopener">'+IC.arrow+'View job</a>'+
+      '<button class="act" data-act="applied" data-id="'+esc(r.id)+'">'+IC.eye+'Un-mark</button></div>':'');
+    wrap.appendChild(el);
+  });
+}
+function logRowsText(){
+  return appliedEntries().map(function(r){
+    return r.date+"  —  "+r.title+(r.company?", "+r.company:"")+"  —  applied online";
+  });
+}
+document.getElementById("printlog").onclick = function(){
+  const rows=appliedEntries();
+  const wl=document.getElementById("worklog");
+  wl.innerHTML =
+    "<h1>Work-Search Log</h1>"+
+    "<p>Name: ______________________   Week of "+esc(weekStart())+" (Sunday–Saturday)   "+
+    "Iowa asks for 4 reemployment activities per week; at least 3 must be job applications.</p>"+
+    "<table><tr><th>Date</th><th>Position</th><th>Employer</th><th>How</th><th>Result / notes</th></tr>"+
+    rows.map(function(r){
+      return "<tr><td>"+esc(r.date)+"</td><td>"+esc(r.title)+"</td><td>"+esc(r.company)+
+             "</td><td>Online application</td><td>"+esc((state.notes[r.id]||"").slice(0,80))+"</td></tr>";
+    }).join("")+
+    (rows.length?"":"<tr><td colspan=5>(no applications logged yet)</td></tr>")+
+    "</table>";
+  wl.hidden=false;
+  window.print();
+};
+document.getElementById("copylog").onclick = function(){
+  const text="My work-search log\n"+logRowsText().join("\n");
+  (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+    .then(function(){ showToast("Copied — paste it into your weekly claim or a text."); })
+    .catch(function(){ showToast("Couldn't copy automatically — use Print instead."); });
+};
+
+/* ── My corner: greeting + about-me quiz (tunes the feed today; the AI
+      companion plugs in here once sign-in exists) ───────────────────────── */
+const QUIZ = [
+  ["kind","What kind of work sounds best right now?",
+    [["people","With people"],["quiet","Quiet & organized"],["hands","Keeping my hands busy"],["care","Caring for others"]]],
+  ["where","Where would you rather be?",
+    [["out","Out of the house"],["home","Working from home"],["either","Either is fine"]]],
+  ["time","What hours fit your life?",
+    [["day","Daytime"],["evening","Evenings"],["any","Whatever works"]]],
+  ["pay","Posted pay?",
+    [["must","Show $19+ first"],["open","Good jobs, listed pay or not"]]],
+  ["confidence","How are you feeling about applying?",
+    [["low","Nervous — start me easy"],["ok","Ready — bring it on"]]],
+];
+function renderCorner(){
+  const body=document.getElementById("quizbody"); if(!body) return;
+  const h=new Date().getHours();
+  const part = h<5?"You're up late":(h<12?"Good morning":(h<17?"Good afternoon":"Good evening"));
+  document.getElementById("cornergreet").textContent =
+    part+". This page is just for you — no job list, no pressure. "+ENC_LINES[(dayHash()+3)%ENC_LINES.length];
+  body.innerHTML = QUIZ.map(function(q){
+    return '<div class="qq">'+esc(q[1])+'</div><div class="qopts">'+
+      q[2].map(function(o){
+        const on = state.profile[q[0]]===o[0];
+        return '<button class="qopt" data-act="qopt" data-q="'+esc(q[0])+'" data-v="'+esc(o[0])+'" aria-pressed="'+on+'">'+esc(o[1])+'</button>';
+      }).join("")+'</div>';
+  }).join("") +
+  (Object.keys(state.profile).length>=QUIZ.length
+    ? '<div class="qdone">Got it. The Jobs page now puts your kind of work first. ✦</div>' : "");
+}
+function quizPick(t){
+  const q=t.getAttribute("data-q"), v=t.getAttribute("data-v");
+  state.profile[q] = (state.profile[q]===v) ? undefined : v;
+  if(state.profile[q]===undefined) delete state.profile[q];
+  persist(); render();
+}
+
+/* ── Bottom-nav views ───────────────────────────────────────────────────── */
+const VIEWS = {
+  jobs:   [".controls","#progress","#count","#list","#empty"],
+  today:  ["#todaywrap"],
+  apps:   ["#appswrap"],
+  corner: ["#cornerwrap"],
+  help:   [".safety","#coach","#faqwrap"],
+};
+function setView(name){
+  Object.keys(VIEWS).forEach(function(v){
+    VIEWS[v].forEach(function(sel){
+      const el=document.querySelector(sel);
+      if(el) el.hidden = (v!==name) || (sel==="#coach" && state.coachOff) ||
+                         (sel==="#empty" && el.hidden && v===name && name==="jobs");
+    });
+    const btn=document.getElementById("nav-"+v);
+    if(btn) btn.setAttribute("aria-current", String(v===name));
+  });
+  if(name==="jobs") render(); else { renderPicks(); renderApps(); renderCorner(); }
+  window.scrollTo({top:0});
+}
+["jobs","today","apps","corner","help"].forEach(function(v){
+  const b=document.getElementById("nav-"+v);
+  if(b) b.onclick=function(){ setView(v); };
+});
+
+document.getElementById("footenc").textContent = ENC_LINES[dayHash()%ENC_LINES.length];
+
+buildChips();
+render();
+setView("jobs");
+
+/* ── Portal: optional sign-in so saves follow the user across devices. ──────
+   The page is fully usable without it: not configured -> this whole block is
+   inert; configured but offline -> localStorage keeps working and we retry
+   when the connection returns. All user-visible text goes through
+   textContent or esc(); the publishable key here is browser-safe BY DESIGN
+   (RLS + invite-only auth are the security boundary, never this key). */
+(function(){
+  if(!PORTAL || !PORTAL.url || !PORTAL.key) return;
+  var tag = document.getElementById("sbjs");
+  function boot(){ if(window.supabase && window.supabase.createClient) init(); }
+  if(window.supabase){ boot(); }
+  else if(tag){ tag.addEventListener("load", boot); }
+  // CDN unreachable (offline first load): no listener fires, app runs as-is.
+
+  function init(){
+    // experimental.passkey enables signInWithPasskey/registerPasskey (verified
+    // present in supabase-js 2.108.1; project WebAuthn RP is configured).
+    var sb = window.supabase.createClient(PORTAL.url, PORTAL.key,
+      { auth: { experimental: { passkey: true } } });
+    var PAGE = location.origin + location.pathname;
+    var bar = document.getElementById("syncbar"),
+        rowOut = document.getElementById("syncrow-out"),
+        rowIn = document.getElementById("syncrow-in"),
+        whoEl = document.getElementById("syncwho"),
+        modal = document.getElementById("authmodal"),
+        msg = document.getElementById("authmsg");
+    var emailEl = document.getElementById("authemail"),
+        passEl = document.getElementById("authpass"),
+        primaryBtn = document.getElementById("authprimarybtn"),
+        toggleBtn = document.getElementById("authtoggle"),
+        forgotBtn = document.getElementById("authforgot"),
+        titleEl = document.getElementById("authtitle"),
+        subEl = document.getElementById("authsub");
+    var user = null, mode = "signin";  // "signin" | "signup"
+    var noteRowId = {}, noteTimers = {};
+    bar.hidden = false;
+
+    var supportsPasskey = !!(window.PublicKeyCredential) && typeof sb.auth.signInWithPasskey === "function";
+    if(!supportsPasskey){ var pk = document.getElementById("authpasskey"); if(pk) pk.hidden = true; }
+
+    function setMsg(t, isErr){ msg.textContent = t || ""; msg.className = "authmsg" + (isErr ? " err" : ""); }
+    function showOut(){ rowOut.hidden = false; rowIn.hidden = true; }
+    function showIn(extra){
+      rowOut.hidden = true; rowIn.hidden = false;
+      whoEl.innerHTML = IC.check + ' <span class="who">' +
+        (extra ? esc(extra) : 'Synced across your devices') + '</span> — ' + esc(user && user.email || 'signed in');
+    }
+    function openModal(){ modal.hidden = false; setMsg(""); document.getElementById("authrecover").hidden = true;
+      document.getElementById("authmain").hidden = false; setTimeout(function(){ emailEl.focus(); }, 60); }
+    function closeModal(){ modal.hidden = true; }
+    function friendly(error){
+      var m = String(error && error.message || "");
+      if(/passkey|webauthn|credential/i.test(m) && /no|not found|none/i.test(m))
+        return "No passkey found on this device yet. Sign in another way first, then add Face ID below.";
+      if(/already registered|user already/i.test(m)) return "You already have an account — try signing in instead.";
+      if(/invalid login|invalid credentials|wrong/i.test(m)) return "That email and password don't match. Try again or use a sign-in link.";
+      if(/email not confirmed|confirm/i.test(m)) return "Check your email and tap the confirm link first, then sign in.";
+      if(/signup.*(not|dis)|not.*allowed/i.test(m)) return "New accounts are paused — ask " + (META.contact || "the person who set this up") + ".";
+      if(/rate|too many/i.test(m)) return "Too many tries — wait a minute, then try again.";
+      if(/fetch|network|load failed/i.test(m)) return "No internet right now — your saves are safe on this phone.";
+      return (m || "Something went wrong").slice(0, 110);
+    }
+
+    function setMode(m){
+      mode = m;
+      var up = (m === "signup");
+      titleEl.innerHTML = (up ? "Create your account " : "Welcome back ") + '<span class="sparkle">&#10022;</span>';
+      subEl.textContent = up ? "Make an account so your jobs, notes and chats are saved and follow you."
+                             : "Sign in so your jobs, notes and chats follow you to any device.";
+      passEl.hidden = false;
+      passEl.setAttribute("autocomplete", up ? "new-password" : "current-password");
+      passEl.placeholder = up ? "Choose a password (8+ characters)" : "Password";
+      primaryBtn.textContent = up ? "Create account" : "Sign in";
+      toggleBtn.textContent = up ? "Already have an account? Sign in" : "New here? Create an account";
+      forgotBtn.hidden = up;
+      setMsg("");
+    }
+
+    document.getElementById("syncopen").onclick = function(){ setMode("signin"); openModal(); };
+    document.getElementById("authclose").onclick = closeModal;
+    modal.addEventListener("click", function(e){ if(e.target === modal) closeModal(); });
+    toggleBtn.onclick = function(){ setMode(mode === "signin" ? "signup" : "signin"); emailEl.focus(); };
+
+    // Passkey — Face ID / fingerprint, no password.
+    document.getElementById("authpasskey").onclick = function(){
+      setMsg("Waiting for Face ID / fingerprint…");
+      sb.auth.signInWithPasskey().then(function(r){
+        if(r.error) setMsg(friendly(r.error), true);  // success handled by onAuthStateChange
+      }).catch(function(e){ setMsg(friendly(e), true); });
+    };
+
+    // Email + password (sign in OR create account).
+    primaryBtn.onclick = function(){
+      var em = emailEl.value.trim(), pw = passEl.value;
+      if(!/.+@.+\..+/.test(em)){ setMsg("That doesn't look like an email address.", true); return; }
+      if(pw.length < 8){ setMsg("Password needs at least 8 characters.", true); return; }
+      setMsg(mode === "signup" ? "Creating your account…" : "Signing you in…");
+      var p = mode === "signup"
+        ? sb.auth.signUp({ email: em, password: pw, options: { emailRedirectTo: PAGE } })
+        : sb.auth.signInWithPassword({ email: em, password: pw });
+      p.then(function(r){
+        if(r.error){ setMsg(friendly(r.error), true); return; }
+        if(mode === "signup" && r.data && r.data.user && !r.data.session)
+          setMsg("Account made! Check your email and tap the confirm link, then come back and sign in.");
+        // session present -> onAuthStateChange closes the modal + syncs.
+      });
+    };
+
+    // Magic link — passwordless.
+    document.getElementById("authmagic").onclick = function(){
+      var em = emailEl.value.trim();
+      if(!/.+@.+\..+/.test(em)){ setMsg("Enter your email above first, then tap this.", true); return; }
+      setMsg("Sending your link…");
+      sb.auth.signInWithOtp({ email: em, options: { emailRedirectTo: PAGE } })
+        .then(function(r){ setMsg(r.error ? friendly(r.error) : "Link sent! Open your email ON THIS DEVICE and tap it.", !!r.error); });
+    };
+
+    // Google OAuth (degrades gracefully if the provider isn't configured yet).
+    document.getElementById("authgoogle").onclick = function(){
+      setMsg("Opening Google…");
+      sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: PAGE } })
+        .then(function(r){ if(r.error) setMsg(/provider|not enabled|unsupported/i.test(r.error.message||"")
+          ? "Google sign-in isn't set up yet — use a sign-in link or password for now." : friendly(r.error), true); });
+    };
+
+    // Forgot password -> recovery email.
+    forgotBtn.onclick = function(){
+      var em = emailEl.value.trim();
+      if(!/.+@.+\..+/.test(em)){ setMsg("Enter your email above first, then tap Forgot password.", true); return; }
+      setMsg("Sending a reset link…");
+      sb.auth.resetPasswordForEmail(em, { redirectTo: PAGE })
+        .then(function(r){ setMsg(r.error ? friendly(r.error) : "Reset link sent — open it from your email to set a new password.", !!r.error); });
+    };
+
+    // Set-new-password panel (after the user returns via a recovery link).
+    document.getElementById("authsetpass").onclick = function(){
+      var np = document.getElementById("authnewpass").value;
+      var rmsg = document.getElementById("authrecmsg");
+      if(np.length < 8){ rmsg.textContent = "At least 8 characters, please."; rmsg.className = "authmsg err"; return; }
+      rmsg.textContent = "Saving…"; rmsg.className = "authmsg";
+      sb.auth.updateUser({ password: np }).then(function(r){
+        if(r.error){ rmsg.textContent = friendly(r.error); rmsg.className = "authmsg err"; }
+        else { rmsg.textContent = "Done! You're signed in."; setTimeout(closeModal, 900); }
+      });
+    };
+
+    document.getElementById("syncout").onclick = function(){
+      sb.auth.signOut().catch(function(){});  // onAuthStateChange flips UI; local saves stay
+    };
+
+    // Offer to add a passkey once signed in (so next time = instant Face ID).
+    function offerPasskey(){
+      if(!supportsPasskey || !user) return;
+      if(localStorage.getItem("pk_offered:" + user.id)) return;
+      localStorage.setItem("pk_offered:" + user.id, "1");
+      showToast("Add Face ID for instant sign-in next time?", "Add", function(){
+        sb.auth.registerPasskey().then(function(r){
+          showToast(r.error ? "Couldn't add it — that's okay, you're still signed in." : "Face ID ready ✦ — Daddy");
+        }).catch(function(){ showToast("Couldn't add it this time — no worries."); });
+      });
+    }
+
+    sb.auth.onAuthStateChange(function(evt, session){
+      if(evt === "PASSWORD_RECOVERY"){
+        modal.hidden = false;
+        document.getElementById("authmain").hidden = true;
+        document.getElementById("authrecover").hidden = false;
+        return;
+      }
+      var u = session && session.user || null;
+      var justIn = !!u && !user;
+      user = u;
+      if(user){ showIn(); closeModal(); if(justIn){ syncAll(); setTimeout(offerPasskey, 1500); } }
+      else { showOut(); }
+    });
+    sb.auth.getSession().then(function(r){
+      user = r.data && r.data.session && r.data.session.user || null;
+      if(user){ showIn(); syncAll(); } else { showOut(); }
+    }).catch(function(){ showOut(); });
+
+    /* Pull server state, merge (a flag set anywhere stays set; newest note
+       wins), then push back anything only this device knew about — which IS
+       the localStorage import on first sign-in, no separate path needed. */
+    function syncAll(){
+      Promise.all([
+        sb.from("user_job_status").select("job_id,applied,applied_on,saved,hidden"),
+        sb.from("job_notes").select("id,job_id,body,created_at").order("created_at", { ascending: false }),
+      ]).then(function(res){
+        if(res[0].error) throw res[0].error;
+        if(res[1].error) throw res[1].error;
+        var localIds = {};
+        Object.keys(state.applied).forEach(function(id){ localIds[id] = 1; });
+        state.saved.forEach(function(id){ localIds[id] = 1; });
+        state.hidden.forEach(function(id){ localIds[id] = 1; });
+        var server = {};
+        (res[0].data || []).forEach(function(r){
+          server[r.job_id] = r;
+          if(r.applied && !state.applied[r.job_id]) state.applied[r.job_id] = r.applied_on || today();
+          if(r.saved) state.saved.add(r.job_id);
+          if(r.hidden) state.hidden.add(r.job_id);
+        });
+        var sawNote = {};
+        (res[1].data || []).forEach(function(r){
+          if(sawNote[r.job_id]) return;            // newest-first: keep only latest
+          sawNote[r.job_id] = 1; noteRowId[r.job_id] = r.id;
+          state.notes[r.job_id] = r.body;
+        });
+        persist(); render();
+        var toPush = Object.keys(localIds).filter(function(id){
+          var s = server[id] || {};
+          return (!!state.applied[id]) !== !!s.applied ||
+                 state.saved.has(id) !== !!s.saved ||
+                 state.hidden.has(id) !== !!s.hidden;
+        });
+        pushStatus(toPush);
+        Object.keys(state.notes).forEach(function(id){ if(!sawNote[id]) pushNote(id); });
+        showIn();
+      }).catch(function(e){
+        console.log("[portal] sync failed:", e && e.message || e);
+        showIn("Signed in — will sync when online");
+      });
+    }
+
+    function statusRow(id){
+      return { job_id: id, applied: !!state.applied[id], applied_on: state.applied[id] || null,
+               saved: state.saved.has(id), hidden: state.hidden.has(id),
+               updated_at: new Date().toISOString() };
+    }
+    function pushStatus(ids){
+      if(!user || !ids.length) return;
+      sb.from("user_job_status").upsert(ids.map(statusRow), { onConflict: "user_id,job_id" })
+        .then(function(r){ if(r.error) console.log("[portal] status push:", r.error.message); });
+    }
+    function pushNote(id){
+      if(!user) return;
+      var body = state.notes[id] || "";
+      if(!body){
+        if(noteRowId[id]){
+          sb.from("job_notes").delete().eq("id", noteRowId[id])
+            .then(function(){ delete noteRowId[id]; });
+        }
+        return;
+      }
+      if(noteRowId[id]){
+        sb.from("job_notes").update({ body: body }).eq("id", noteRowId[id])
+          .then(function(r){ if(r.error) console.log("[portal] note push:", r.error.message); });
+      } else {
+        sb.from("job_notes").insert({ job_id: id, body: body }).select("id").single()
+          .then(function(r){
+            if(r.data) noteRowId[id] = r.data.id;
+            if(r.error) console.log("[portal] note push:", r.error.message);
+          });
+      }
+    }
+
+    // Live mutations: these delegated listeners run AFTER the main handlers
+    // above (same container, registered later), so state is already updated.
+    document.querySelector(".app").addEventListener("click", function(e){
+      var t = e.target.closest("[data-act]"); if(!t || !user) return;
+      var act = t.getAttribute("data-act");
+      if(act === "applied" || act === "saved" || act === "hide" || act === "open")
+        pushStatus([t.getAttribute("data-id")]);
+    });
+    document.querySelector(".app").addEventListener("input", function(e){
+      var t = e.target.closest("[data-note]"); if(!t || !user) return;
+      var id = t.getAttribute("data-note");
+      clearTimeout(noteTimers[id]);
+      noteTimers[id] = setTimeout(function(){ pushNote(id); }, 900);
+    });
+    window.addEventListener("online", function(){ if(user) syncAll(); });
+
+    /* Companion chat: appears only signed-in. Calls the 'companion' Edge
+       Function (Anthropic key lives server-side; this page never sees it). */
+    function mountChat(){
+      const card=document.getElementById("chatcard"); if(!card) return;
+      if(!user){ return; }
+      if(card.dataset.live){ return; }
+      card.dataset.live="1";
+      document.getElementById("chatstate").hidden=true;
+      const log=document.createElement("div"); log.className="chatlog"; log.id="chatlog";
+      const row=document.createElement("div"); row.className="chatrow";
+      row.innerHTML='<input class="search" id="chatinput" type="text" maxlength="4000" '+
+        'placeholder="Say hi — it remembers you" aria-label="Message your companion">'+
+        '<button class="syncbtn" id="chatsend">Send</button>';
+      const note=document.createElement("div"); note.className="chatnote";
+      note.textContent="A friendly helper, not a therapist — if things feel heavy, the card above has real humans 24/7. Chats are saved privately to your account so it remembers you; they're never sold or shared (only the person who set this up could ever see them).";
+      card.appendChild(log); card.appendChild(row); card.appendChild(note);
+      sb.from("chat_messages").select("role,body").order("created_at",{ascending:false}).limit(12)
+        .then(function(r){ ((r.data||[]).reverse()).forEach(function(m){ addBub(m.role==="user"?"me":"ai", m.body); }); });
+      function addBub(cls, text){
+        const b=document.createElement("div"); b.className="bub "+cls; b.textContent=text;
+        log.appendChild(b); log.scrollTop=log.scrollHeight; return b;
+      }
+      function send(){
+        const inp=document.getElementById("chatinput");
+        const msg=inp.value.trim(); if(!msg) return;
+        inp.value=""; addBub("me", msg);
+        const wait=addBub("ai", "…");
+        sb.functions.invoke("companion", { body: { message: msg } })
+          .then(function(r){
+            wait.textContent = (r.data && r.data.reply) ? r.data.reply
+              : "I'm having trouble right now — your message is saved, try me again in a minute.";
+          })
+          .catch(function(){ wait.textContent="No connection right now — I'll be here when you're back online."; });
+      }
+      document.getElementById("chatsend").onclick=send;
+      document.getElementById("chatinput").addEventListener("keydown",function(e){
+        if(e.key==="Enter"){ e.preventDefault(); send(); }
+      });
+    }
+    const _showIn = showIn;
+    showIn = function(extra){ _showIn(extra); mountChat(); };
+    if(user) mountChat();
+  }
+})();
+
+if("serviceWorker" in navigator){ navigator.serviceWorker.register("sw.js").catch(()=>{}); }
+</script>
+</body>
+</html>
