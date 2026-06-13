@@ -1153,6 +1153,39 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .syncmsg{margin-top:9px;font-size:14px;color:var(--green-d);font-weight:700}
 .syncmsg.err{color:var(--red)}
 .syncout{flex:0 0 auto;max-width:120px}
+/* Full-screen auth modal */
+.authov{position:fixed;inset:0;z-index:60;background:rgba(8,5,14,.86);backdrop-filter:blur(8px);
+ display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 14px calc(24px + env(safe-area-inset-bottom))}
+.authcard{background:var(--card);border:1px solid var(--line);border-radius:20px;width:100%;max-width:420px;
+ margin:auto;padding:22px 20px;box-shadow:var(--glow);animation:rise .25s ease both}
+.authcard h2{margin:0 0 2px;font-size:23px;font-weight:700}
+.authcard .sub{color:var(--ink2);font-size:14px;margin:0 0 16px;line-height:1.45}
+.authx{position:absolute;top:14px;right:16px;background:none;border:0;color:var(--ink2);font-size:26px;
+ line-height:1;cursor:pointer;padding:6px}
+.pkbtn{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;
+ background:linear-gradient(135deg,#9333ea,#7e22ce);color:#fff;box-shadow:var(--glow);
+ border:0;border-radius:13px;font:inherit;font-weight:700;font-size:16px;padding:15px;min-height:54px;cursor:pointer}
+.pkbtn:active{transform:scale(.985)}
+.authdiv{display:flex;align-items:center;gap:10px;color:var(--ink2);font-size:12px;
+ letter-spacing:.1em;text-transform:uppercase;margin:16px 0}
+.authdiv::before,.authdiv::after{content:"";flex:1;height:1px;background:var(--line)}
+.authfield{display:block;width:100%;font:inherit;font-size:16px;padding:13px 14px;margin:8px 0 0;
+ border:1.5px solid var(--line);border-radius:11px;background:var(--surface);color:var(--ink);min-height:50px}
+.authfield:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+.authprimary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:10px;
+ background:var(--green);color:#fff;border:0;border-radius:11px;font:inherit;font-weight:700;font-size:16px;
+ padding:14px;min-height:52px;cursor:pointer}
+.authprimary:active{transform:scale(.985);background:var(--green-d)}
+.authsecondary{display:flex;align-items:center;justify-content:center;gap:8px;width:100%;margin-top:9px;
+ background:var(--card);color:var(--ink);border:1.5px solid var(--line);border-radius:11px;font:inherit;
+ font-weight:700;font-size:15px;padding:12px;min-height:50px;cursor:pointer}
+.authsecondary:active{transform:scale(.97)}
+.authlink{background:none;border:0;color:var(--green-d);font:inherit;font-size:14px;font-weight:700;
+ cursor:pointer;padding:8px 2px;text-decoration:underline}
+.authrow{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:6px;flex-wrap:wrap}
+.authmsg{margin-top:12px;font-size:14px;font-weight:700;color:var(--green-d);line-height:1.45}
+.authmsg.err{color:var(--red)}
+.authnote{margin-top:14px;font-size:12px;color:var(--ink2);line-height:1.5;text-align:center}
 /* Bottom tab bar */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:space-around;
  background:rgba(14,10,22,.92);backdrop-filter:blur(14px);border-top:1px solid var(--line);
@@ -1249,23 +1282,63 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
   <section class="sync" id="syncbar" hidden>
     <div class="syncrow" id="syncrow-out" hidden>
       <div class="synccopy"><span class="who">Got a new phone, or use a tablet too?</span><br>
-        Sign in and your Applied, Saved and notes follow you.</div>
+        Sign in and your Applied, Saved, notes &amp; chats follow you everywhere.</div>
       <button class="syncbtn" id="syncopen">Sign in</button>
-    </div>
-    <div class="syncform" id="syncform" hidden>
-      <label for="syncemail">Your email address</label>
-      <input class="search" id="syncemail" type="email" inputmode="email" autocomplete="email"
-        placeholder="you@example.com" aria-label="Email address for sign-in link">
-      <button class="apply" id="syncsend">Email me a sign-in link</button>
-      <button class="act" id="syncgoogle"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 01-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 01-10.8-3.8H1.2v3.1A12 12 0 0012 24z"/><path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 010-4.6V6.6H1.2a12 12 0 000 10.8z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4A12 12 0 001.2 6.6l4.1 3.1A7.2 7.2 0 0112 4.8z"/></svg>&nbsp;Continue with Google</button>
-      <button class="cancel" id="synccancel">Not now</button>
-      <div class="syncmsg" id="syncmsg" role="status"></div>
     </div>
     <div class="syncrow" id="syncrow-in" hidden>
       <div class="synccopy" id="syncwho"></div>
       <button class="act syncout" id="syncout">Sign out</button>
     </div>
   </section>
+
+  <!-- Full-screen auth modal (all modern sign-in methods) -->
+  <div class="authov" id="authmodal" hidden>
+    <div class="authcard" style="position:relative">
+      <button class="authx" id="authclose" aria-label="Close">&times;</button>
+
+      <!-- main sign-in / sign-up panel -->
+      <div id="authmain">
+        <h2 id="authtitle">Welcome back <span class="sparkle">&#10022;</span></h2>
+        <p class="sub" id="authsub">Sign in so your jobs, notes and chats follow you to any device.</p>
+
+        <button class="pkbtn" id="authpasskey">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.6-3 3-4.5 5.5-4.5"/><path d="M14 10.5c2 0 3.5 1.5 3.5 3.5 0 1.2-.6 2.2-1.4 2.9V21l-1.3-1-1.3 1v-4.1a3.5 3.5 0 01-1-2.4c0-2 1.5-3.5 3.5-3.5z"/></svg>
+          Sign in with Face ID / fingerprint
+        </button>
+
+        <div class="authdiv">or</div>
+
+        <input class="authfield" id="authemail" type="email" inputmode="email" autocomplete="email"
+          placeholder="Your email address" aria-label="Email">
+        <input class="authfield" id="authpass" type="password" autocomplete="current-password"
+          placeholder="Password" aria-label="Password" hidden>
+        <button class="authprimary" id="authprimarybtn">Continue</button>
+        <button class="authsecondary" id="authmagic">Email me a sign-in link instead</button>
+        <button class="authsecondary" id="authgoogle">
+          <svg viewBox="0 0 24 24" width="17" height="17"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 01-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 01-10.8-3.8H1.2v3.1A12 12 0 0012 24z"/><path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 010-4.6V6.6H1.2a12 12 0 000 10.8z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4A12 12 0 001.2 6.6l4.1 3.1A7.2 7.2 0 0112 4.8z"/></svg>
+          Continue with Google
+        </button>
+
+        <div class="authrow">
+          <button class="authlink" id="authtoggle">New here? Create an account</button>
+          <button class="authlink" id="authforgot" hidden>Forgot password?</button>
+        </div>
+        <div class="authmsg" id="authmsg" role="status"></div>
+        <p class="authnote">Passkeys use your phone&rsquo;s Face ID or fingerprint &mdash; nothing to remember,
+        nothing to steal. Your info is private and never shared.</p>
+      </div>
+
+      <!-- set-new-password panel (shown after a reset link) -->
+      <div id="authrecover" hidden>
+        <h2>Set a new password <span class="sparkle">&#10022;</span></h2>
+        <p class="sub">Pick a new password for your account.</p>
+        <input class="authfield" id="authnewpass" type="password" autocomplete="new-password"
+          placeholder="New password (8+ characters)" aria-label="New password">
+        <button class="authprimary" id="authsetpass">Save new password</button>
+        <div class="authmsg" id="authrecmsg" role="status"></div>
+      </div>
+    </div>
+  </div>
 
   <!-- TODAY view: 3 curated picks, one small win at a time -->
   <section id="todaywrap" hidden>
@@ -1967,64 +2040,165 @@ setView("jobs");
   // CDN unreachable (offline first load): no listener fires, app runs as-is.
 
   function init(){
-    var sb = window.supabase.createClient(PORTAL.url, PORTAL.key);
+    // experimental.passkey enables signInWithPasskey/registerPasskey (verified
+    // present in supabase-js 2.108.1; project WebAuthn RP is configured).
+    var sb = window.supabase.createClient(PORTAL.url, PORTAL.key,
+      { auth: { experimental: { passkey: true } } });
     var PAGE = location.origin + location.pathname;
     var bar = document.getElementById("syncbar"),
         rowOut = document.getElementById("syncrow-out"),
         rowIn = document.getElementById("syncrow-in"),
-        form = document.getElementById("syncform"),
-        msg = document.getElementById("syncmsg"),
-        whoEl = document.getElementById("syncwho");
-    var user = null;
-    var noteRowId = {};          // jobId -> newest job_notes.id seen on the server
-    var noteTimers = {};
+        whoEl = document.getElementById("syncwho"),
+        modal = document.getElementById("authmodal"),
+        msg = document.getElementById("authmsg");
+    var emailEl = document.getElementById("authemail"),
+        passEl = document.getElementById("authpass"),
+        primaryBtn = document.getElementById("authprimarybtn"),
+        toggleBtn = document.getElementById("authtoggle"),
+        forgotBtn = document.getElementById("authforgot"),
+        titleEl = document.getElementById("authtitle"),
+        subEl = document.getElementById("authsub");
+    var user = null, mode = "signin";  // "signin" | "signup"
+    var noteRowId = {}, noteTimers = {};
     bar.hidden = false;
 
-    function setMsg(t, isErr){ msg.textContent = t || ""; msg.className = "syncmsg" + (isErr ? " err" : ""); }
-    function showOut(){ rowOut.hidden = false; rowIn.hidden = true; form.hidden = true; }
+    var supportsPasskey = !!(window.PublicKeyCredential) && typeof sb.auth.signInWithPasskey === "function";
+    if(!supportsPasskey){ var pk = document.getElementById("authpasskey"); if(pk) pk.hidden = true; }
+
+    function setMsg(t, isErr){ msg.textContent = t || ""; msg.className = "authmsg" + (isErr ? " err" : ""); }
+    function showOut(){ rowOut.hidden = false; rowIn.hidden = true; }
     function showIn(extra){
-      rowOut.hidden = true; form.hidden = true; rowIn.hidden = false;
+      rowOut.hidden = true; rowIn.hidden = false;
       whoEl.innerHTML = IC.check + ' <span class="who">' +
-        (extra ? esc(extra) : 'Saves synced') + '</span> — ' + esc(user && user.email || 'signed in');
+        (extra ? esc(extra) : 'Synced across your devices') + '</span> — ' + esc(user && user.email || 'signed in');
     }
+    function openModal(){ modal.hidden = false; setMsg(""); document.getElementById("authrecover").hidden = true;
+      document.getElementById("authmain").hidden = false; setTimeout(function(){ emailEl.focus(); }, 60); }
+    function closeModal(){ modal.hidden = true; }
     function friendly(error){
       var m = String(error && error.message || "");
-      if(/invite|signup|sign-?ups?.*(not|dis)|not.*allowed/i.test(m))
-        return "This app is invite-only — ask " + (META.contact || "the person who set this up") + " to invite your email first.";
+      if(/passkey|webauthn|credential/i.test(m) && /no|not found|none/i.test(m))
+        return "No passkey found on this device yet. Sign in another way first, then add Face ID below.";
+      if(/already registered|user already/i.test(m)) return "You already have an account — try signing in instead.";
+      if(/invalid login|invalid credentials|wrong/i.test(m)) return "That email and password don't match. Try again or use a sign-in link.";
+      if(/email not confirmed|confirm/i.test(m)) return "Check your email and tap the confirm link first, then sign in.";
+      if(/signup.*(not|dis)|not.*allowed/i.test(m)) return "New accounts are paused — ask " + (META.contact || "the person who set this up") + ".";
       if(/rate|too many/i.test(m)) return "Too many tries — wait a minute, then try again.";
       if(/fetch|network|load failed/i.test(m)) return "No internet right now — your saves are safe on this phone.";
-      return "Sign-in didn't work: " + m.slice(0, 90);
+      return (m || "Something went wrong").slice(0, 110);
     }
 
-    document.getElementById("syncopen").onclick = function(){
-      rowOut.hidden = true; form.hidden = false; setMsg("");
-      document.getElementById("syncemail").focus();
-    };
-    document.getElementById("synccancel").onclick = function(){ form.hidden = true; rowOut.hidden = false; };
-    document.getElementById("syncsend").onclick = function(){
-      var em = document.getElementById("syncemail").value.trim();
-      if(!/.+@.+\..+/.test(em)){ setMsg("That doesn't look like an email address — check it and try again.", true); return; }
-      setMsg("Sending your link…");
-      sb.auth.signInWithOtp({ email: em, options: { emailRedirectTo: PAGE } })
-        .then(function(r){
-          if(r.error){ setMsg(friendly(r.error), true); }
-          else { setMsg("Link sent! Open your email ON THIS DEVICE and tap the link."); }
-        });
-    };
-    document.getElementById("syncgoogle").onclick = function(){
-      sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: PAGE } })
-        .then(function(r){ if(r.error) setMsg(friendly(r.error), true); });
-    };
-    document.getElementById("syncout").onclick = function(){
-      sb.auth.signOut().catch(function(){});
-      // onAuthStateChange flips the UI; local saves stay on the device.
+    function setMode(m){
+      mode = m;
+      var up = (m === "signup");
+      titleEl.innerHTML = (up ? "Create your account " : "Welcome back ") + '<span class="sparkle">&#10022;</span>';
+      subEl.textContent = up ? "Make an account so your jobs, notes and chats are saved and follow you."
+                             : "Sign in so your jobs, notes and chats follow you to any device.";
+      passEl.hidden = false;
+      passEl.setAttribute("autocomplete", up ? "new-password" : "current-password");
+      passEl.placeholder = up ? "Choose a password (8+ characters)" : "Password";
+      primaryBtn.textContent = up ? "Create account" : "Sign in";
+      toggleBtn.textContent = up ? "Already have an account? Sign in" : "New here? Create an account";
+      forgotBtn.hidden = up;
+      setMsg("");
+    }
+
+    document.getElementById("syncopen").onclick = function(){ setMode("signin"); openModal(); };
+    document.getElementById("authclose").onclick = closeModal;
+    modal.addEventListener("click", function(e){ if(e.target === modal) closeModal(); });
+    toggleBtn.onclick = function(){ setMode(mode === "signin" ? "signup" : "signin"); emailEl.focus(); };
+
+    // Passkey — Face ID / fingerprint, no password.
+    document.getElementById("authpasskey").onclick = function(){
+      setMsg("Waiting for Face ID / fingerprint…");
+      sb.auth.signInWithPasskey().then(function(r){
+        if(r.error) setMsg(friendly(r.error), true);  // success handled by onAuthStateChange
+      }).catch(function(e){ setMsg(friendly(e), true); });
     };
 
-    sb.auth.onAuthStateChange(function(_evt, session){
+    // Email + password (sign in OR create account).
+    primaryBtn.onclick = function(){
+      var em = emailEl.value.trim(), pw = passEl.value;
+      if(!/.+@.+\..+/.test(em)){ setMsg("That doesn't look like an email address.", true); return; }
+      if(pw.length < 8){ setMsg("Password needs at least 8 characters.", true); return; }
+      setMsg(mode === "signup" ? "Creating your account…" : "Signing you in…");
+      var p = mode === "signup"
+        ? sb.auth.signUp({ email: em, password: pw, options: { emailRedirectTo: PAGE } })
+        : sb.auth.signInWithPassword({ email: em, password: pw });
+      p.then(function(r){
+        if(r.error){ setMsg(friendly(r.error), true); return; }
+        if(mode === "signup" && r.data && r.data.user && !r.data.session)
+          setMsg("Account made! Check your email and tap the confirm link, then come back and sign in.");
+        // session present -> onAuthStateChange closes the modal + syncs.
+      });
+    };
+
+    // Magic link — passwordless.
+    document.getElementById("authmagic").onclick = function(){
+      var em = emailEl.value.trim();
+      if(!/.+@.+\..+/.test(em)){ setMsg("Enter your email above first, then tap this.", true); return; }
+      setMsg("Sending your link…");
+      sb.auth.signInWithOtp({ email: em, options: { emailRedirectTo: PAGE } })
+        .then(function(r){ setMsg(r.error ? friendly(r.error) : "Link sent! Open your email ON THIS DEVICE and tap it.", !!r.error); });
+    };
+
+    // Google OAuth (degrades gracefully if the provider isn't configured yet).
+    document.getElementById("authgoogle").onclick = function(){
+      setMsg("Opening Google…");
+      sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: PAGE } })
+        .then(function(r){ if(r.error) setMsg(/provider|not enabled|unsupported/i.test(r.error.message||"")
+          ? "Google sign-in isn't set up yet — use a sign-in link or password for now." : friendly(r.error), true); });
+    };
+
+    // Forgot password -> recovery email.
+    forgotBtn.onclick = function(){
+      var em = emailEl.value.trim();
+      if(!/.+@.+\..+/.test(em)){ setMsg("Enter your email above first, then tap Forgot password.", true); return; }
+      setMsg("Sending a reset link…");
+      sb.auth.resetPasswordForEmail(em, { redirectTo: PAGE })
+        .then(function(r){ setMsg(r.error ? friendly(r.error) : "Reset link sent — open it from your email to set a new password.", !!r.error); });
+    };
+
+    // Set-new-password panel (after the user returns via a recovery link).
+    document.getElementById("authsetpass").onclick = function(){
+      var np = document.getElementById("authnewpass").value;
+      var rmsg = document.getElementById("authrecmsg");
+      if(np.length < 8){ rmsg.textContent = "At least 8 characters, please."; rmsg.className = "authmsg err"; return; }
+      rmsg.textContent = "Saving…"; rmsg.className = "authmsg";
+      sb.auth.updateUser({ password: np }).then(function(r){
+        if(r.error){ rmsg.textContent = friendly(r.error); rmsg.className = "authmsg err"; }
+        else { rmsg.textContent = "Done! You're signed in."; setTimeout(closeModal, 900); }
+      });
+    };
+
+    document.getElementById("syncout").onclick = function(){
+      sb.auth.signOut().catch(function(){});  // onAuthStateChange flips UI; local saves stay
+    };
+
+    // Offer to add a passkey once signed in (so next time = instant Face ID).
+    function offerPasskey(){
+      if(!supportsPasskey || !user) return;
+      if(localStorage.getItem("pk_offered:" + user.id)) return;
+      localStorage.setItem("pk_offered:" + user.id, "1");
+      showToast("Add Face ID for instant sign-in next time?", "Add", function(){
+        sb.auth.registerPasskey().then(function(r){
+          showToast(r.error ? "Couldn't add it — that's okay, you're still signed in." : "Face ID ready ✦ — Daddy");
+        }).catch(function(){ showToast("Couldn't add it this time — no worries."); });
+      });
+    }
+
+    sb.auth.onAuthStateChange(function(evt, session){
+      if(evt === "PASSWORD_RECOVERY"){
+        modal.hidden = false;
+        document.getElementById("authmain").hidden = true;
+        document.getElementById("authrecover").hidden = false;
+        return;
+      }
       var u = session && session.user || null;
-      var signedIn = !!u && !user;
+      var justIn = !!u && !user;
       user = u;
-      if(user){ showIn(); if(signedIn) syncAll(); } else { showOut(); }
+      if(user){ showIn(); closeModal(); if(justIn){ syncAll(); setTimeout(offerPasskey, 1500); } }
+      else { showOut(); }
     });
     sb.auth.getSession().then(function(r){
       user = r.data && r.data.session && r.data.session.user || null;
