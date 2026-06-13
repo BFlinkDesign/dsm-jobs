@@ -1,9 +1,14 @@
 name: Health Monitor (self-repair signal)
 
-# Every 6 hours: confirm the live site is up + fresh, the Supabase portal is
-# reachable, and the companion function is alive. On ANY failure, open (or
-# reuse) a single GitHub issue so the problem is never silent — that issue is
-# the human/repair signal. Read-only checks; nothing here can break the site.
+# Every 6 hours: confirm the published site is correct + fresh, the Supabase
+# portal is reachable, and the companion function is alive. On ANY real failure,
+# open/refresh a single GitHub issue so the problem is never silent.
+#
+# Design note: we do NOT grep the served Pages URL — its CDN has per-edge
+# propagation and a runner can briefly see a contentless 200 while real users
+# get the good build. Instead we read the AUTHORITATIVE gh-pages branch via a
+# git checkout (always reliable in Actions) for content + freshness, and use the
+# served URL only for an "is-up" 200.
 
 on:
   schedule:
@@ -19,7 +24,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 6
     steps:
-      - name: Check live site, freshness, Supabase, companion
+      - name: Check out the published build (gh-pages)
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: published
+          fetch-depth: 1
+
+      - name: Health checks
         id: check
         shell: bash
         env:
@@ -30,24 +42,17 @@ jobs:
           fail() { echo "::error::$1"; echo "$1" >> /tmp/fails.txt; }
           : > /tmp/fails.txt
           SITE="https://bflinkdesign.github.io/dsm-jobs/"
+          PAGE="published/index.html"
 
-          # 1) Live site is up (served URL returns 200). The GitHub Pages CDN has
-          #    per-edge propagation, so we DON'T grep the served HTML (an edge can
-          #    briefly return a contentless 200); 200 alone = the CDN is serving.
-          code="000"
-          for attempt in 1 2 3 4; do
-            code="$(curl -s -m 25 -o /dev/null -w '%{http_code}' "$SITE" || echo 000)"
-            [ "$code" = "200" ] && break
-            echo "site attempt $attempt: HTTP $code (retrying)"; sleep 15
-          done
-          [ "$code" = "200" ] || fail "Live site HTTP $code after retries (expected 200)"
+          # 1) Published content is the real app
+          if [ -f "$PAGE" ]; then
+            grep -q "Job Board" "$PAGE" || fail "Published build missing 'Job Board' marker"
+          else
+            fail "gh-pages index.html not found"
+          fi
 
-          # 2) Published content + freshness: read the AUTHORITATIVE gh-pages
-          #    branch via raw.githubusercontent (CDN-independent ground truth).
-          RAW="https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/gh-pages/index.html"
-          pub="$(curl -s -m 25 "$RAW" || true)"
-          printf '%s' "$pub" | grep -q "Job Board" || fail "Published gh-pages build missing 'Job Board' marker"
-          updated="$(printf '%s' "$pub" | grep -oE 'updated [0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | awk '{print $2}')"
+          # 2) Freshness: the daily scan stamps 'updated YYYY-MM-DD' in the page
+          updated="$(grep -oE 'updated [0-9]{4}-[0-9]{2}-[0-9]{2}' "$PAGE" 2>/dev/null | head -1 | awk '{print $2}')"
           if [ -n "$updated" ]; then
             age=$(( ( $(date +%s) - $(date -d "$updated" +%s) ) / 86400 ))
             echo "published build updated $updated (${age}d ago)"
@@ -56,18 +61,21 @@ jobs:
             fail "Could not read 'updated' date from the published build"
           fi
 
-          # 3) Supabase portal liveness — use GoTrue's public /auth/v1/health
-          #    (the jobs table is authenticated-only by RLS, so an anon probe of
-          #    it correctly returns 401 — that's by design, not an outage).
+          # 3) Served URL is up (200 from any CDN edge = Pages is serving)
+          code="$(curl -s -m 25 -o /dev/null -w '%{http_code}' "$SITE" || echo 000)"
+          [ "$code" = "200" ] || fail "Served site HTTP $code (expected 200)"
+
+          # 4) Supabase portal liveness (GoTrue health is public; the jobs table is
+          #    authenticated-only by RLS so we never probe it anonymously) + companion
           if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_PUBLISHABLE_KEY:-}" ]; then
             ac="$(curl -s -m 25 -o /dev/null -w '%{http_code}' \
               "$SUPABASE_URL/auth/v1/health" -H "apikey: $SUPABASE_PUBLISHABLE_KEY" || echo 000)"
             [ "$ac" = "200" ] || fail "Supabase auth health HTTP $ac (expected 200)"
             fc="$(curl -s -m 25 -o /dev/null -w '%{http_code}' -X POST \
               "$SUPABASE_URL/functions/v1/companion" -H 'Content-Type: application/json' -d '{}' || echo 000)"
-            case "$fc" in 200|400|401|429) echo "companion fn alive ($fc)";; *) fail "Companion fn HTTP $fc (expected 200/400/401/429)";; esac
+            case "$fc" in 200|400|401|429) echo "companion fn alive ($fc)";; *) fail "Companion fn HTTP $fc";; esac
           else
-            echo "Supabase not configured in secrets — skipping portal checks (not a failure)."
+            echo "Supabase not configured — skipping portal checks (not a failure)."
           fi
 
           if [ -s /tmp/fails.txt ]; then
@@ -86,16 +94,13 @@ jobs:
               `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const title = "🩺 Health check failing";
             const existing = await github.rest.issues.listForRepo({
-              owner: context.repo.owner, repo: context.repo.repo,
-              state: "open", labels: "health" });
+              owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "health" });
             if (existing.data.length) {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: existing.data[0].number, body });
+              await github.rest.issues.createComment({ owner: context.repo.owner,
+                repo: context.repo.repo, issue_number: existing.data[0].number, body });
             } else {
-              await github.rest.issues.create({
-                owner: context.repo.owner, repo: context.repo.repo,
-                title, body, labels: ["health", "automated"] });
+              await github.rest.issues.create({ owner: context.repo.owner,
+                repo: context.repo.repo, title, body, labels: ["health", "automated"] });
             }
         env:
           SUMMARY: ${{ steps.check.outputs.summary }}
