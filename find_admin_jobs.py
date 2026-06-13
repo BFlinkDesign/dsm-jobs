@@ -26,6 +26,8 @@ No third-party packages required - stock Python 3 only.
 """
 
 import argparse
+import base64
+import binascii
 import csv
 import json
 import os
@@ -815,6 +817,25 @@ def write_csv(rows, path):
                         r["created"], r["source"], "; ".join(sc["reasons"]), r["url"]])
 
 
+# "Will train" — employer-stated phrases that mean a candidate without
+# credentials or history is genuinely in the running. This is the app's
+# counterweight to a buyer's-market feed: the badge is only shown when the
+# EMPLOYER said it (substring of their own posting text), never inferred.
+TRAIN_HINTS = [
+    "no experience necessary", "no experience needed", "no experience required",
+    "no prior experience", "experience not required", "experience is not required",
+    "will train", "we train", "we'll train", "willing to train",
+    "paid training", "training provided", "training is provided",
+    "on-the-job training", "on the job training", "no degree required",
+]
+
+
+def will_train(description):
+    """True when the posting itself says training is provided / no experience."""
+    d = (description or "").lower()
+    return any(h in d for h in TRAIN_HINTS)
+
+
 def _jobs_payload(safe_rows):
     """Build the JSON list the front-end app renders."""
     jobs = []
@@ -841,12 +862,100 @@ def _jobs_payload(safe_rows):
             "category": job_category(r["title"]),
             "commute": "" if r["source"] == "remote" else commute_text(r["location"]),
             "about": snippet(r.get("description")),
+            "trains": will_train(r.get("description")),
         })
     return jobs
 
 
+def _portal_rows(safe_rows, last_seen_iso):
+    """Schema-shaped rows for portal.push (public.jobs upsert).
+
+    Built from the SAME helpers as _jobs_payload so the portal can never
+    disagree with the page. Invariant #1: pay_text is the display string the
+    card shows ("Pay not listed" unless employer-stated); no numeric wage
+    column exists in the portal at all. first_seen is deliberately omitted:
+    the DB default stamps it on insert, and merge-duplicates leaves it alone
+    on update (only columns present in the payload are merged).
+    """
+    rows = []
+    for r in friend_sort(safe_rows):
+        stated = (not r["predicted"]) and (r["hourly_min"] is not None or r["hourly_max"] is not None)
+        rows.append({
+            "id": str(r.get("id") or r["url"]),
+            "title": r["title"],
+            "company": r["company"],
+            "location": r["location"],
+            "pay_text": salary_text(r) if stated else "Pay not listed",
+            "verdict": r["verdict"],
+            "category": job_category(r["title"]),
+            "trust_label": trusted_reason(r["company"]),
+            "commute": "" if r["source"] == "remote" else commute_text(r["location"]),
+            "url": r["url"],
+            "about": snippet(r.get("description")),
+            "trains": will_train(r.get("description")),
+            "source": r["source"],
+            "posted": r["created"] or None,    # "" would be rejected by the date column
+            "last_seen": last_seen_iso,
+        })
+    return rows
+
+
+def _is_browser_safe_supabase_key(key):
+    """True ONLY for a key that is safe to embed in a world-readable page.
+
+    Positive allowlist (not a blacklist): accept the new publishable format
+    (``sb_publishable_...``) or a legacy anon JWT whose decoded ``role`` claim
+    is exactly ``"anon"``. Everything else is rejected — including a legacy
+    ``service_role`` JWT, whose ``role`` lives *inside* the base64url payload
+    (a substring blacklist on ``"service_role"`` misses it). This is the safety
+    net for the realistic operator mistake of pasting the secret/service_role
+    key into the publishable env var.
+    """
+    if key.startswith("sb_publishable_"):
+        return True
+    parts = key.split(".")                        # legacy keys are JWTs: h.p.s
+    if len(parts) == 3 and parts[0].startswith("eyJ"):
+        payload = parts[1] + "=" * (-len(parts[1]) % 4)   # restore b64 padding
+        try:
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+        except (binascii.Error, ValueError, UnicodeDecodeError):
+            return False                          # unparseable -> not safe
+        return claims.get("role") == "anon"
+    return False
+
+
+def _portal_web_config():
+    """Browser config for the portal, or None when not configured.
+
+    Uses the PUBLISHABLE/anon key only (browser-safe by design; RLS +
+    invite-only auth are the boundary). A secret/service_role key must NEVER
+    reach the public page — see _is_browser_safe_supabase_key for the gate.
+    """
+    url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    key = os.environ.get("SUPABASE_PUBLISHABLE_KEY") or ""
+    if not (re.match(r"^https://[a-z0-9-]+\.supabase\.co$", url) and key):
+        return None
+    if not _is_browser_safe_supabase_key(key):
+        raise RuntimeError(
+            "SUPABASE_PUBLISHABLE_KEY is not a browser-safe key - refusing to "
+            "embed it in the public page. Use the publishable (or legacy anon) "
+            "key, NEVER the secret / service_role key."
+        )
+    return {"url": url, "key": key}
+
+
+# Pinned + SRI-locked: the browser refuses the script if the CDN bytes ever
+# change. Hash computed from the fetched artifact 2026-06-12 (sha384).
+PORTAL_SCRIPT_TAG = (
+    '<script id="sbjs" defer crossorigin="anonymous" '
+    'integrity="sha384-EjUdIVmzWliPzdzhxZ9ZoO0etXLKWuUPUftAGxP6qH6Lm4oLwoLaJR0Ba4pIDiDL" '
+    'src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.108.1/dist/umd/supabase.js">'
+    "</script>"
+)
+
+
 def write_html(safe_rows, hidden_count, total_checked, path, generated,
-               contact="me", contact_phone=""):
+               contact="me", contact_phone="", portal_cfg=None):
     jobs = _jobs_payload(safe_rows)
     meta = {
         "contact": contact,
@@ -857,9 +966,13 @@ def write_html(safe_rows, hidden_count, total_checked, path, generated,
     }
     jobs_json = json.dumps(jobs, ensure_ascii=False).replace("</", "<\\/")
     meta_json = json.dumps(meta, ensure_ascii=False).replace("</", "<\\/")
+    portal_json = (json.dumps(portal_cfg, ensure_ascii=False).replace("</", "<\\/")
+                   if portal_cfg else "null")
     out = (APP_TEMPLATE
            .replace("##JOBS##", jobs_json)
-           .replace("##META##", meta_json))
+           .replace("##META##", meta_json)
+           .replace("##PORTAL_SCRIPT##", PORTAL_SCRIPT_TAG if portal_cfg else "")
+           .replace("##PORTAL##", portal_json))
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(out)
 
@@ -871,41 +984,66 @@ APP_TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#ffffff">
+<meta name="theme-color" content="#0e0a16">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Job Board">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
-<title>Job Board — Des Moines</title>
+<title>Job Board — Grimes &amp; Des Moines</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+##PORTAL_SCRIPT##
 <style>
 :root{
- --paper:#ffffff; --card:#ffffff; --surface:#f6f7f9; --ink:#0d1117; --ink2:#5b636e; --line:#e7e9ee;
- --green:#0f9d63; --green-d:#0b7c4e; --green-soft:#e8f7ef;
- --gold:#0b7c4e; --red:#d23b35; --shadow:0 1px 2px rgba(13,17,23,.04);
+ /* Goth violet system. Variable names kept from the light theme so every
+    component re-skins in one place: --green IS the primary (violet) now. */
+ --paper:#0e0a16; --card:#171022; --surface:#1e1530; --ink:#f1eaff; --ink2:#b8a8da; --line:#2e2347;
+ --green:#9333ea; --green-d:#c9a8ff; --green-soft:rgba(147,51,234,.16);
+ --gold:#e9d5ff; --red:#ff7b72; --shadow:0 10px 28px rgba(0,0,0,.35);
+ --glow:0 0 16px rgba(168,85,247,.45);
 }
 *{box-sizing:border-box}
+[hidden]{display:none !important}   /* beat component display rules (flex etc.) */
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);
  font-family:'Atkinson Hyperlegible',-apple-system,Segoe UI,Roboto,Arial,sans-serif;
  font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased}
+/* Star field: pure CSS, fixed, behind everything; gentle twinkle. */
+body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
+ background:
+  radial-gradient(1.5px 1.5px at 12% 18%, rgba(233,213,255,.55) 50%, transparent 51%),
+  radial-gradient(1px 1px at 78% 9%,  rgba(192,132,252,.5) 50%, transparent 51%),
+  radial-gradient(1.5px 1.5px at 64% 32%, rgba(233,213,255,.35) 50%, transparent 51%),
+  radial-gradient(1px 1px at 31% 56%, rgba(192,132,252,.4) 50%, transparent 51%),
+  radial-gradient(1.5px 1.5px at 88% 64%, rgba(233,213,255,.45) 50%, transparent 51%),
+  radial-gradient(1px 1px at 9% 83%,  rgba(192,132,252,.4) 50%, transparent 51%),
+  radial-gradient(1.5px 1.5px at 47% 92%, rgba(233,213,255,.3) 50%, transparent 51%),
+  radial-gradient(ellipse 120% 60% at 50% -10%, rgba(88,28,135,.28), transparent 60%);
+ animation:twinkle 7s ease-in-out infinite alternate}
+@keyframes twinkle{from{opacity:.55}to{opacity:1}}
 .app{max-width:640px;margin:0 auto;padding:0 16px 120px}
 svg{display:inline-block;vertical-align:-2px}
 /* App bar */
-header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
- backdrop-filter:saturate(1.1) blur(10px);margin:0 -16px;padding:16px;
+header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
+ backdrop-filter:saturate(1.2) blur(12px);margin:0 -16px;padding:16px;
  border-bottom:1px solid var(--line)}
 .brandrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);font-weight:700}
-.word{font-family:inherit;font-weight:600;font-size:26px;line-height:1.05;letter-spacing:-.01em}
+.word{font-family:inherit;font-weight:700;font-size:26px;line-height:1.05;letter-spacing:-.01em;
+ background:linear-gradient(100deg,#f1eaff 20%,#c084fc 50%,#e9d5ff 80%);
+ -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
+ position:relative;display:inline-block;padding-right:20px}
+.word::after{content:"\2726";position:absolute;right:0;top:-4px;font-size:14px;
+ -webkit-text-fill-color:#c084fc;animation:spark 2.6s ease-in-out infinite}
+@keyframes spark{0%,100%{opacity:.35;transform:scale(.8) rotate(0deg)}50%{opacity:1;transform:scale(1.15) rotate(18deg)}}
 .safebadge{display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);color:var(--green-d);
- font-size:12px;font-weight:700;padding:6px 10px;border-radius:999px;white-space:nowrap}
+ font-size:12px;font-weight:700;padding:6px 10px;border-radius:999px;white-space:nowrap;
+ border:1px solid rgba(192,132,252,.35)}
 .summary{color:var(--ink2);font-size:14px;margin-top:6px}
 /* Safety */
-.safety{background:#fff;border:1px solid var(--line);border-left:4px solid var(--red);
+.safety{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--red);
  border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
 .safety h2{margin:0 0 4px;font-family:inherit;font-size:19px;font-weight:600;
  display:flex;align-items:center;gap:8px}
@@ -914,18 +1052,18 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
 .safety li{margin:5px 0}
 .safety .note{color:var(--ink2);font-size:15px;margin-top:6px}
 .callbtn{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:12px;
- background:#fff;border:2px solid var(--red);color:var(--red);text-decoration:none;font-weight:700;
+ background:var(--card);border:2px solid var(--red);color:var(--red);text-decoration:none;font-weight:700;
  padding:13px;border-radius:11px;font-size:16px;min-height:52px}
 /* Controls */
 .controls{position:sticky;top:62px;z-index:15;background:var(--paper);padding:10px 0 2px}
 .searchwrap{position:relative}
 .searchwrap svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--ink2)}
 .search{width:100%;font:inherit;font-size:17px;padding:14px 16px 14px 44px;border:1.5px solid var(--line);
- border-radius:12px;background:#fff;min-height:52px;color:var(--ink)}
+ border-radius:12px;background:var(--card);min-height:52px;color:var(--ink)}
 .search:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
 .chips{display:flex;gap:8px;overflow-x:auto;padding:11px 0 5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
-.chip{flex:0 0 auto;background:#fff;border:1.5px solid var(--line);border-radius:999px;
+.chip{flex:0 0 auto;background:var(--card);border:1.5px solid var(--line);border-radius:999px;
  padding:9px 15px;font:inherit;font-size:15px;font-weight:700;color:var(--ink2);min-height:44px;white-space:nowrap;transition:.15s}
 .chip[aria-pressed="true"]{background:var(--green);color:#fff;border-color:var(--green)}
 /* Lists */
@@ -942,11 +1080,12 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
 .co{font-size:16px;font-weight:700;color:var(--ink)}
 .meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--ink2);font-size:14px;margin-top:9px}
 .meta span{display:inline-flex;align-items:center;gap:6px}
-.apply{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;background:var(--green);color:#fff;
+.apply{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;
+ background:linear-gradient(135deg,#9333ea,#7e22ce);color:#fff;box-shadow:var(--glow);
  text-decoration:none;font-weight:700;padding:15px;border-radius:11px;font-size:17px;min-height:54px;transition:.12s}
-.apply:active{transform:scale(.985);background:var(--green-d)}
+.apply:active{transform:scale(.985);background:#6b21a8}
 .actions{display:flex;gap:8px;margin-top:9px}
-.act{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:#fff;
+.act{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--card);
  border:1.5px solid var(--line);border-radius:11px;padding:11px 6px;font:inherit;font-size:14px;font-weight:700;
  min-height:48px;color:var(--ink2);transition:.12s}
 .act:active{transform:scale(.97)}
@@ -957,17 +1096,19 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
 .foot{display:flex;flex-direction:column;align-items:center;gap:6px;color:var(--ink2);font-size:13px;
  text-align:center;margin:30px 0 0;line-height:1.6;border-top:1px solid var(--line);padding-top:18px}
 /* Enhancements */
-.stale{background:#fdf1f0;border:1px solid #f2d3d0;color:#8f2f2a;border-radius:12px;
+.stale{background:rgba(255,123,114,.1);border:1px solid rgba(255,123,114,.35);color:#ffb4ae;border-radius:12px;
  padding:12px 14px;margin:14px 0 0;font-size:15px;line-height:1.45}
-.coach{background:var(--green-soft);border:1px solid #cfe3da;border-radius:14px;
+.coach{background:var(--green-soft);border:1px solid rgba(192,132,252,.3);border-radius:14px;
  padding:14px 44px 12px 16px;margin:18px 0;position:relative}
 .coach h2{margin:0 0 4px;font-size:18px;font-weight:700;color:var(--green-d)}
 .coach ul{margin:6px 0 2px;padding-left:20px}
 .coach li{margin:5px 0;font-size:15px}
 .coach .dismiss{position:absolute;top:8px;right:8px;background:none;border:0;font:inherit;
  font-size:22px;line-height:1;color:var(--green-d);padding:8px;cursor:pointer}
-.newtag{display:inline-flex;align-items:center;background:var(--gold);color:#fff;font-size:12px;
+.newtag{display:inline-flex;align-items:center;background:var(--gold);color:#2e1065;font-size:12px;
  font-weight:700;padding:4px 9px;border-radius:999px}
+.traintag{display:inline-flex;align-items:center;gap:4px;background:rgba(192,132,252,.18);color:var(--green-d);
+ font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;border:1px solid rgba(192,132,252,.4)}
 .pillrow{display:inline-flex;align-items:center;gap:7px}
 .about{margin-top:10px;font-size:15px;color:var(--ink2)}
 .about summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
@@ -977,9 +1118,101 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
 .notes{display:none;margin-top:9px}
 .notes.open{display:block}
 .notes textarea{width:100%;min-height:84px;font:inherit;font-size:15px;border:1.5px solid var(--line);
- border-radius:11px;padding:10px 12px;background:#fff;color:var(--ink);resize:vertical}
+ border-radius:11px;padding:10px 12px;background:var(--card);color:var(--ink);resize:vertical}
 .notes textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
 .old{color:var(--ink2)}
+/* Portal sync bar (hidden entirely unless the portal is configured) */
+.sync{background:var(--green-soft);border:1px solid rgba(192,132,252,.3);border-radius:14px;padding:13px 16px;margin:14px 0 0}
+.syncrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.synccopy{font-size:15px;color:var(--green-d);line-height:1.45}
+.synccopy .who{font-weight:700}
+.syncbtn{flex:0 0 auto;background:var(--green);color:#fff;border:0;border-radius:11px;font:inherit;
+ font-weight:700;font-size:15px;padding:11px 18px;min-height:48px;cursor:pointer}
+.syncbtn:active{transform:scale(.97)}
+.syncform{margin-top:4px}
+.syncform label{display:block;font-size:14px;font-weight:700;color:var(--green-d);margin:2px 0 6px}
+.syncform .search{padding-left:16px}
+.syncform .apply{margin-top:10px;width:100%;border:0;font:inherit;cursor:pointer}
+.syncform .act{margin-top:8px;width:100%;background:var(--card);cursor:pointer}
+.syncform .cancel{margin-top:8px;width:100%;background:none;border:0;color:var(--ink2);
+ font:inherit;font-size:14px;font-weight:700;padding:8px;cursor:pointer}
+.syncmsg{margin-top:9px;font-size:14px;color:var(--green-d);font-weight:700}
+.syncmsg.err{color:var(--red)}
+.syncout{flex:0 0 auto;max-width:120px}
+/* Bottom tab bar */
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:space-around;
+ background:rgba(14,10,22,.92);backdrop-filter:blur(14px);border-top:1px solid var(--line);
+ padding:6px 4px calc(8px + env(safe-area-inset-bottom))}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;
+ color:var(--ink2);font:inherit;font-size:11px;font-weight:700;padding:7px 2px;min-height:52px;cursor:pointer;
+ border-radius:10px;transition:.15s}
+.tab[aria-current="true"]{color:#c084fc;text-shadow:0 0 14px rgba(192,132,252,.6)}
+.tab:active{transform:scale(.94)}
+/* Section intros, encouragement, cards */
+.picksintro h2{margin:18px 0 4px;font-size:22px;font-weight:700}
+.picksintro p{margin:0 0 6px;color:var(--ink2);font-size:15px;line-height:1.5}
+.weekline{font-weight:700;color:var(--green-d)}
+.sparkle{color:#c084fc;animation:spark 2.6s ease-in-out infinite;display:inline-block}
+.enc{margin:18px 2px 0;color:var(--green-d);font-size:15px;font-weight:700;text-align:center}
+.logbtns{display:flex;gap:8px;margin:6px 0 8px}
+.logbtns .act{flex:1}
+.lognote{color:var(--ink2);font-size:14px;line-height:1.5;margin:4px 2px 10px}
+.rescard{background:rgba(255,123,114,.07);border:1px solid rgba(255,123,114,.3);border-radius:14px;
+ padding:14px 16px;margin:14px 0}
+.rescard h3{margin:0 0 8px;font-size:17px;color:#ffb4ae}
+.resline{margin:7px 0;font-size:15px;line-height:1.5}
+.resline a{color:var(--green-d);font-weight:700;text-decoration:none;border-bottom:1px solid rgba(192,132,252,.4)}
+.resnote{margin:10px 0 0;color:var(--ink2);font-size:14px;line-height:1.5}
+.resnote a{color:var(--green-d)}
+.quizcard,.chatcard{background:var(--card);border:1px solid var(--line);border-radius:16px;
+ padding:16px;margin:14px 0;box-shadow:var(--shadow)}
+.quizcard h3,.chatcard h3{margin:0 0 6px;font-size:18px}
+.quizcard p,.chatcard p{margin:0 0 10px;color:var(--ink2);font-size:15px;line-height:1.5}
+.qq{margin:12px 0 4px;font-weight:700;font-size:16px}
+.qopts{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.qopt{background:var(--surface);border:1.5px solid var(--line);border-radius:999px;color:var(--ink2);
+ font:inherit;font-size:14px;font-weight:700;padding:10px 14px;min-height:44px;cursor:pointer;transition:.12s}
+.qopt[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#fff;box-shadow:var(--glow)}
+.qdone{color:var(--green-d);font-weight:700;font-size:14px;margin-top:8px}
+/* Companion chat (signed-in only) */
+.chatlog{display:flex;flex-direction:column;gap:8px;margin:10px 0;max-height:50vh;overflow-y:auto}
+.bub{max-width:85%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.5;white-space:pre-wrap}
+.bub.me{align-self:flex-end;background:var(--green);color:#fff;border-bottom-right-radius:6px}
+.bub.ai{align-self:flex-start;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-bottom-left-radius:6px}
+.chatrow{display:flex;gap:8px;margin-top:8px}
+.chatrow .search{flex:1;min-height:48px}
+.chatrow .syncbtn{min-width:74px}
+.chatnote{font-size:12px;color:var(--ink2);margin-top:8px;line-height:1.45}
+/* FAQ */
+.faq{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px 16px;margin:10px 0}
+.faq summary{font-weight:700;cursor:pointer;font-size:16px;color:var(--ink)}
+.faq p{color:var(--ink2);font-size:15px;line-height:1.55;margin:8px 0 2px}
+/* Toast + applied celebration */
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + env(safe-area-inset-bottom));
+ z-index:40;display:flex;align-items:center;gap:10px;background:#241738;border:1px solid rgba(192,132,252,.5);
+ color:var(--ink);font-size:15px;font-weight:700;padding:12px 18px;border-radius:999px;box-shadow:var(--glow);
+ max-width:92vw;animation:rise .25s ease both}
+.toast button{background:none;border:0;color:#c084fc;font:inherit;font-weight:700;cursor:pointer;padding:4px}
+.burst{position:fixed;z-index:50;pointer-events:none;color:#c084fc;font-size:16px;animation:burst 1s ease-out forwards}
+@keyframes burst{0%{opacity:1;transform:translate(0,0) scale(.6) rotate(0)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(1.3) rotate(120deg)}}
+/* Snooze (Not today) */
+.act.snz.on{background:var(--surface);color:var(--green-d);border-color:rgba(192,132,252,.4)}
+/* Call script */
+.script{margin-top:9px}
+.script summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
+.script blockquote{margin:8px 0 0;padding:10px 12px;background:var(--surface);border-left:3px solid var(--green);
+ border-radius:8px;color:var(--ink);font-size:15px;line-height:1.55}
+/* Work-search log: print only */
+@media print{
+ body{background:#fff;color:#000}
+ body::before{display:none}
+ .app>*:not(#worklog),.tabbar,.toast{display:none !important}
+ #worklog{display:block !important;color:#000}
+ #worklog h1{font-size:18px;margin:0 0 2px}
+ #worklog p{font-size:12px;margin:2px 0 10px}
+ #worklog table{width:100%;border-collapse:collapse;font-size:12px}
+ #worklog th,#worklog td{border:1px solid #444;padding:6px 8px;text-align:left;vertical-align:top}
+}
 @keyframes rise{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.card{animation:none}}
 </style>
@@ -989,7 +1222,7 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
   <header class="bar">
     <div class="brandrow">
       <div>
-        <div class="eyebrow">Des Moines Metro</div>
+        <div class="eyebrow">Grimes &middot; Des Moines metro</div>
         <div class="word">Job Board</div>
       </div>
       <span class="safebadge"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Scam-checked</span>
@@ -998,6 +1231,88 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
   </header>
 
   <div class="stale" id="stale" hidden></div>
+
+  <section class="sync" id="syncbar" hidden>
+    <div class="syncrow" id="syncrow-out" hidden>
+      <div class="synccopy"><span class="who">Got a new phone, or use a tablet too?</span><br>
+        Sign in and your Applied, Saved and notes follow you.</div>
+      <button class="syncbtn" id="syncopen">Sign in</button>
+    </div>
+    <div class="syncform" id="syncform" hidden>
+      <label for="syncemail">Your email address</label>
+      <input class="search" id="syncemail" type="email" inputmode="email" autocomplete="email"
+        placeholder="you@example.com" aria-label="Email address for sign-in link">
+      <button class="apply" id="syncsend">Email me a sign-in link</button>
+      <button class="act" id="syncgoogle"><svg viewBox="0 0 24 24" width="16" height="16"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 01-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 01-10.8-3.8H1.2v3.1A12 12 0 0012 24z"/><path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 010-4.6V6.6H1.2a12 12 0 000 10.8z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4A12 12 0 001.2 6.6l4.1 3.1A7.2 7.2 0 0112 4.8z"/></svg>&nbsp;Continue with Google</button>
+      <button class="cancel" id="synccancel">Not now</button>
+      <div class="syncmsg" id="syncmsg" role="status"></div>
+    </div>
+    <div class="syncrow" id="syncrow-in" hidden>
+      <div class="synccopy" id="syncwho"></div>
+      <button class="act syncout" id="syncout">Sign out</button>
+    </div>
+  </section>
+
+  <!-- TODAY view: 3 curated picks, one small win at a time -->
+  <section id="todaywrap" hidden>
+    <div class="picksintro">
+      <h2>Today&rsquo;s 3 picks <span class="sparkle">&#10022;</span></h2>
+      <p>You don&rsquo;t have to look at every job. Here are 3 good ones for today &mdash;
+      checked, no degree needed. Apply to one and you&rsquo;ve done today&rsquo;s job search.</p>
+    </div>
+    <div id="picks"></div>
+    <div class="enc" id="todayenc"></div>
+  </section>
+
+  <!-- MY APPS view: applications + the Iowa work-search log -->
+  <section id="appswrap" hidden>
+    <div class="picksintro">
+      <h2>My applications</h2>
+      <p class="weekline" id="weekline"></p>
+    </div>
+    <div class="logbtns">
+      <button class="act" id="printlog">Print my work-search log</button>
+      <button class="act" id="copylog">Copy as text</button>
+    </div>
+    <p class="lognote">Iowa unemployment asks for <b>4 work-search activities each week</b>
+    (Sunday&ndash;Saturday), and at least 3 must be job applications. This log keeps
+    them for you &mdash; print it or copy it into your weekly claim.</p>
+    <div id="applist"></div>
+  </section>
+
+  <!-- MY CORNER view: companion, quiz, resources -->
+  <section id="cornerwrap" hidden>
+    <div class="picksintro">
+      <h2 id="cornerhi">My corner <span class="sparkle">&#10022;</span></h2>
+      <p id="cornergreet"></p>
+    </div>
+
+    <div class="rescard">
+      <h3>Need help right now?</h3>
+      <p class="resline"><b>988</b> &mdash; call or text, free, 24/7 (Suicide &amp; Crisis Lifeline)</p>
+      <p class="resline"><b>Your Life Iowa</b> &mdash; call <a href="tel:8555818111">855-581-8111</a>
+        or text <a href="sms:8558958398">855-895-8398</a>, free, 24/7</p>
+      <p class="resline"><b>Iowa Warm Line</b> &mdash; <a href="tel:8447759276">844-775-9276</a>
+        &mdash; just want someone kind to talk to? That&rsquo;s what this one is for.</p>
+      <p class="resnote">All free. No insurance needed. No questions asked.
+        More help (food, rent, free clinics): dial <b>2-1-1</b> or visit
+        <a href="https://www.211iowa.org" target="_blank" rel="noopener">211iowa.org</a>.</p>
+    </div>
+
+    <div class="quizcard" id="quizcard">
+      <h3>About me <span class="sparkle">&#10022;</span></h3>
+      <p id="quizintro">Answer a few easy questions and the Jobs page starts putting
+      the right ones first. No wrong answers. Change them any time.</p>
+      <div id="quizbody"></div>
+    </div>
+
+    <div class="chatcard" id="chatcard">
+      <h3>Your companion</h3>
+      <p id="chatstate">A friendly check-in chat that gets to know you and helps with
+      the search &mdash; it turns on once sign-in is set up. Your quiz answers above
+      already make the app smarter today.</p>
+    </div>
+  </section>
 
   <section class="safety">
     <h2><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/></svg>Before you apply</h2>
@@ -1024,6 +1339,31 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
     </ul>
   </section>
 
+  <div id="faqwrap" hidden>
+    <div class="picksintro"><h2>Questions people ask</h2></div>
+    <details class="faq"><summary>Are these jobs real?</summary>
+      <p>Every job here came from the employer's own hiring system or a checked job site,
+      and each one was screened for scams before you ever see it. Jobs that looked wrong
+      were removed &mdash; the number we removed is shown at the bottom of the Jobs page.</p></details>
+    <details class="faq"><summary>What does &ldquo;Will train&rdquo; mean?</summary>
+      <p>The employer wrote in their own posting that no experience is needed or that they
+      provide training. Those are great ones to try even if you don&rsquo;t feel qualified.</p></details>
+    <details class="faq"><summary>What if I don't meet everything they ask for?</summary>
+      <p>Job ads are wish lists. If you can do about half of what they list, apply anyway &mdash;
+      that's normal and employers expect it.</p></details>
+    <details class="faq"><summary>Why does it say &ldquo;Pay not listed&rdquo;?</summary>
+      <p>The employer didn&rsquo;t post the wage. That&rsquo;s common and not a bad sign &mdash;
+      ask what it pays when they contact you.</p></details>
+    <details class="faq"><summary>How does the work-search log work?</summary>
+      <p>When you mark a job Applied, it's saved with the date automatically. The
+      <b>My apps</b> tab can print or copy your weekly list for your Iowa unemployment claim.</p></details>
+    <details class="faq"><summary>Is my information private?</summary>
+      <p>Everything stays on your phone unless you choose to sign in. Signing in saves your
+      jobs, notes and chats to a private account so a new phone doesn&rsquo;t lose them. It&rsquo;s
+      never sold, never shown to employers, and never used for ads. The only person who could
+      ever see what&rsquo;s saved is the person who set this up for you &mdash; nobody else.</p></details>
+  </div>
+
   <div class="controls">
     <div class="searchwrap">
       <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
@@ -1038,12 +1378,29 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);
   <div class="count" id="count"></div>
   <div id="list"></div>
   <div class="empty" id="empty" hidden></div>
+  <div class="enc" id="footenc"></div>
   <div class="foot" id="foot"></div>
+
+  <!-- Print-only: the Iowa work-search log -->
+  <div id="worklog" hidden></div>
 </div>
+
+<div class="toast" id="toast" hidden>
+  <span id="toasttext"></span><button id="toastact" hidden></button>
+</div>
+
+<nav class="tabbar" aria-label="App sections">
+  <button class="tab" id="nav-jobs" aria-current="true"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M8 7V5a2 2 0 012-2h4a2 2 0 012 2v2"/></svg><span>Jobs</span></button>
+  <button class="tab" id="nav-today" aria-current="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l2.2 5.4L20 9l-4.4 3.9L17 19l-5-3.2L7 19l1.4-6.1L4 9l5.8-.6z"/></svg><span>Today</span></button>
+  <button class="tab" id="nav-apps" aria-current="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M9 11l3 3 8-8"/><path d="M20 12v6a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2h9"/></svg><span>My apps</span></button>
+  <button class="tab" id="nav-corner" aria-current="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21s-7-4.6-9.3-9A5.4 5.4 0 0112 6.3 5.4 5.4 0 0121.3 12c-2.3 4.4-9.3 9-9.3 9z"/></svg><span>My corner</span></button>
+  <button class="tab" id="nav-help" aria-current="false"><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 114.1 1.9c-.8.7-1.6 1.2-1.6 2.3"/><circle cx="12" cy="16.8" r=".5"/></svg><span>Help</span></button>
+</nav>
 
 <script>
 const JOBS = ##JOBS##;
 const META = ##META##;
+const PORTAL = ##PORTAL##;   // {url, key(publishable)} or null when not configured
 const LS = "myjobs:v1";
 function load(){ try{return JSON.parse(localStorage.getItem(LS))||{}}catch(e){return {}} }
 function save(s){ try{localStorage.setItem(LS, JSON.stringify(s))}catch(e){} }
@@ -1062,9 +1419,17 @@ state.saved   = new Set(state.saved||[]);
 state.hidden  = new Set(state.hidden||[]);
 state.notes   = state.notes || {};
 state.coachOff = !!state.coachOff;
+state.snooze  = state.snooze || {};          // id -> "come back on" date (gentler than Hide)
+state.appliedLog = state.appliedLog || {};   // id -> {t,c,d,u} captured at apply time, so the
+                                             // work-search log survives jobs leaving the feed
+state.profile = state.profile || {};         // quiz answers -> "For you" feed boost
 const prevSeen = new Set(state.seen||[]);
 function persist(){ save({applied:state.applied, saved:[...state.saved], hidden:[...state.hidden],
-  notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff}); }
+  notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff,
+  snooze:state.snooze, appliedLog:state.appliedLog, profile:state.profile}); }
+// Ledger backfill: any applied job still in today's feed gets its details kept.
+JOBS.forEach(j=>{ if(state.applied[j.id] && !state.appliedLog[j.id])
+  state.appliedLog[j.id]={t:j.title,c:j.company,d:state.applied[j.id],u:j.url}; });
 
 // "New since your last visit": anything not on the page they saw last time.
 // On the very first visit nothing is badged (everything would be "new").
@@ -1076,12 +1441,16 @@ persist();
 
 const openNotes = new Set();
 let filters = { q:"", cat:"", pay:false, inperson:false, remote:false, known:false,
-                saved:false, applied:false, showHidden:false };
+                saved:false, applied:false, showHidden:false, trains:false };
+function snoozedNow(id){
+  const until = state.snooze[id];
+  return until && until > today();           // ISO dates compare as strings
+}
 
 const CHIPS = [
-  ["pay","$19+/hr"], ["inperson","In person"], ["remote","Work from home"],
-  ["known","Verified employer"], ["saved","Saved"], ["applied","Applied"],
-  ["showHidden","Hidden"],
+  ["trains","Will train ✦"], ["pay","$19+/hr"], ["inperson","In person"],
+  ["remote","Work from home"], ["known","Verified employer"], ["saved","Saved"],
+  ["applied","Applied"], ["showHidden","Hidden"],
 ];
 const CATS = [...new Set(JOBS.map(j=>j.category).filter(Boolean))];
 const IC = {
@@ -1103,6 +1472,7 @@ function safeUrl(u){try{var p=new URL(u,location.href);return (p.protocol==="htt
 function matches(j){
   if(!filters.showHidden && state.hidden.has(j.id)) return false;
   if(filters.showHidden && !state.hidden.has(j.id)) return false;
+  if(!filters.showHidden && snoozedNow(j.id)) return false;   // "Not today" naps
   if(filters.q){
     const q=filters.q.toLowerCase();
     if(!((j.title+" "+j.company+" "+j.location).toLowerCase().includes(q))) return false;
@@ -1114,23 +1484,50 @@ function matches(j){
   if(filters.known && !j.trusted) return false;
   if(filters.saved && !state.saved.has(j.id)) return false;
   if(filters.applied && !(j.id in state.applied)) return false;
+  if(filters.trains && !j.trains) return false;
   return true;
+}
+
+/* "For you": quiz answers gently float matching jobs upward inside the
+   scanner's trust-first order. A boost, never a burial — base order is kept
+   as the tiebreaker (invariant: never bury "Pay not listed" or low scorers). */
+function forYouScore(j){
+  const p = state.profile; let s = 0;
+  if(p.kind){
+    const k = j.category||"";
+    if(p.kind==="people" && (k==="Customer service"||k==="Store & retail")) s+=2;
+    if(p.kind==="quiet"  && (k==="Office"||k==="Production & labor")) s+=2;
+    if(p.kind==="hands"  && (k==="Production & labor"||k==="Food & cleaning")) s+=2;
+    if(p.kind==="care"   && k==="Caregiving") s+=2;
+  }
+  if(p.where==="home" && j.remote) s+=2;
+  if(p.where==="out" && !j.remote) s+=1;
+  if(p.confidence==="low" && j.trains) s+=2;      // "will train" first when feeling shaky
+  if(p.pay==="must" && j.good) s+=1;
+  return s;
+}
+function orderForYou(list){
+  if(!Object.keys(state.profile).length) return list;
+  return list.map((j,i)=>[forYouScore(j), -i, j])
+             .sort((a,b)=> b[0]-a[0] || b[1]-a[1])
+             .map(x=>x[2]);
 }
 
 function render(){
   const good = JOBS.filter(j=>j.good).length;
   document.getElementById("summary").textContent =
-    JOBS.length + " safe jobs · " + good + " pay $19+/hr" +
-    (newCount ? " · " + newCount + " new since your last visit" : "") +
+    JOBS.length + " safe jobs · every one scam-checked, no degree needed" +
+    (newCount ? " · " + newCount + " new" : "") +
     " · updated " + META.generated;
   const ap = Object.keys(state.applied).length;
+  const wk = appsThisWeek();
   const prog = document.getElementById("progress");
-  prog.innerHTML = ap ? (IC.check + "You've applied to " + ap + (ap===1?" job":" jobs")) : "";
+  prog.innerHTML = ap ? (IC.check + "You've applied to " + ap + (ap===1?" job":" jobs") +
+    (wk ? " · " + wk + " this week" : "")) : "";
 
   // Jobs are pre-sorted by the scanner: verified employers first, then $19+,
-  // then newest. Keep that order — sorting by pay here would bury the
-  // "Pay not listed" jobs, which are often the best leads.
-  const list = JOBS.filter(matches);
+  // then newest. "For you" (quiz) only nudges within that — never buries.
+  const list = orderForYou(JOBS.filter(matches));
 
   document.getElementById("count").textContent =
     list.length + (filters.showHidden?" hidden ":" ") + (list.length===1?"job":"jobs");
@@ -1141,48 +1538,66 @@ function render(){
   empty.hidden = list.length>0;
   if(!list.length){ empty.innerHTML = IC.eye + "<div>No jobs match. Turn off a filter to see more.</div>"; }
 
-  list.forEach(function(j,i){
-    const appliedOn = state.applied[j.id], applied = !!appliedOn, saved = state.saved.has(j.id);
-    const note = state.notes[j.id] || "";
-    const appliedDays = applied ? daysSince(appliedOn) : null;
-    const payCls = j.good ? "good" : "none";
-    const verified = j.trusted
-      ? '<span class="verified">'+IC.check+'Verified'+(j.trustLabel?' — '+esc(j.trustLabel):' employer')+'</span>'
-      : '<span></span>';
-    const where = j.remote ? (IC.home+"Work from home") : (IC.bldg+"In person");
-    const postedDays = daysSince(j.posted);
-    const el = document.createElement("div");
-    el.className = "card";
-    el.style.animationDelay = (Math.min(i,12)*0.025)+"s";
-    el.innerHTML =
-      '<div class="cardtop"><span class="pillrow"><span class="pill '+payCls+'">'+esc(j.pay)+'</span>'+
-        (isNew[j.id]?'<span class="newtag">New</span>':'')+'</span>'+verified+'</div>'+
-      '<div class="title">'+esc(j.title)+'</div>'+
-      '<div class="co">'+esc(j.company)+'</div>'+
-      '<div class="meta">'+
-        '<span>'+IC.pin+esc(j.location)+'</span>'+
-        (j.commute?'<span>'+IC.car+esc(j.commute)+'</span>':'')+
-        '<span>'+where+'</span>'+
-        (j.posted?'<span'+(postedDays!=null&&postedDays>=21?' class="old"':'')+'>posted '+esc(ago(j.posted)||j.posted)+'</span>':'')+
-      '</div>'+
-      (j.about?'<details class="about"><summary>What you\'d do</summary><p>'+esc(j.about)+'</p></details>':'')+
-      (applied&&appliedDays!=null&&appliedDays>=5
-        ?'<div class="nudge">You applied '+esc(ago(appliedOn))+' — it\'s okay to call and ask about your application.</div>':'')+
-      '<a class="apply" href="'+esc(safeUrl(j.url))+'" target="_blank" rel="noopener" data-act="open" data-id="'+esc(j.id)+'">Apply'+IC.arrow+'</a>'+
-      '<div class="actions">'+
-        '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+IC.check+(applied?'Applied':'I applied')+'</button>'+
-        '<button class="act'+(saved?' on':'')+'" data-act="saved" data-id="'+esc(j.id)+'">'+IC.bookmark+(saved?'Saved':'Save')+'</button>'+
-        '<button class="act" data-act="hide" data-id="'+esc(j.id)+'">'+IC.eye+(filters.showHidden?'Unhide':'Hide')+'</button>'+
-      '</div>'+
-      '<div class="actions">'+
-        '<button class="act'+(note?' on':'')+'" data-act="notes" data-id="'+esc(j.id)+'">'+IC.pen+(note?'My notes':'Add note')+'</button>'+
-        (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Send to '+esc(META.contact||"a friend")+'</button>':'')+
-      '</div>'+
-      '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
-        '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — who you talked to, when to follow up">'+esc(note)+'</textarea>'+
-      '</div>';
-    wrap.appendChild(el);
-  });
+  list.forEach(function(j,i){ wrap.appendChild(cardEl(j,i)); });
+  renderPicks(); renderApps(); renderCorner();
+}
+
+function callScriptHTML(j, appliedOn){
+  // A word-for-word script takes the fear out of the follow-up call.
+  const when = ago(appliedOn) || "recently";
+  return '<details class="script"><summary>'+IC.pen+' What do I say if I call?</summary>'+
+    '<blockquote>&ldquo;Hi! My name is ____. I applied for the '+esc(j.title)+
+    ' job '+esc(when)+', and I wanted to check if it&rsquo;s still open and if you need anything else from me.'+
+    ' Thank you!&rdquo;</blockquote>'+
+    '<p style="margin:6px 0 0;font-size:13px;color:var(--ink2)">That&rsquo;s the whole call. Short is perfect. If voicemail, say the same thing plus your phone number.</p>'+
+    '</details>';
+}
+
+function cardEl(j, i){
+  const appliedOn = state.applied[j.id], applied = !!appliedOn, saved = state.saved.has(j.id);
+  const note = state.notes[j.id] || "";
+  const appliedDays = applied ? daysSince(appliedOn) : null;
+  const payCls = j.good ? "good" : "none";
+  const verified = j.trusted
+    ? '<span class="verified">'+IC.check+'Verified'+(j.trustLabel?' — '+esc(j.trustLabel):' employer')+'</span>'
+    : '<span></span>';
+  const where = j.remote ? (IC.home+"Work from home") : (IC.bldg+"In person");
+  const postedDays = daysSince(j.posted);
+  const snoozed = snoozedNow(j.id);
+  const el = document.createElement("div");
+  el.className = "card";
+  el.style.animationDelay = (Math.min(i,12)*0.025)+"s";
+  el.innerHTML =
+    '<div class="cardtop"><span class="pillrow"><span class="pill '+payCls+'">'+esc(j.pay)+'</span>'+
+      (j.trains?'<span class="traintag">&#10022; Will train</span>':'')+
+      (isNew[j.id]?'<span class="newtag">New</span>':'')+'</span>'+verified+'</div>'+
+    '<div class="title">'+esc(j.title)+'</div>'+
+    '<div class="co">'+esc(j.company)+'</div>'+
+    '<div class="meta">'+
+      '<span>'+IC.pin+esc(j.location)+'</span>'+
+      (j.commute?'<span>'+IC.car+esc(j.commute)+'</span>':'')+
+      '<span>'+where+'</span>'+
+      (j.posted?'<span'+(postedDays!=null&&postedDays>=21?' class="old"':'')+'>posted '+esc(ago(j.posted)||j.posted)+'</span>':'')+
+    '</div>'+
+    (j.about?'<details class="about"><summary>What you\'d do</summary><p>'+esc(j.about)+'</p></details>':'')+
+    (applied&&appliedDays!=null&&appliedDays>=5
+      ?'<div class="nudge">You applied '+esc(ago(appliedOn))+' — it\'s okay to call and ask about your application.'+
+        callScriptHTML(j, appliedOn)+'</div>':'')+
+    '<a class="apply" href="'+esc(safeUrl(j.url))+'" target="_blank" rel="noopener" data-act="open" data-id="'+esc(j.id)+'">Apply'+IC.arrow+'</a>'+
+    '<div class="actions">'+
+      '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+IC.check+(applied?'Applied':'I applied')+'</button>'+
+      '<button class="act'+(saved?' on':'')+'" data-act="saved" data-id="'+esc(j.id)+'">'+IC.bookmark+(saved?'Saved':'Save')+'</button>'+
+      '<button class="act snz'+(snoozed?' on':'')+'" data-act="snooze" data-id="'+esc(j.id)+'">'+IC.eye+(snoozed?'Napping':'Not today')+'</button>'+
+      '<button class="act" data-act="hide" data-id="'+esc(j.id)+'">'+IC.eye+(filters.showHidden?'Unhide':'Hide')+'</button>'+
+    '</div>'+
+    '<div class="actions">'+
+      '<button class="act'+(note?' on':'')+'" data-act="notes" data-id="'+esc(j.id)+'">'+IC.pen+(note?'My notes':'Add note')+'</button>'+
+      (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Send to '+esc(META.contact||"a friend")+'</button>':'')+
+    '</div>'+
+    '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
+      '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — who you talked to, when to follow up">'+esc(note)+'</textarea>'+
+    '</div>';
+  return el;
 }
 
 function buildChips(){
@@ -1215,14 +1630,39 @@ function buildChips(){
 
 const jobById = new Map(JOBS.map(j=>[j.id,j]));
 
-document.getElementById("list").addEventListener("click",(e)=>{
+function markApplied(id, el){
+  state.appliedLog[id] = state.appliedLog[id] ||
+    (jobById.get(id) ? {t:jobById.get(id).title, c:jobById.get(id).company,
+                        d:today(), u:jobById.get(id).url} : {t:"(job)", c:"", d:today(), u:""});
+  state.appliedLog[id].d = state.applied[id];
+  celebrate(el);
+}
+
+// Delegated on the app container so Jobs, Today's picks and My-apps cards
+// all share one set of handlers.
+document.querySelector(".app").addEventListener("click",(e)=>{
   const t=e.target.closest("[data-act]"); if(!t) return;
   const id=t.getAttribute("data-id"), act=t.getAttribute("data-act");
-  if(act==="open"){ if(!state.applied[id]) state.applied[id]=today(); persist(); setTimeout(render,400); return; }
+  if(act==="open"){
+    if(!state.applied[id]){ state.applied[id]=today(); markApplied(id, t); }
+    persist(); setTimeout(render,400); return;
+  }
   e.preventDefault();
-  if(act==="applied"){ state.applied[id] ? delete state.applied[id] : state.applied[id]=today(); }
+  if(act==="applied"){
+    if(state.applied[id]){ delete state.applied[id]; }
+    else { state.applied[id]=today(); markApplied(id, t); }
+  }
   if(act==="saved"){ state.saved.has(id)?state.saved.delete(id):state.saved.add(id); }
   if(act==="hide"){ state.hidden.has(id)?state.hidden.delete(id):state.hidden.add(id); }
+  if(act==="snooze"){
+    if(snoozedNow(id)){ delete state.snooze[id]; }
+    else {
+      const until=new Date(); until.setDate(until.getDate()+3);
+      state.snooze[id]=until.toISOString().slice(0,10);
+      showToast("Okay — it'll come back in a few days.", "Undo",
+        function(){ delete state.snooze[id]; persist(); render(); });
+    }
+  }
   if(act==="notes"){
     const box=t.closest(".card").querySelector(".notes");
     const open=box.classList.toggle("open");
@@ -1235,11 +1675,12 @@ document.getElementById("list").addEventListener("click",(e)=>{
     if(j && navigator.share){ navigator.share({title:j.title+" at "+j.company, url:safeUrl(j.url)}).catch(()=>{}); }
     return;
   }
+  if(act==="qopt"){ quizPick(t); return; }
   persist(); render();
 });
 
 // Auto-save notes as they type (no re-render, so the keyboard stays up).
-document.getElementById("list").addEventListener("input",(e)=>{
+document.querySelector(".app").addEventListener("input",(e)=>{
   const t=e.target.closest("[data-note]"); if(!t) return;
   const id=t.getAttribute("data-note");
   const v=t.value;
@@ -1278,8 +1719,438 @@ document.getElementById("foot").innerHTML =
   "<div>We checked "+META.total+" postings and hid <b>"+META.hidden+"</b> that looked like scams.</div>"+
   "<div>Tip: tap Share, then <b>Add to Home Screen</b> to keep this on your phone.</div>";
 
+/* ── Gentle engine: encouragement, celebration, toast ─────────────────── */
+function dayHash(){ const d=today(); let h=0; for(let i=0;i<d.length;i++) h=(h*31+d.charCodeAt(i))>>>0; return h; }
+const ENC_LINES = [
+  "Job ads are wish lists. If you can do about half of it, apply.",
+  "Job searching is real work. You showed up today — that counts.",
+  "Entry-level postings get fewer real applicants than you'd think. Yours matters.",
+  "One application today beats five you never send. Small is fine.",
+  "“Pay not listed” isn't a no — it's a question you get to ask.",
+  "Rough day? The jobs will still be here tomorrow. Be kind to yourself.",
+];
+const KIND_LINES = [
+  "That took effort. Nice work. ✦",
+  "Applied! That's a real step forward. ✦",
+  "Look at you go. One more out the door. ✦",
+  "Done and counted — it's in your weekly log too. ✦",
+];
+let toastTimer = null;
+function showToast(text, label, fn){
+  const t=document.getElementById("toast"), b=document.getElementById("toastact");
+  document.getElementById("toasttext").textContent = text;
+  if(label && fn){ b.hidden=false; b.textContent=label; b.onclick=function(){ t.hidden=true; fn(); }; }
+  else { b.hidden=true; b.onclick=null; }
+  t.hidden=false;
+  clearTimeout(toastTimer); toastTimer=setTimeout(function(){ t.hidden=true; }, 6000);
+}
+const REDUCED = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+function celebrate(el){
+  const n = Object.keys(state.applied).length;
+  showToast(KIND_LINES[n % KIND_LINES.length]);
+  if(REDUCED || !el || !el.getBoundingClientRect) return;
+  const r = el.getBoundingClientRect();
+  for(let i=0;i<8;i++){
+    const s=document.createElement("span");
+    s.className="burst"; s.textContent="✦";
+    s.style.left=(r.left+r.width/2)+"px"; s.style.top=(r.top+r.height/2)+"px";
+    s.style.setProperty("--bx", (Math.cos(i/8*6.283)*70+(Math.random()*20-10))+"px");
+    s.style.setProperty("--by", (Math.sin(i/8*6.283)*70-30)+"px");
+    document.body.appendChild(s);
+    setTimeout(function(){ s.remove(); }, 1100);
+  }
+}
+
+/* ── Weekly tally (Iowa work-search week runs Sunday–Saturday) ──────────── */
+function weekStart(){
+  const d=new Date(); d.setDate(d.getDate()-d.getDay());   // back to Sunday
+  return d.toISOString().slice(0,10);
+}
+function appsThisWeek(){
+  const ws=weekStart();
+  return Object.values(state.applied).filter(function(d){ return d && d>=ws; }).length;
+}
+
+/* ── Today's 3 picks: deterministic per day, trusted/will-train first ──── */
+function todaysPicks(){
+  const pool = JOBS.filter(function(j){
+    return !state.applied[j.id] && !state.hidden.has(j.id) && !snoozedNow(j.id);
+  });
+  const ranked = orderForYou(pool).map(function(j,i){
+    return [ (j.trusted?2:0)+(j.trains?1:0), -i, j ];
+  }).sort(function(a,b){ return b[0]-a[0] || b[1]-a[1]; }).map(function(x){ return x[2]; });
+  const picks=[], h=dayHash(), top=ranked.slice(0, Math.min(12, ranked.length));
+  for(let k=0; k<top.length && picks.length<3; k++){
+    picks.push(top[(h+k*5) % top.length]);
+    for(let dup=0; dup<picks.length-1; dup++)
+      if(picks[dup]===picks[picks.length-1]){ picks.pop(); break; }
+  }
+  return picks;
+}
+function renderPicks(){
+  const wrap=document.getElementById("picks"); if(!wrap) return;
+  wrap.innerHTML="";
+  const picks=todaysPicks();
+  document.getElementById("todayenc").textContent = ENC_LINES[dayHash()%ENC_LINES.length];
+  if(!picks.length){
+    wrap.innerHTML='<div class="empty">'+IC.check+"<div>You've worked through today's list — genuinely well done. New jobs arrive every morning.</div></div>";
+    return;
+  }
+  picks.forEach(function(j,i){ wrap.appendChild(cardEl(j,i)); });
+}
+
+/* ── My applications + the printable Iowa work-search log ──────────────── */
+function appliedEntries(){
+  return Object.keys(state.applied).map(function(id){
+    const lg = state.appliedLog[id] || {};
+    const j = jobById.get(id);
+    return { id:id, date: state.applied[id] || lg.d || "",
+             title: lg.t || (j&&j.title) || "(job no longer listed)",
+             company: lg.c || (j&&j.company) || "",
+             url: lg.u || (j&&j.url) || "" };
+  }).sort(function(a,b){ return a.date<b.date?1:-1; });
+}
+function renderApps(){
+  const wrap=document.getElementById("applist"); if(!wrap) return;
+  const wk=appsThisWeek();
+  document.getElementById("weekline").innerHTML =
+    wk + (wk===1?" application":" applications") + " this week " +
+    (wk>=3 ? "— that covers the 3 applications Iowa asks for. ✦"
+           : "— Iowa asks for 4 work-search activities a week, 3 of them applications.");
+  wrap.innerHTML="";
+  const rows=appliedEntries();
+  if(!rows.length){
+    wrap.innerHTML='<div class="empty">'+IC.pen+'<div>Nothing here yet — and that\'s okay. When you tap <b>Apply</b> or <b>I applied</b> on a job, it lands here with the date saved.</div></div>';
+    return;
+  }
+  rows.forEach(function(r){
+    const j=jobById.get(r.id);
+    const days=daysSince(r.date);
+    const el=document.createElement("div");
+    el.className="card";
+    el.innerHTML =
+      '<div class="title">'+esc(r.title)+'</div>'+
+      '<div class="co">'+esc(r.company)+'</div>'+
+      '<div class="meta"><span>'+IC.check+'applied '+esc(ago(r.date)||r.date)+'</span></div>'+
+      (days!=null&&days>=5&&j?'<div class="nudge">It\'s been a bit — a quick call shows you\'re serious.'+callScriptHTML(j,r.date)+'</div>':'')+
+      (r.url?'<div class="actions"><a class="act" style="text-decoration:none" href="'+esc(safeUrl(r.url))+'" target="_blank" rel="noopener">'+IC.arrow+'View job</a>'+
+      '<button class="act" data-act="applied" data-id="'+esc(r.id)+'">'+IC.eye+'Un-mark</button></div>':'');
+    wrap.appendChild(el);
+  });
+}
+function logRowsText(){
+  return appliedEntries().map(function(r){
+    return r.date+"  —  "+r.title+(r.company?", "+r.company:"")+"  —  applied online";
+  });
+}
+document.getElementById("printlog").onclick = function(){
+  const rows=appliedEntries();
+  const wl=document.getElementById("worklog");
+  wl.innerHTML =
+    "<h1>Work-Search Log</h1>"+
+    "<p>Name: ______________________   Week of "+esc(weekStart())+" (Sunday–Saturday)   "+
+    "Iowa asks for 4 reemployment activities per week; at least 3 must be job applications.</p>"+
+    "<table><tr><th>Date</th><th>Position</th><th>Employer</th><th>How</th><th>Result / notes</th></tr>"+
+    rows.map(function(r){
+      return "<tr><td>"+esc(r.date)+"</td><td>"+esc(r.title)+"</td><td>"+esc(r.company)+
+             "</td><td>Online application</td><td>"+esc((state.notes[r.id]||"").slice(0,80))+"</td></tr>";
+    }).join("")+
+    (rows.length?"":"<tr><td colspan=5>(no applications logged yet)</td></tr>")+
+    "</table>";
+  wl.hidden=false;
+  window.print();
+};
+document.getElementById("copylog").onclick = function(){
+  const text="My work-search log\n"+logRowsText().join("\n");
+  (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
+    .then(function(){ showToast("Copied — paste it into your weekly claim or a text."); })
+    .catch(function(){ showToast("Couldn't copy automatically — use Print instead."); });
+};
+
+/* ── My corner: greeting + about-me quiz (tunes the feed today; the AI
+      companion plugs in here once sign-in exists) ───────────────────────── */
+const QUIZ = [
+  ["kind","What kind of work sounds best right now?",
+    [["people","With people"],["quiet","Quiet & organized"],["hands","Keeping my hands busy"],["care","Caring for others"]]],
+  ["where","Where would you rather be?",
+    [["out","Out of the house"],["home","Working from home"],["either","Either is fine"]]],
+  ["time","What hours fit your life?",
+    [["day","Daytime"],["evening","Evenings"],["any","Whatever works"]]],
+  ["pay","Posted pay?",
+    [["must","Show $19+ first"],["open","Good jobs, listed pay or not"]]],
+  ["confidence","How are you feeling about applying?",
+    [["low","Nervous — start me easy"],["ok","Ready — bring it on"]]],
+];
+function renderCorner(){
+  const body=document.getElementById("quizbody"); if(!body) return;
+  const h=new Date().getHours();
+  const part = h<5?"You're up late":(h<12?"Good morning":(h<17?"Good afternoon":"Good evening"));
+  document.getElementById("cornergreet").textContent =
+    part+". This page is just for you — no job list, no pressure. "+ENC_LINES[(dayHash()+3)%ENC_LINES.length];
+  body.innerHTML = QUIZ.map(function(q){
+    return '<div class="qq">'+esc(q[1])+'</div><div class="qopts">'+
+      q[2].map(function(o){
+        const on = state.profile[q[0]]===o[0];
+        return '<button class="qopt" data-act="qopt" data-q="'+esc(q[0])+'" data-v="'+esc(o[0])+'" aria-pressed="'+on+'">'+esc(o[1])+'</button>';
+      }).join("")+'</div>';
+  }).join("") +
+  (Object.keys(state.profile).length>=QUIZ.length
+    ? '<div class="qdone">Got it. The Jobs page now puts your kind of work first. ✦</div>' : "");
+}
+function quizPick(t){
+  const q=t.getAttribute("data-q"), v=t.getAttribute("data-v");
+  state.profile[q] = (state.profile[q]===v) ? undefined : v;
+  if(state.profile[q]===undefined) delete state.profile[q];
+  persist(); render();
+}
+
+/* ── Bottom-nav views ───────────────────────────────────────────────────── */
+const VIEWS = {
+  jobs:   [".controls","#progress","#count","#list","#empty"],
+  today:  ["#todaywrap"],
+  apps:   ["#appswrap"],
+  corner: ["#cornerwrap"],
+  help:   [".safety","#coach","#faqwrap"],
+};
+function setView(name){
+  Object.keys(VIEWS).forEach(function(v){
+    VIEWS[v].forEach(function(sel){
+      const el=document.querySelector(sel);
+      if(el) el.hidden = (v!==name) || (sel==="#coach" && state.coachOff) ||
+                         (sel==="#empty" && el.hidden && v===name && name==="jobs");
+    });
+    const btn=document.getElementById("nav-"+v);
+    if(btn) btn.setAttribute("aria-current", String(v===name));
+  });
+  if(name==="jobs") render(); else { renderPicks(); renderApps(); renderCorner(); }
+  window.scrollTo({top:0});
+}
+["jobs","today","apps","corner","help"].forEach(function(v){
+  const b=document.getElementById("nav-"+v);
+  if(b) b.onclick=function(){ setView(v); };
+});
+
+document.getElementById("footenc").textContent = ENC_LINES[dayHash()%ENC_LINES.length];
+
 buildChips();
 render();
+setView("jobs");
+
+/* ── Portal: optional sign-in so saves follow the user across devices. ──────
+   The page is fully usable without it: not configured -> this whole block is
+   inert; configured but offline -> localStorage keeps working and we retry
+   when the connection returns. All user-visible text goes through
+   textContent or esc(); the publishable key here is browser-safe BY DESIGN
+   (RLS + invite-only auth are the security boundary, never this key). */
+(function(){
+  if(!PORTAL || !PORTAL.url || !PORTAL.key) return;
+  var tag = document.getElementById("sbjs");
+  function boot(){ if(window.supabase && window.supabase.createClient) init(); }
+  if(window.supabase){ boot(); }
+  else if(tag){ tag.addEventListener("load", boot); }
+  // CDN unreachable (offline first load): no listener fires, app runs as-is.
+
+  function init(){
+    var sb = window.supabase.createClient(PORTAL.url, PORTAL.key);
+    var PAGE = location.origin + location.pathname;
+    var bar = document.getElementById("syncbar"),
+        rowOut = document.getElementById("syncrow-out"),
+        rowIn = document.getElementById("syncrow-in"),
+        form = document.getElementById("syncform"),
+        msg = document.getElementById("syncmsg"),
+        whoEl = document.getElementById("syncwho");
+    var user = null;
+    var noteRowId = {};          // jobId -> newest job_notes.id seen on the server
+    var noteTimers = {};
+    bar.hidden = false;
+
+    function setMsg(t, isErr){ msg.textContent = t || ""; msg.className = "syncmsg" + (isErr ? " err" : ""); }
+    function showOut(){ rowOut.hidden = false; rowIn.hidden = true; form.hidden = true; }
+    function showIn(extra){
+      rowOut.hidden = true; form.hidden = true; rowIn.hidden = false;
+      whoEl.innerHTML = IC.check + ' <span class="who">' +
+        (extra ? esc(extra) : 'Saves synced') + '</span> — ' + esc(user && user.email || 'signed in');
+    }
+    function friendly(error){
+      var m = String(error && error.message || "");
+      if(/invite|signup|sign-?ups?.*(not|dis)|not.*allowed/i.test(m))
+        return "This app is invite-only — ask " + (META.contact || "the person who set this up") + " to invite your email first.";
+      if(/rate|too many/i.test(m)) return "Too many tries — wait a minute, then try again.";
+      if(/fetch|network|load failed/i.test(m)) return "No internet right now — your saves are safe on this phone.";
+      return "Sign-in didn't work: " + m.slice(0, 90);
+    }
+
+    document.getElementById("syncopen").onclick = function(){
+      rowOut.hidden = true; form.hidden = false; setMsg("");
+      document.getElementById("syncemail").focus();
+    };
+    document.getElementById("synccancel").onclick = function(){ form.hidden = true; rowOut.hidden = false; };
+    document.getElementById("syncsend").onclick = function(){
+      var em = document.getElementById("syncemail").value.trim();
+      if(!/.+@.+\..+/.test(em)){ setMsg("That doesn't look like an email address — check it and try again.", true); return; }
+      setMsg("Sending your link…");
+      sb.auth.signInWithOtp({ email: em, options: { emailRedirectTo: PAGE } })
+        .then(function(r){
+          if(r.error){ setMsg(friendly(r.error), true); }
+          else { setMsg("Link sent! Open your email ON THIS DEVICE and tap the link."); }
+        });
+    };
+    document.getElementById("syncgoogle").onclick = function(){
+      sb.auth.signInWithOAuth({ provider: "google", options: { redirectTo: PAGE } })
+        .then(function(r){ if(r.error) setMsg(friendly(r.error), true); });
+    };
+    document.getElementById("syncout").onclick = function(){
+      sb.auth.signOut().catch(function(){});
+      // onAuthStateChange flips the UI; local saves stay on the device.
+    };
+
+    sb.auth.onAuthStateChange(function(_evt, session){
+      var u = session && session.user || null;
+      var signedIn = !!u && !user;
+      user = u;
+      if(user){ showIn(); if(signedIn) syncAll(); } else { showOut(); }
+    });
+    sb.auth.getSession().then(function(r){
+      user = r.data && r.data.session && r.data.session.user || null;
+      if(user){ showIn(); syncAll(); } else { showOut(); }
+    }).catch(function(){ showOut(); });
+
+    /* Pull server state, merge (a flag set anywhere stays set; newest note
+       wins), then push back anything only this device knew about — which IS
+       the localStorage import on first sign-in, no separate path needed. */
+    function syncAll(){
+      Promise.all([
+        sb.from("user_job_status").select("job_id,applied,applied_on,saved,hidden"),
+        sb.from("job_notes").select("id,job_id,body,created_at").order("created_at", { ascending: false }),
+      ]).then(function(res){
+        if(res[0].error) throw res[0].error;
+        if(res[1].error) throw res[1].error;
+        var localIds = {};
+        Object.keys(state.applied).forEach(function(id){ localIds[id] = 1; });
+        state.saved.forEach(function(id){ localIds[id] = 1; });
+        state.hidden.forEach(function(id){ localIds[id] = 1; });
+        var server = {};
+        (res[0].data || []).forEach(function(r){
+          server[r.job_id] = r;
+          if(r.applied && !state.applied[r.job_id]) state.applied[r.job_id] = r.applied_on || today();
+          if(r.saved) state.saved.add(r.job_id);
+          if(r.hidden) state.hidden.add(r.job_id);
+        });
+        var sawNote = {};
+        (res[1].data || []).forEach(function(r){
+          if(sawNote[r.job_id]) return;            // newest-first: keep only latest
+          sawNote[r.job_id] = 1; noteRowId[r.job_id] = r.id;
+          state.notes[r.job_id] = r.body;
+        });
+        persist(); render();
+        var toPush = Object.keys(localIds).filter(function(id){
+          var s = server[id] || {};
+          return (!!state.applied[id]) !== !!s.applied ||
+                 state.saved.has(id) !== !!s.saved ||
+                 state.hidden.has(id) !== !!s.hidden;
+        });
+        pushStatus(toPush);
+        Object.keys(state.notes).forEach(function(id){ if(!sawNote[id]) pushNote(id); });
+        showIn();
+      }).catch(function(e){
+        console.log("[portal] sync failed:", e && e.message || e);
+        showIn("Signed in — will sync when online");
+      });
+    }
+
+    function statusRow(id){
+      return { job_id: id, applied: !!state.applied[id], applied_on: state.applied[id] || null,
+               saved: state.saved.has(id), hidden: state.hidden.has(id),
+               updated_at: new Date().toISOString() };
+    }
+    function pushStatus(ids){
+      if(!user || !ids.length) return;
+      sb.from("user_job_status").upsert(ids.map(statusRow), { onConflict: "user_id,job_id" })
+        .then(function(r){ if(r.error) console.log("[portal] status push:", r.error.message); });
+    }
+    function pushNote(id){
+      if(!user) return;
+      var body = state.notes[id] || "";
+      if(!body){
+        if(noteRowId[id]){
+          sb.from("job_notes").delete().eq("id", noteRowId[id])
+            .then(function(){ delete noteRowId[id]; });
+        }
+        return;
+      }
+      if(noteRowId[id]){
+        sb.from("job_notes").update({ body: body }).eq("id", noteRowId[id])
+          .then(function(r){ if(r.error) console.log("[portal] note push:", r.error.message); });
+      } else {
+        sb.from("job_notes").insert({ job_id: id, body: body }).select("id").single()
+          .then(function(r){
+            if(r.data) noteRowId[id] = r.data.id;
+            if(r.error) console.log("[portal] note push:", r.error.message);
+          });
+      }
+    }
+
+    // Live mutations: these delegated listeners run AFTER the main handlers
+    // above (same container, registered later), so state is already updated.
+    document.querySelector(".app").addEventListener("click", function(e){
+      var t = e.target.closest("[data-act]"); if(!t || !user) return;
+      var act = t.getAttribute("data-act");
+      if(act === "applied" || act === "saved" || act === "hide" || act === "open")
+        pushStatus([t.getAttribute("data-id")]);
+    });
+    document.querySelector(".app").addEventListener("input", function(e){
+      var t = e.target.closest("[data-note]"); if(!t || !user) return;
+      var id = t.getAttribute("data-note");
+      clearTimeout(noteTimers[id]);
+      noteTimers[id] = setTimeout(function(){ pushNote(id); }, 900);
+    });
+    window.addEventListener("online", function(){ if(user) syncAll(); });
+
+    /* Companion chat: appears only signed-in. Calls the 'companion' Edge
+       Function (Anthropic key lives server-side; this page never sees it). */
+    function mountChat(){
+      const card=document.getElementById("chatcard"); if(!card) return;
+      if(!user){ return; }
+      if(card.dataset.live){ return; }
+      card.dataset.live="1";
+      document.getElementById("chatstate").hidden=true;
+      const log=document.createElement("div"); log.className="chatlog"; log.id="chatlog";
+      const row=document.createElement("div"); row.className="chatrow";
+      row.innerHTML='<input class="search" id="chatinput" type="text" maxlength="4000" '+
+        'placeholder="Say hi — it remembers you" aria-label="Message your companion">'+
+        '<button class="syncbtn" id="chatsend">Send</button>';
+      const note=document.createElement("div"); note.className="chatnote";
+      note.textContent="A friendly helper, not a therapist — if things feel heavy, the card above has real humans 24/7. Chats are saved privately to your account so it remembers you; they're never sold or shared (only the person who set this up could ever see them).";
+      card.appendChild(log); card.appendChild(row); card.appendChild(note);
+      sb.from("chat_messages").select("role,body").order("created_at",{ascending:false}).limit(12)
+        .then(function(r){ ((r.data||[]).reverse()).forEach(function(m){ addBub(m.role==="user"?"me":"ai", m.body); }); });
+      function addBub(cls, text){
+        const b=document.createElement("div"); b.className="bub "+cls; b.textContent=text;
+        log.appendChild(b); log.scrollTop=log.scrollHeight; return b;
+      }
+      function send(){
+        const inp=document.getElementById("chatinput");
+        const msg=inp.value.trim(); if(!msg) return;
+        inp.value=""; addBub("me", msg);
+        const wait=addBub("ai", "…");
+        sb.functions.invoke("companion", { body: { message: msg } })
+          .then(function(r){
+            wait.textContent = (r.data && r.data.reply) ? r.data.reply
+              : "I'm having trouble right now — your message is saved, try me again in a minute.";
+          })
+          .catch(function(){ wait.textContent="No connection right now — I'll be here when you're back online."; });
+      }
+      document.getElementById("chatsend").onclick=send;
+      document.getElementById("chatinput").addEventListener("keydown",function(e){
+        if(e.key==="Enter"){ e.preventDefault(); send(); }
+      });
+    }
+    const _showIn = showIn;
+    showIn = function(extra){ _showIn(extra); mountChat(); };
+    if(user) mountChat();
+  }
+})();
+
 if("serviceWorker" in navigator){ navigator.serviceWorker.register("sw.js").catch(()=>{}); }
 </script>
 </body>
@@ -1345,6 +2216,9 @@ def main():
                     help="Name the friend should call if a job looks like a scam (shown in the page).")
     ap.add_argument("--contact-phone", default="",
                     help="Optional phone number for the in-page 'Call' button (tel: link).")
+    ap.add_argument("--push-supabase", action="store_true",
+                    help="After building the site, upsert today's safe rows into the "
+                         "Supabase portal (no-op unless SUPABASE_URL + SUPABASE_SERVICE_KEY are set).")
     args = ap.parse_args()
 
     MIN_HOURLY = args.min_hourly
@@ -1385,8 +2259,28 @@ def main():
     csv_path = os.path.join(base, f"admin-jobs-{datestr}.csv")
     html_path = os.path.join(web_dir, "index.html")     # the mobile PWA
     write_csv(sort_rows(rows), csv_path)                 # full audit incl. hidden
+    # Portal config never reaches a --mock page: canned data must not gain a
+    # sign-in surface, and a mock page must never be deployed anyway.
+    portal_cfg = None if args.mock else _portal_web_config()
     write_html(safe, len(hidden), len(rows), html_path, human,
-               contact=args.contact, contact_phone=args.contact_phone)
+               contact=args.contact, contact_phone=args.contact_phone,
+               portal_cfg=portal_cfg)
+
+    if args.push_supabase:
+        if args.mock:
+            print("  portal : refusing to push --mock data to Supabase")
+        else:
+            from portal import push as portal_push
+            if portal_push.supabase_enabled():
+                try:
+                    portal_push.push_jobs(_portal_rows(safe, stamp.isoformat()), log=print)
+                except RuntimeError as err:
+                    # Loud but non-fatal: the public site must publish even
+                    # when the portal is down. CI surfaces this in the log.
+                    print(f"  WARNING: portal push failed (site still publishes): {err}",
+                          file=sys.stderr)
+            else:
+                print("  portal : not configured (SUPABASE_URL/SUPABASE_SERVICE_KEY) - skipped")
 
     n_good = sum(1 for r in safe if r["verdict"] == "meets")
     print("-" * 40)

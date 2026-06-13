@@ -1,5 +1,5 @@
 /* Service worker: app shell offline + network-first for fresh jobs. */
-const CACHE = "myjobs-v1";
+const CACHE = "myjobs-v2";   // bumped for the goth-purple shell (new manifest/icons)
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest",
   "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png",
