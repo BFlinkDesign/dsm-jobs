@@ -35,6 +35,16 @@ Sources + the doc facts each fetcher is written against:
 - CareerOneStop (USDOL) -- key-gated stub; response envelope not verifiable
   from the official doc in this pass (bot-blocked), left unimplemented rather
   than guessed. See fetch_careeronestop.
+- NEOGOV / GovernmentJobs.com  GET
+  https://www.governmentjobs.com/SearchEngine/JobsFeed?agency={slug} (keyless
+  RSS). Standard RSS fields (title/link/pubDate) un-namespaced; pay + location
+  in the joblisting: namespace (minimumSalary/maximumSalary/salaryCurrency/
+  salaryInterval/location/jobId). Salary is EMPLOYER-STATED USD (Hour/Year
+  converted to hourly; non-USD or other intervals suppressed) -> stated=True.
+  Government posts directly = highest scam-safety. link = real apply page.
+  Per-agency: NEOGOV_AGENCIES holds slugs verified live (200 + items) for the
+  Des Moines metro. XML parsed with stdlib ElementTree behind a DOCTYPE/ENTITY
+  guard (runtime is stdlib-only; defusedxml would break the no-pip-install CD).
 
 Field shapes for Greenhouse/Lever/Careerjet were verified live / against
 official docs on 2026-06-10. Re-verify before changing the mappings.
@@ -47,6 +57,8 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 
 USAJOBS_HOST = "https://data.usajobs.gov/api/search"
 JOOBLE_HOST = "https://jooble.org/api/"
@@ -75,6 +87,7 @@ _ALLOWED_PREFIXES = (
     "https://boards-api.greenhouse.io/",
     "https://api.lever.co/",
     "https://search.api.careerjet.net/",
+    "https://www.governmentjobs.com/",
 )
 
 
@@ -106,6 +119,28 @@ def _request_json(url: str, *, headers: "dict[str, str] | None" = None, body: ob
             if attempt == attempts:
                 raise RuntimeError(f"provider network error: {err.reason}") from err
         time.sleep(5 * attempt)
+
+
+def _request_text(url: str, *, attempts: int = 3,
+                  allowed_prefixes: "tuple[str, ...] | None" = None) -> str:
+    """GET returning decoded text (for XML/RSS feeds). Same allowlist + bounded
+    retry policy as _request_json; HTTPS-allowlisted hosts only (CWE-939)."""
+    if not url.startswith(allowed_prefixes or _ALLOWED_PREFIXES):
+        raise RuntimeError("refusing non-allowlisted provider URL")
+    req = urllib.request.Request(url, headers={"User-Agent": "admin-job-finder/1.0"})
+    for attempt in range(1, attempts + 1):
+        try:
+            # nosemgrep - url allowlist-pinned above; HTTPS hosts only.
+            with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
+                return resp.read().decode("utf-8-sig", "replace")
+        except urllib.error.HTTPError as err:
+            if err.code < 500 or attempt == attempts:
+                raise RuntimeError(f"provider HTTP {err.code}") from err
+        except urllib.error.URLError as err:
+            if attempt == attempts:
+                raise RuntimeError(f"provider network error: {err.reason}") from err
+        time.sleep(5 * attempt)
+    raise RuntimeError("unreachable")
 
 
 # ── USAJobs ────────────────────────────────────────────────────────────────
@@ -513,6 +548,112 @@ def fetch_careeronestop(titles, location, verdict_fn, log):
     raise NotImplementedError("CareerOneStop field map unverified — confirm envelope before enabling")
 
 
+# ── NEOGOV / GovernmentJobs.com (keyless RSS, gold-standard scam-safety) ────
+# Per-agency public feed: government employers post directly, salaries are
+# EMPLOYER-STATED USD ranges, apply URLs are real. Verified live 2026-06-12 —
+# only slugs that returned 200 + items are listed (item counts in comments).
+# Each agency name is set so employer_is_trusted() ("Government" group) matches.
+NEOGOV_FEED = "https://www.governmentjobs.com/SearchEngine/JobsFeed"
+NEOGOV_AGENCIES = [
+    ("iowa", "State of Iowa"),              # 197 items (statewide; metro-filtered downstream)
+    ("desmoines", "City of Des Moines"),    # 13
+    ("johnston", "City of Johnston"),       # 36
+    ("urbandale", "City of Urbandale"),     # 2
+    ("waukee", "City of Waukee"),           # 2
+]
+_NEOGOV_NS = "{http://www.neogov.com/namespaces/JobListing}"
+_NEOGOV_INTERVAL = {  # -> multiplier to hourly; only reliably-convertible units
+    "hour": 1.0, "hourly": 1.0,
+    "year": 1.0 / 2080, "annual": 1.0 / 2080, "annually": 1.0 / 2080,
+}
+
+
+def neogov_enabled():
+    return True  # keyless public feeds
+
+
+def _neogov_hourly(lo_s, hi_s, interval, currency):
+    """Employer-stated salary -> hourly. USD only; Hour/Year only. Anything
+    else (other currency or pay period we can't convert exactly) -> suppress
+    the number rather than guess (invariant #1)."""
+    if (currency or "USD").upper() != "USD":
+        return None, None
+    factor = _NEOGOV_INTERVAL.get((interval or "").strip().lower())
+    if factor is None:
+        return None, None
+    try:
+        lo = float(lo_s) * factor if lo_s else None
+        hi = float(hi_s) * factor if hi_s else None
+    except (TypeError, ValueError):
+        return None, None
+    return (round(lo, 2) if lo else None), (round(hi, 2) if hi else None)
+
+
+def _neogov_date(pubdate):
+    try:
+        return parsedate_to_datetime(pubdate).date().isoformat() if pubdate else ""
+    except (TypeError, ValueError):
+        return ""
+
+
+def _neogov_rows(xml_text, company, verdict_fn):
+    # XXE / billion-laughs defense WITHOUT a third-party dep (the app's runtime
+    # is stdlib-only by design — the CD runs python with no pip install, so
+    # defusedxml is not an option here). Both attacks REQUIRE a DTD/entity
+    # declaration, and stdlib ElementTree never resolves *external* entities;
+    # rejecting any DOCTYPE/ENTITY (case-insensitive) before parsing closes the
+    # remaining internal-entity-expansion vector. A genuine RSS feed has neither.
+    head = xml_text[:4096].upper()
+    if "<!DOCTYPE" in head or "<!ENTITY" in xml_text.upper():
+        raise RuntimeError("refusing NEOGOV feed with DTD/entity declarations")
+    root = ET.fromstring(xml_text)  # noqa: S314 - DTD/entity-guarded above
+
+    def g(item, tag):
+        el = item.find(_NEOGOV_NS + tag)
+        if el is None:
+            el = item.find(tag)  # standard RSS fields are un-namespaced
+        return (el.text or "").strip() if el is not None and el.text else ""
+
+    rows = []
+    for it in root.findall(".//item"):
+        title = g(it, "title")
+        url = g(it, "link") or g(it, "guid")
+        if not title or not url:
+            continue
+        lo, hi = _neogov_hourly(g(it, "minimumSalary"), g(it, "maximumSalary"),
+                                g(it, "salaryInterval"), g(it, "salaryCurrency"))
+        stated = lo is not None or hi is not None
+        loc = g(it, "location").replace(" - ", ", ")  # -> commas for in_polk_or_dallas()
+        rows.append({
+            "id": "gov-" + (g(it, "jobId") or url)[-40:],
+            "title": title,
+            "company": company,
+            "location": loc,
+            "hourly_min": lo,
+            "hourly_max": hi,
+            "predicted": not stated,
+            "verdict": verdict_fn(lo, hi, stated=stated),
+            "created": _neogov_date(g(it, "pubDate")),
+            "url": url,
+            "source": "local",  # government metro postings are in-person
+            "description": _strip_tags(g(it, "qualifications") or g(it, "description"))[:2000].strip(),
+        })
+    return rows
+
+
+def fetch_neogov(titles, location, verdict_fn, log):
+    del titles, location
+    rows = []
+    for slug, company in NEOGOV_AGENCIES:
+        try:
+            xml_text = _request_text(f"{NEOGOV_FEED}?agency={slug}")
+            rows.extend(_neogov_rows(xml_text, company, verdict_fn))
+        except Exception as err:  # noqa: BLE001 - per-agency isolation
+            print(f"  WARNING: neogov agency '{slug}' failed: {err}", file=sys.stderr)
+    log(f"  gov    : {len(rows)} postings")
+    return rows
+
+
 # ── registry ───────────────────────────────────────────────────────────────
 
 PROVIDERS = [
@@ -521,6 +662,7 @@ PROVIDERS = [
     ("jsearch", jsearch_enabled, fetch_jsearch),
     ("ats", ats_enabled, fetch_ats),
     ("careerjet", careerjet_enabled, fetch_careerjet),
+    ("neogov", neogov_enabled, fetch_neogov),  # keyless gov feeds — always on
     # ("careeronestop", careeronestop_enabled, fetch_careeronestop),  # stub
 ]
 
