@@ -13,6 +13,7 @@ conservative so it never cries wolf:
 Reuses providers' allowlisted request helpers — no new network code. Stdlib only.
 """
 
+import re
 import sys
 import time
 
@@ -58,8 +59,13 @@ def main():
     print("== NEOGOV (government) ==")
     for slug, _ in p.NEOGOV_AGENCIES:
         probe(
+            # Items are <item xmlns:joblisting=...> (the real provider matches them
+            # via findall('.//item')); count the opening tag, NOT the literal
+            # "<item>", or every healthy feed reads as a false EMPTY.
             "neogov/" + slug,
-            lambda slug=slug: p._request_text(f"{p.NEOGOV_FEED}?agency={slug}").count("<item>"),
+            lambda slug=slug: len(
+                re.findall(r"<item[\s>]", p._request_text(f"{p.NEOGOV_FEED}?agency={slug}"))
+            ),
         )
         time.sleep(2)
     print("== Workday ==")
