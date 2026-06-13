@@ -138,7 +138,9 @@ def test_empty_payloads_yield_no_rows():
 def test_providers_disabled_without_keys(monkeypatch):
     for var in ("USAJOBS_API_KEY", "USAJOBS_EMAIL", "JOOBLE_API_KEY", "JSEARCH_API_KEY", "CAREERJET_AFFID"):
         monkeypatch.delenv(var, raising=False)
-    monkeypatch.setattr(providers, "ATS_BOARDS", {})  # no-auth ATS off too -> no network
+    # The two keyless always-on providers are neutralized so this stays offline.
+    monkeypatch.setattr(providers, "ATS_BOARDS", {})
+    monkeypatch.setattr(providers, "NEOGOV_AGENCIES", [])
     assert providers.usajobs_enabled() is False
     assert providers.jooble_enabled() is False
     assert providers.ats_enabled() is False
@@ -361,3 +363,99 @@ def test_careeronestop_is_an_honest_stub():
     finally:
         for k in monkeypatch_env:
             os.environ.pop(k, None)
+
+
+# ── NEOGOV / GovernmentJobs.com feed (keyless RSS) ──────────────────────────
+
+import pytest  # noqa: E402
+
+_NEOGOV_FIXTURE = """<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:joblisting="http://www.neogov.com/namespaces/JobListing">
+  <channel>
+    <title>State of Iowa, IA</title>
+    <item>
+      <title>Administrative Assistant 2</title>
+      <link>https://www.governmentjobs.com/careers/iowa/jobs/5376469</link>
+      <pubDate>Fri, 12 Jun 2026 22:11:53 GMT</pubDate>
+      <joblisting:jobId>5376469</joblisting:jobId>
+      <joblisting:minimumSalary>22.50</joblisting:minimumSalary>
+      <joblisting:maximumSalary>33.00</joblisting:maximumSalary>
+      <joblisting:salaryCurrency>USD</joblisting:salaryCurrency>
+      <joblisting:salaryInterval>Hour</joblisting:salaryInterval>
+      <joblisting:location>Des Moines - 50319 - Polk County</joblisting:location>
+      <joblisting:qualifications>Graduation from high school.</joblisting:qualifications>
+    </item>
+    <item>
+      <title>Office Coordinator</title>
+      <link>https://www.governmentjobs.com/careers/iowa/jobs/5376470</link>
+      <pubDate>Thu, 11 Jun 2026 10:00:00 GMT</pubDate>
+      <joblisting:jobId>5376470</joblisting:jobId>
+      <joblisting:minimumSalary>50000</joblisting:minimumSalary>
+      <joblisting:maximumSalary>62400</joblisting:maximumSalary>
+      <joblisting:salaryCurrency>USD</joblisting:salaryCurrency>
+      <joblisting:salaryInterval>Year</joblisting:salaryInterval>
+      <joblisting:location>Ankeny - 50023 - Polk County</joblisting:location>
+    </item>
+    <item>
+      <title>Records Clerk (EU office)</title>
+      <link>https://www.governmentjobs.com/careers/iowa/jobs/5376471</link>
+      <joblisting:jobId>5376471</joblisting:jobId>
+      <joblisting:minimumSalary>30000</joblisting:minimumSalary>
+      <joblisting:salaryCurrency>EUR</joblisting:salaryCurrency>
+      <joblisting:salaryInterval>Year</joblisting:salaryInterval>
+      <joblisting:location>Dublin - IE</joblisting:location>
+    </item>
+  </channel>
+</rss>"""
+
+
+def test_neogov_parses_stated_usd_salary_and_fields():
+    rows = providers._neogov_rows(_NEOGOV_FIXTURE, "State of Iowa", fa.salary_verdict)
+    assert len(rows) == 3
+    a = rows[0]
+    assert a["title"] == "Administrative Assistant 2"
+    assert a["company"] == "State of Iowa"
+    assert a["url"].endswith("/jobs/5376469")
+    assert a["id"] == "gov-5376469"
+    assert a["hourly_min"] == 22.5 and a["hourly_max"] == 33.0
+    assert a["predicted"] is False                 # employer-stated -> real number
+    assert a["verdict"] == "meets"                 # $22.50 floor >= $19
+    assert a["location"] == "Des Moines, 50319, Polk County"   # normalized for metro filter
+    assert a["created"] == "2026-06-12"
+    assert a["source"] == "local"
+
+
+def test_neogov_year_salary_converted_to_hourly():
+    rows = providers._neogov_rows(_NEOGOV_FIXTURE, "State of Iowa", fa.salary_verdict)
+    office = rows[1]
+    assert office["hourly_min"] == round(50000 / 2080, 2)   # ~24.04
+    assert office["verdict"] == "meets"
+
+
+def test_neogov_non_usd_salary_suppressed():
+    """invariant #1: a non-USD employer salary must NOT become a number."""
+    rows = providers._neogov_rows(_NEOGOV_FIXTURE, "State of Iowa", fa.salary_verdict)
+    eu = rows[2]
+    assert eu["hourly_min"] is None and eu["hourly_max"] is None
+    assert eu["predicted"] is True
+    assert eu["verdict"] == "unlisted"
+
+
+def test_neogov_hourly_helper_units():
+    assert providers._neogov_hourly("20", "30", "Hour", "USD") == (20.0, 30.0)
+    assert providers._neogov_hourly("41600", None, "Year", "USD")[0] == 20.0
+    assert providers._neogov_hourly("20", "30", "Hour", "EUR") == (None, None)
+    assert providers._neogov_hourly("20", "30", "Week", "USD") == (None, None)   # unknown interval
+    assert providers._neogov_hourly("", "", "Hour", "USD") == (None, None)
+
+
+def test_neogov_rejects_dtd_entity_bomb():
+    bomb = '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY a "boom">]><rss></rss>'
+    with pytest.raises(RuntimeError, match="DTD/entity"):
+        providers._neogov_rows(bomb, "X", fa.salary_verdict)
+
+
+def test_neogov_skips_items_without_title_or_url():
+    feed = ('<?xml version="1.0"?><rss xmlns:joblisting="http://www.neogov.com/namespaces/JobListing">'
+            '<channel><item><joblisting:jobId>1</joblisting:jobId></item></channel></rss>')
+    assert providers._neogov_rows(feed, "X", fa.salary_verdict) == []
