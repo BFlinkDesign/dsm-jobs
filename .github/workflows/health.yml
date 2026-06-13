@@ -31,11 +31,18 @@ jobs:
           : > /tmp/fails.txt
           SITE="https://bflinkdesign.github.io/dsm-jobs/"
 
-          # 1) Live site serves and looks like the app
-          body="$(curl -fsS -m 25 "$SITE" || true)"
-          code="$(curl -s -m 25 -o /dev/null -w '%{http_code}' "$SITE" || echo 000)"
-          [ "$code" = "200" ] || fail "Live site HTTP $code (expected 200)"
-          echo "$body" | grep -q "Job Board" || fail "Live site missing 'Job Board' marker"
+          # 1) Live site serves and looks like the app. Retry: GitHub Pages has
+          #    a brief redeploy window after each daily publish where the URL can
+          #    404 — don't false-alarm on that.
+          body=""; code="000"
+          for attempt in 1 2 3 4; do
+            body="$(curl -s -m 25 "$SITE" || true)"
+            code="$(curl -s -m 25 -o /dev/null -w '%{http_code}' "$SITE" || echo 000)"
+            if [ "$code" = "200" ] && printf '%s' "$body" | grep -q "Job Board"; then break; fi
+            echo "site attempt $attempt: HTTP $code (retrying)"; sleep 15
+          done
+          [ "$code" = "200" ] || fail "Live site HTTP $code after retries (expected 200)"
+          printf '%s' "$body" | grep -q "Job Board" || fail "Live site missing 'Job Board' marker after retries"
 
           # 2) Freshness: the page prints 'updated YYYY-MM-DD'; alert if > 3 days old
           updated="$(printf '%s' "$body" | grep -oE 'updated [0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | awk '{print $2}')"
@@ -47,13 +54,13 @@ jobs:
             fail "Could not read 'updated' date from live site"
           fi
 
-          # 3) Supabase portal reachable (jobs table responds) — only if configured
+          # 3) Supabase portal liveness — use GoTrue's public /auth/v1/health
+          #    (the jobs table is authenticated-only by RLS, so an anon probe of
+          #    it correctly returns 401 — that's by design, not an outage).
           if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_PUBLISHABLE_KEY:-}" ]; then
-            sc="$(curl -s -m 25 -o /dev/null -w '%{http_code}' \
-              "$SUPABASE_URL/rest/v1/jobs?select=id&limit=1" \
-              -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
-              -H "Authorization: Bearer $SUPABASE_PUBLISHABLE_KEY" || echo 000)"
-            [ "$sc" = "200" ] || fail "Supabase jobs table HTTP $sc (expected 200)"
+            ac="$(curl -s -m 25 -o /dev/null -w '%{http_code}' \
+              "$SUPABASE_URL/auth/v1/health" -H "apikey: $SUPABASE_PUBLISHABLE_KEY" || echo 000)"
+            [ "$ac" = "200" ] || fail "Supabase auth health HTTP $ac (expected 200)"
             fc="$(curl -s -m 25 -o /dev/null -w '%{http_code}' -X POST \
               "$SUPABASE_URL/functions/v1/companion" -H 'Content-Type: application/json' -d '{}' || echo 000)"
             case "$fc" in 200|400|401|429) echo "companion fn alive ($fc)";; *) fail "Companion fn HTTP $fc (expected 200/400/401/429)";; esac
