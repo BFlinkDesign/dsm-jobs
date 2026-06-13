@@ -1,0 +1,92 @@
+name: Health Monitor (self-repair signal)
+
+# Every 6 hours: confirm the live site is up + fresh, the Supabase portal is
+# reachable, and the companion function is alive. On ANY failure, open (or
+# reuse) a single GitHub issue so the problem is never silent — that issue is
+# the human/repair signal. Read-only checks; nothing here can break the site.
+
+on:
+  schedule:
+    - cron: "0 */6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Check live site, freshness, Supabase, companion
+        id: check
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -uo pipefail
+          fail() { echo "::error::$1"; echo "$1" >> /tmp/fails.txt; }
+          : > /tmp/fails.txt
+          SITE="https://bflinkdesign.github.io/dsm-jobs/"
+
+          # 1) Live site serves and looks like the app
+          body="$(curl -fsS -m 25 "$SITE" || true)"
+          code="$(curl -s -m 25 -o /dev/null -w '%{http_code}' "$SITE" || echo 000)"
+          [ "$code" = "200" ] || fail "Live site HTTP $code (expected 200)"
+          echo "$body" | grep -q "Job Board" || fail "Live site missing 'Job Board' marker"
+
+          # 2) Freshness: the page prints 'updated YYYY-MM-DD'; alert if > 3 days old
+          updated="$(printf '%s' "$body" | grep -oE 'updated [0-9]{4}-[0-9]{2}-[0-9]{2}' | head -1 | awk '{print $2}')"
+          if [ -n "$updated" ]; then
+            age=$(( ( $(date +%s) - $(date -d "$updated" +%s) ) / 86400 ))
+            echo "site last updated $updated (${age}d ago)"
+            [ "$age" -le 3 ] || fail "Live site is stale: last updated $updated (${age} days ago) — daily scan may be failing"
+          else
+            fail "Could not read 'updated' date from live site"
+          fi
+
+          # 3) Supabase portal reachable (jobs table responds) — only if configured
+          if [ -n "${SUPABASE_URL:-}" ] && [ -n "${SUPABASE_PUBLISHABLE_KEY:-}" ]; then
+            sc="$(curl -s -m 25 -o /dev/null -w '%{http_code}' \
+              "$SUPABASE_URL/rest/v1/jobs?select=id&limit=1" \
+              -H "apikey: $SUPABASE_PUBLISHABLE_KEY" \
+              -H "Authorization: Bearer $SUPABASE_PUBLISHABLE_KEY" || echo 000)"
+            [ "$sc" = "200" ] || fail "Supabase jobs table HTTP $sc (expected 200)"
+            fc="$(curl -s -m 25 -o /dev/null -w '%{http_code}' -X POST \
+              "$SUPABASE_URL/functions/v1/companion" -H 'Content-Type: application/json' -d '{}' || echo 000)"
+            case "$fc" in 200|400|401|429) echo "companion fn alive ($fc)";; *) fail "Companion fn HTTP $fc (expected 200/400/401/429)";; esac
+          else
+            echo "Supabase not configured in secrets — skipping portal checks (not a failure)."
+          fi
+
+          if [ -s /tmp/fails.txt ]; then
+            { echo "summary<<EOF"; cat /tmp/fails.txt; echo "EOF"; } >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          echo "All health checks passed."
+
+      - name: Open/refresh an issue on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = `Automated health check failed at ${new Date().toISOString()}.\n\n` +
+              "```\n" + (process.env.SUMMARY || "see workflow logs") + "\n```\n\n" +
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = "🩺 Health check failing";
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: "open", labels: "health" });
+            if (existing.data.length) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.data[0].number, body });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ["health", "automated"] });
+            }
+        env:
+          SUMMARY: ${{ steps.check.outputs.summary }}

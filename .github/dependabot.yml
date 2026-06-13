@@ -1,0 +1,20 @@
+# Keeps the repo from rotting on its own: weekly PRs to bump GitHub Actions
+# (fixes the Node-20 deprecation) and dev tooling. Auto-merge can be enabled
+# later; for now they surface as PRs that CI gates.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"
+    labels: ["dependencies", "automated"]
+
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps"
+    labels: ["dependencies", "automated"]
