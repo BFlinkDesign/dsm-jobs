@@ -138,9 +138,11 @@ def test_empty_payloads_yield_no_rows():
 def test_providers_disabled_without_keys(monkeypatch):
     for var in ("USAJOBS_API_KEY", "USAJOBS_EMAIL", "JOOBLE_API_KEY", "JSEARCH_API_KEY", "CAREERJET_AFFID"):
         monkeypatch.delenv(var, raising=False)
-    # The two keyless always-on providers are neutralized so this stays offline.
+    # The keyless always-on providers are neutralized so this stays offline.
     monkeypatch.setattr(providers, "ATS_BOARDS", {})
     monkeypatch.setattr(providers, "NEOGOV_AGENCIES", [])
+    monkeypatch.setattr(providers, "WORKDAY_BOARDS", [])
+    monkeypatch.setattr(providers, "SMARTRECRUITERS_COMPANIES", [])
     assert providers.usajobs_enabled() is False
     assert providers.jooble_enabled() is False
     assert providers.ats_enabled() is False
@@ -418,9 +420,9 @@ def test_neogov_parses_stated_usd_salary_and_fields():
     assert a["url"].endswith("/jobs/5376469")
     assert a["id"] == "gov-5376469"
     assert a["hourly_min"] == 22.5 and a["hourly_max"] == 33.0
-    assert a["predicted"] is False                 # employer-stated -> real number
-    assert a["verdict"] == "meets"                 # $22.50 floor >= $19
-    assert a["location"] == "Des Moines, 50319, Polk County"   # normalized for metro filter
+    assert a["predicted"] is False  # employer-stated -> real number
+    assert a["verdict"] == "meets"  # $22.50 floor >= $19
+    assert a["location"] == "Des Moines, 50319, Polk County"  # normalized for metro filter
     assert a["created"] == "2026-06-12"
     assert a["source"] == "local"
 
@@ -428,7 +430,7 @@ def test_neogov_parses_stated_usd_salary_and_fields():
 def test_neogov_year_salary_converted_to_hourly():
     rows = providers._neogov_rows(_NEOGOV_FIXTURE, "State of Iowa", fa.salary_verdict)
     office = rows[1]
-    assert office["hourly_min"] == round(50000 / 2080, 2)   # ~24.04
+    assert office["hourly_min"] == round(50000 / 2080, 2)  # ~24.04
     assert office["verdict"] == "meets"
 
 
@@ -445,7 +447,7 @@ def test_neogov_hourly_helper_units():
     assert providers._neogov_hourly("20", "30", "Hour", "USD") == (20.0, 30.0)
     assert providers._neogov_hourly("41600", None, "Year", "USD")[0] == 20.0
     assert providers._neogov_hourly("20", "30", "Hour", "EUR") == (None, None)
-    assert providers._neogov_hourly("20", "30", "Week", "USD") == (None, None)   # unknown interval
+    assert providers._neogov_hourly("20", "30", "Week", "USD") == (None, None)  # unknown interval
     assert providers._neogov_hourly("", "", "Hour", "USD") == (None, None)
 
 
@@ -456,6 +458,75 @@ def test_neogov_rejects_dtd_entity_bomb():
 
 
 def test_neogov_skips_items_without_title_or_url():
-    feed = ('<?xml version="1.0"?><rss xmlns:joblisting="http://www.neogov.com/namespaces/JobListing">'
-            '<channel><item><joblisting:jobId>1</joblisting:jobId></item></channel></rss>')
+    feed = (
+        '<?xml version="1.0"?><rss xmlns:joblisting="http://www.neogov.com/namespaces/JobListing">'
+        "<channel><item><joblisting:jobId>1</joblisting:jobId></item></channel></rss>"
+    )
     assert providers._neogov_rows(feed, "X", fa.salary_verdict) == []
+
+
+# ── Workday CxS + SmartRecruiters row builders (offline fixtures) ────────────
+
+_WORKDAY_PAYLOAD = {
+    "total": 2,
+    "jobPostings": [
+        {"title": "Sr Executive Assistant", "externalPath": "/job/West-Des-Moines-Iowa/Sr-Exec-Asst_R1",
+         "locationsText": "West Des Moines, Iowa", "bulletFields": ["R253169"]},
+        {"title": "BlackLine System Administrator", "externalPath": "/job/Remote/Sysadmin_R2",
+         "locationsText": "2 Locations", "bulletFields": ["R253917"]},
+    ],
+}
+
+
+def test_workday_rows_url_and_no_salary():
+    base = "https://athene.wd5.myworkdayjobs.com/athene_careers"
+    rows = providers._workday_rows(_WORKDAY_PAYLOAD, base, "Athene", fa.salary_verdict)
+    assert len(rows) == 2
+    a = rows[0]
+    assert a["id"] == "wd-R253169"
+    assert a["title"] == "Sr Executive Assistant"
+    assert a["company"] == "Athene"
+    assert a["url"] == base + "/job/West-Des-Moines-Iowa/Sr-Exec-Asst_R1"
+    assert a["hourly_min"] is None and a["predicted"] is True   # no salary on CxS list
+    assert a["verdict"] == "unlisted"
+    assert a["location"] == "West Des Moines, Iowa"             # passes in_polk_or_dallas downstream
+
+
+def test_workday_rows_skip_missing_path():
+    payload = {"jobPostings": [{"title": "No Path Job", "bulletFields": ["X"]}]}
+    assert providers._workday_rows(payload, "https://x.wd5.myworkdayjobs.com/s", "X", fa.salary_verdict) == []
+
+
+_SR_PAYLOAD = {
+    "totalFound": 2,
+    "content": [
+        {"id": "abc123", "name": "Administrative Assistant III",
+         "company": {"identifier": "WellmarkInc"},
+         "location": {"city": "Des Moines", "region": "IA", "country": "us", "remote": False},
+         "releasedDate": "2026-06-10T00:00:00.000Z"},
+        {"id": "def456", "name": "Remote Coordinator",
+         "company": {"identifier": "WellmarkInc"},
+         "location": {"city": "", "region": "", "country": "us", "remote": True,
+                      "fullLocation": "Remote, US"},
+         "releasedDate": "2026-06-09T00:00:00.000Z"},
+    ],
+}
+
+
+def test_smartrecruiters_rows_url_location_and_remote():
+    rows = providers._smartrecruiters_rows(_SR_PAYLOAD, "Wellmark", fa.salary_verdict)
+    assert len(rows) == 2
+    a = rows[0]
+    assert a["id"] == "sr-abc123"
+    assert a["title"] == "Administrative Assistant III"
+    assert a["company"] == "Wellmark"
+    assert a["url"] == "https://jobs.smartrecruiters.com/WellmarkInc/abc123"
+    assert a["location"] == "Des Moines, IA"      # passes the metro filter
+    assert a["source"] == "local"
+    assert a["verdict"] == "unlisted"             # no salary on the list endpoint
+    assert rows[1]["source"] == "remote"          # remote flag honored
+
+
+def test_smartrecruiters_skips_incomplete():
+    payload = {"content": [{"name": "No Id", "company": {"identifier": "X"}}]}  # no id
+    assert providers._smartrecruiters_rows(payload, "X", fa.salary_verdict) == []
