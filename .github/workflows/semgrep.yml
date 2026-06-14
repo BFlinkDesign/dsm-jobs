@@ -1,49 +1,85 @@
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
-# This workflow file requires a free account on Semgrep.dev to
-# manage rules, file ignores, notifications, and more.
+# Keyless Semgrep SAST gate (Static Application Security Testing).
 #
-# See https://semgrep.dev/docs
+# WHAT THIS IS: scans OUR OWN source for bug / injection / XSS / hardcoded-secret
+# patterns using Semgrep's OSS engine + public registry rulesets, fetched
+# anonymously. NO Semgrep account, NO SEMGREP_APP_TOKEN, NO login. Free forever.
+#
+# WHAT THIS IS NOT: Software Composition Analysis (SCA / CVE-in-dependency
+# scanning). That is Semgrep Supply Chain, a paid Cloud product that REQUIRES
+# SEMGREP_APP_TOKEN. This repo is stdlib-only at runtime AND Dependabot already
+# scans pip + github-actions for CVEs, so SCA would add ~zero here and is
+# intentionally absent.
+#
+# The real gate is `--error`: any finding fails the PR. (Uploading SARIF to the
+# GitHub Security tab is a free-on-public-repos bonus, left OFF — see the note.)
+#
+# Delivery note: we `pip install semgrep` on a plain ubuntu runner rather than
+# run inside the semgrep/semgrep container, because a container's bundled Node
+# can drift and break actions/checkout. The scan command is identical either way.
 
 name: Semgrep
 
 on:
-  push:
-    branches: [ "main" ]
   pull_request:
-    # The branches below must be a subset of the branches above
-    branches: [ "main" ]
+    branches: [main]      # the gate: every PR into the protected branch
   schedule:
-    - cron: '30 3 * * 5'
+    - cron: '37 9 * * 1'  # weekly Mon 09:37 UTC — catches new rules on unchanged code
+  workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: read          # least privilege: only needs to read the code
 
 jobs:
   semgrep:
-    permissions:
-      contents: read # for actions/checkout to fetch code
-      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
-      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
-    name: Scan
+    name: scan (keyless OSS)
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # never let a hung scan run forever (CI-hang policy)
+    # Dependabot PRs run with a read-only token; Dependabot's own CVE scanning
+    # gates those, so skip the SAST run there.
+    if: github.actor != 'dependabot[bot]'
     steps:
-      # Checkout project source
       - uses: actions/checkout@v4
 
-      # Scan code using project's configuration on https://semgrep.dev/manage
-      - uses: returntocorp/semgrep-action@fcd5ab7459e8d91cb1777481980d1b18b4fc6735
+      - uses: actions/setup-python@v5
         with:
-          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
-          publishDeployment: ${{ secrets.SEMGREP_DEPLOYMENT_ID }}
-          generateSarif: "1"
+          python-version: "3.12"
 
-      # Upload SARIF file generated in previous step
-      - name: Upload SARIF file
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif
-        if: always()
+      - name: Install Semgrep (OSS, no account)
+        run: python -m pip install --upgrade pip semgrep
+
+      # Keyless: every --config is a PUBLIC registry ruleset pulled over HTTPS
+      # with no auth. --error => exit non-zero (fail the PR) on any finding.
+      #   p/python         : Python correctness + security (injection, ssrf, ...)
+      #   p/secrets        : hardcoded credential / token patterns in source
+      #   p/github-actions : insecure workflow patterns (this repo has 5 workflows)
+      # We use `semgrep scan --config ...` (pure OSS, keyless), NOT `semgrep ci`
+      # (the platform command, which expects SEMGREP_APP_TOKEN).
+      - name: Semgrep keyless scan (fail on findings)
+        run: |
+          semgrep scan \
+            --config p/python \
+            --config p/secrets \
+            --config p/github-actions \
+            --error \
+            --metrics=off \
+            --disable-version-check
+
+      # ---------------------------------------------------------------------
+      # OPTIONAL: publish findings to the GitHub Security tab (Code Scanning),
+      # FREE on public repos. Left OFF because (1) `--error` already blocks the
+      # PR — that's the protection — and (2) github/codeql-action/upload-sarif
+      # has a known bug rejecting Semgrep SARIF ("security severity value ... is
+      # not a number") on some versions. To enable: add `security-events: write`
+      # to permissions above, then uncomment below (note the `|| true` so SARIF
+      # still uploads when findings exist).
+      #
+      # - name: Semgrep SARIF (keyless)
+      #   run: |
+      #     semgrep scan --config p/python --config p/secrets \
+      #       --config p/github-actions --metrics=off --disable-version-check \
+      #       --sarif --output semgrep.sarif || true
+      # - name: Upload SARIF to GitHub code scanning
+      #   uses: github/codeql-action/upload-sarif@v3
+      #   with:
+      #     sarif_file: semgrep.sarif
+      #   if: always()
