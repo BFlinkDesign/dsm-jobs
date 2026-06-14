@@ -1,0 +1,94 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+#
+# CodeRabbit config for dsm-jobs. This is a job-finder PWA built for ONE
+# vulnerable end user (phone-only, no degree, going through a hard time), so the
+# review priorities are: don't leak her data, don't show her a scam, and don't
+# ever quote a made-up wage. Tuned for a solo maintainer: low-noise profile, no
+# merge-blocking (CI + Semgrep are the hard gates; CodeRabbit is advisory).
+language: "en-US"
+early_access: false
+
+reviews:
+  # "chill" = fewer nitpicks, focus on real issues. Right for a single reviewer
+  # who has no second human to absorb false-positive noise.
+  profile: "chill"
+  # Advisory only — CodeRabbit comments but does not formally block the merge.
+  # The deterministic gates (CI: ruff/mypy/tests/secret-scan, Semgrep SAST) are
+  # what gate merges.
+  request_changes_workflow: false
+  high_level_summary: true
+  poem: false
+  review_status: true
+  collapse_walkthrough: true
+  auto_review:
+    enabled: true
+    drafts: false
+
+  # Skip generated / binary / vendor noise. web/index.html is generated and
+  # gitignored (never in a PR); listed for safety. Icons/images aren't code.
+  path_filters:
+    - "!web/index.html"
+    - "!**/*.png"
+    - "!**/*.svg"
+    - "!**/*.ico"
+    - "!**/*.webmanifest"
+
+  path_instructions:
+    - path: "find_admin_jobs.py"
+      instructions: |
+        This is the scanner + PWA generator. Enforce the load-bearing invariants:
+        - NEVER let a guessed/predicted wage become a number. Adzuna predicts ~74%
+          of salaries (salary_is_predicted=1); predicted -> verdict "unlisted" ->
+          the card shows "Pay not listed", never a figure or a $19+ badge. Only
+          employer-STATED pay gets a number, and the $19+ test uses the LOW end of
+          a stated range. salary_verdict() must remain the SINGLE place a wage
+          becomes a verdict — flag any wage logic added elsewhere.
+        - Scams are HIDDEN, not labeled. Flag any change that surfaces a
+          scam-flagged row to the user or that weakens scam_assessment /
+          scam_blocklist / TRUSTED_EMPLOYER_HINTS.
+        - XSS safety in the embedded JS (APP_TEMPLATE): every dynamic string must
+          go through esc(), every apply link through safeUrl() (http/https only),
+          and embedded JSON must keep its "</" escaped. Flag any raw interpolation
+          into HTML.
+        - Attainability filter must keep realistic roles for an experienced admin
+          and drop only senior/exec tiers — do not let it start dropping
+          experienced-admin titles or showing director/VP/C-level roles.
+        - Runtime is STDLIB-ONLY by design (CD runs python with no pip install).
+          Flag ANY new third-party runtime import added to this file.
+        - No secret or PII in committed files or printed output (public repo;
+          Actions logs are world-readable). Build vars (SUPABASE_*, SENTRY_DSN)
+          must self-gate: absent -> the feature emits nothing, page still valid.
+    - path: "providers.py"
+      instructions: |
+        Extra job sources. Each provider must be fail-soft (one bad source never
+        kills the scan), route wages through the single salary_verdict(), and only
+        emit a wage number when the employer STATED it (free-text/!=USD/unknown
+        period -> "Pay not listed", never a guess). Outbound requests must stay
+        URL-allowlisted (_ALLOWED_PREFIXES). Stdlib-only — flag new runtime deps.
+        XML parsing must keep the DOCTYPE/ENTITY guard (no XXE). Flag any source
+        that could emit a non-real or unvetted apply URL.
+    - path: "**/*.py"
+      instructions: |
+        - Match the surrounding style. Explicit error handling on every network /
+          file call; no bare `except:` that swallows failures silently.
+        - ASCII only in print() (cp1252 Windows terminals crash on emoji / arrows
+          / box-drawing). UTF-8 for file I/O.
+        - Don't add a runtime dependency to the app; dev-only tools go in
+          requirements-dev.txt.
+    - path: ".github/workflows/*.yml"
+      instructions: |
+        - Every job needs timeout-minutes. Use least-privilege `permissions:`.
+        - Never echo a secret; never let a secret reach a log (public repo).
+        - Keep the self-gating pattern: a step that needs an unset key must no-op
+          cleanly (a notice), not fail.
+    - path: "supabase/functions/**/*.ts"
+      instructions: |
+        The "companion" Edge Function talks to the user and to Anthropic.
+        - NEVER log or persist user message content / PII; scrub it from any
+          error path before it leaves the function.
+        - Gate optional integrations on Deno.env.get(...) so an unset key is a
+          clean no-op. await any flush before returning (the isolate can freeze).
+        - No secrets in source; read them from the environment only.
+
+chat:
+  auto_reply: true
