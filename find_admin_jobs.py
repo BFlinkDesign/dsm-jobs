@@ -968,8 +968,76 @@ PORTAL_SCRIPT_TAG = (
 )
 
 
+def _sentry_web_config():
+    """Browser Sentry config, or None when SENTRY_DSN is unset.
+
+    A Sentry DSN is PUBLIC/embeddable by design (it only authorizes SENDING
+    events, never reading them), so it is safe in the static page. It is still a
+    build-time var so the feature self-gates: no DSN -> no Sentry script and no
+    init are emitted, and the page is byte-for-byte the same as before. Privacy
+    for our single vulnerable user is enforced in the init (sendDefaultPii
+    false, no replay, beforeSend strips user/request/context).
+    """
+    dsn = (os.environ.get("SENTRY_DSN") or "").strip()
+    if not dsn:
+        return None
+    # Shape-check so a typo/garbage value can't silently ship a broken tag.
+    if not re.match(r"^https://[0-9a-f]+@o\d+\.ingest\.(us\.|de\.)?sentry\.io/\d+$", dsn):
+        raise RuntimeError(
+            "SENTRY_DSN does not look like a Sentry DSN "
+            "(https://<key>@o<org>.ingest.us.sentry.io/<project>) - refusing to embed it."
+        )
+    return {"dsn": dsn}
+
+
+# Pinned + SRI-locked exactly like the Supabase tag. Tracing bundle (errors +
+# performance; NO replay, so no DOM recording is ever shipped) v10.57.0; the
+# sha384 was computed from the fetched artifact 2026-06-14. If the version is
+# bumped, recompute the hash for that exact file or the browser silently refuses
+# the script (fail-safe: the app still works, Sentry just won't load).
+SENTRY_CDN_TAG = (
+    '<script '
+    'src="https://browser.sentry-cdn.com/10.57.0/bundle.tracing.min.js" '
+    'integrity="sha384-fm7orKrUHTJhAKcdqNq6Kb/0qIpMNYz3TbwoEoiA3hdbnHqSBhIqMAZ4XS09pCU5" '
+    'crossorigin="anonymous"></script>'
+)
+
+# Privacy-locked init. The single vulnerable user IS the spec: no PII, no
+# session replay, request/user/context stripped before anything leaves the
+# device, breadcrumbs scrubbed of typed text. Light tracing only (opted in for
+# the AI/perf monitor). Wrapped in try/catch so monitoring can never break the
+# app. The DSN is interpolated via json.dumps -> always a safe JS string.
+_SENTRY_INIT_TMPL = """<script>
+(function(){ if(!window.Sentry) return; try {
+  Sentry.init({
+    dsn: __DSN__,
+    sendDefaultPii: false,
+    tracesSampleRate: 0.1,
+    beforeBreadcrumb: function(crumb){
+      if (crumb && crumb.category === 'ui.input') return null;
+      if (crumb && crumb.data) { delete crumb.data.from; delete crumb.data.to; }
+      return crumb;
+    },
+    beforeSend: function(event){
+      delete event.user; delete event.request;
+      delete event.contexts; delete event.server_name;
+      return event;
+    }
+  });
+} catch (e) { /* monitoring must never break the app */ } })();
+</script>"""
+
+
+def _sentry_head(sentry_cfg):
+    """Return the <head> Sentry block (SRI tag + privacy-locked init), or ""."""
+    if not sentry_cfg:
+        return ""
+    dsn_js = json.dumps(sentry_cfg["dsn"])
+    return SENTRY_CDN_TAG + "\n" + _SENTRY_INIT_TMPL.replace("__DSN__", dsn_js)
+
+
 def write_html(safe_rows, hidden_count, total_checked, path, generated,
-               contact="me", contact_phone="", portal_cfg=None):
+               contact="me", contact_phone="", portal_cfg=None, sentry_cfg=None):
     jobs = _jobs_payload(safe_rows)
     meta = {
         "contact": contact,
@@ -985,6 +1053,7 @@ def write_html(safe_rows, hidden_count, total_checked, path, generated,
     out = (APP_TEMPLATE
            .replace("##JOBS##", jobs_json)
            .replace("##META##", meta_json)
+           .replace("##SENTRY##", _sentry_head(sentry_cfg))
            .replace("##PORTAL_SCRIPT##", PORTAL_SCRIPT_TAG if portal_cfg else "")
            .replace("##PORTAL##", portal_json))
     with open(path, "w", encoding="utf-8") as fh:
@@ -1005,6 +1074,7 @@ APP_TEMPLATE = r"""<!doctype html>
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>Job Board — Grimes &amp; Des Moines</title>
+##SENTRY##
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
@@ -2452,9 +2522,10 @@ def main():
     # Portal config never reaches a --mock page: canned data must not gain a
     # sign-in surface, and a mock page must never be deployed anyway.
     portal_cfg = None if args.mock else _portal_web_config()
+    sentry_cfg = None if args.mock else _sentry_web_config()
     write_html(safe, len(hidden), len(rows), html_path, human,
                contact=args.contact, contact_phone=args.contact_phone,
-               portal_cfg=portal_cfg)
+               portal_cfg=portal_cfg, sentry_cfg=sentry_cfg)
 
     if args.push_supabase:
         if args.mock:

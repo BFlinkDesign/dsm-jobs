@@ -14,6 +14,28 @@
 //   Iowa Warm Line 844-775-9276.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import * as Sentry from "npm:@sentry/deno@10";
+
+// Error + AI monitoring, gated on SENTRY_DSN so an unset key is a clean no-op
+// (the function behaves exactly as before). Privacy is the spec: no PII, request
+// bodies / user / context stripped before anything leaves the isolate. Tracing
+// is ON (one user, low volume) so the Anthropic call is captured as a gen_ai
+// span — model + token counts only, never her prompts or the replies.
+const SENTRY_DSN = Deno.env.get("SENTRY_DSN");
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    tracesSampleRate: 1.0,
+    sendDefaultPii: false,
+    beforeSend(event) {
+      delete event.user;
+      delete event.request; // headers / body / query string
+      delete event.contexts;
+      delete event.server_name;
+      return event;
+    },
+  });
+}
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MODEL = "claude-haiku-4-5-20251001"; // fast + inexpensive; one user, short chats
@@ -92,7 +114,7 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-Deno.serve(async (req) => {
+async function handle(req: Request): Promise<Response> {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "POST only" }, 405);
 
@@ -143,28 +165,67 @@ Deno.serve(async (req) => {
     content: m.body,
   }));
 
-  const resp = await fetch(ANTHROPIC_URL, {
-    method: "POST",
-    headers: {
-      "x-api-key": apiKey,
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
+  // AI monitoring: wrap the LLM call in a gen_ai span. We record model + token
+  // counts ONLY — never gen_ai.input.messages / gen_ai.output.messages, so her
+  // prompts and the replies never leave the isolate. startSpan is a safe no-op
+  // when Sentry isn't initialized (SENTRY_DSN unset).
+  const ai = await Sentry.startSpan(
+    {
+      op: "gen_ai.chat",
+      name: `chat ${MODEL}`,
+      attributes: {
+        "gen_ai.operation.name": "chat",
+        "gen_ai.provider.name": "anthropic",
+        "gen_ai.request.model": MODEL,
+      },
     },
-    body: JSON.stringify({
-      model: MODEL,
-      max_tokens: 600,
-      system: SYSTEM_PROMPT +
-        (prof?.profile ? `\n\nWhat you know so far: ${JSON.stringify(prof.profile)}` : ""),
-      tools: [PROFILE_TOOL],
-      messages,
-    }),
-  });
-  if (!resp.ok) {
-    const detail = (await resp.text()).slice(0, 200);
-    console.error("anthropic error", resp.status, detail);
+    async (span) => {
+      const resp = await fetch(ANTHROPIC_URL, {
+        method: "POST",
+        headers: {
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({
+          model: MODEL,
+          max_tokens: 600,
+          system: SYSTEM_PROMPT +
+            (prof?.profile ? `\n\nWhat you know so far: ${JSON.stringify(prof.profile)}` : ""),
+          tools: [PROFILE_TOOL],
+          messages,
+        }),
+      });
+      if (!resp.ok) {
+        const detail = (await resp.text()).slice(0, 200);
+        return { ok: false as const, status: resp.status, detail };
+      }
+      const d = await resp.json();
+      // Privacy-safe telemetry only: model + token counts + stop reason.
+      if (d?.model) span.setAttribute("gen_ai.response.model", d.model);
+      if (d?.usage) {
+        span.setAttribute("gen_ai.usage.input_tokens", d.usage.input_tokens ?? 0);
+        span.setAttribute("gen_ai.usage.output_tokens", d.usage.output_tokens ?? 0);
+      }
+      if (d?.stop_reason) {
+        span.setAttribute("gen_ai.response.finish_reasons", JSON.stringify([d.stop_reason]));
+      }
+      return { ok: true as const, data: d };
+    },
+  );
+  if (!ai.ok) {
+    console.error("anthropic error", ai.status, ai.detail);
+    if (SENTRY_DSN) {
+      // detail is provider error text only (never user content); keep it short.
+      Sentry.captureException(new Error(`anthropic ${ai.status}`), {
+        tags: { upstream: "anthropic", status: String(ai.status) },
+        extra: { detail: ai.detail },
+      });
+      await Sentry.flush(2000);
+    }
     return json({ error: "companion is resting — try again in a minute" }, 502);
   }
-  const data = await resp.json();
+  const data = ai.data;
 
   let reply = "";
   for (const block of data.content ?? []) {
@@ -183,4 +244,20 @@ Deno.serve(async (req) => {
   reply = reply.trim() || "I'm here. Tell me more?";
   await supabase.from("chat_messages").insert({ role: "assistant", body: reply });
   return json({ reply });
+}
+
+// Outer guard: any unexpected throw is reported (no user content — beforeSend
+// strips request/user) and flushed BEFORE returning, because the Deno isolate
+// can freeze right after the response and drop an unsent event.
+Deno.serve(async (req) => {
+  try {
+    return await handle(req);
+  } catch (err) {
+    console.error("companion crash", err);
+    if (SENTRY_DSN) {
+      Sentry.captureException(err);
+      await Sentry.flush(2000);
+    }
+    return json({ error: "something went sideways — try again in a bit 💜" }, 500);
+  }
 });
