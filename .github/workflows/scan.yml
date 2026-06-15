@@ -82,11 +82,46 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: python find_admin_jobs.py --contact "Brady" --push-supabase
 
+      # Pre-publish safety gate: never serve Lilly a broken or gutted build.
+      # The build can exit 0 yet produce a bad page (e.g. a regression that
+      # drops every job, or malformed HTML). Validate the actual artifact here;
+      # on failure the job stops BEFORE publish, so the last good site stays
+      # live and the failure-issue step fires. This is what makes an auto-merged
+      # fix safe: even if a bad change passes CI, it can't reach the live site.
+      - name: Verify built page (pre-publish gate)
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, pathlib, re, sys
+          p = pathlib.Path("web/index.html")
+          if not p.exists():
+              print("GATE FAIL: web/index.html was not produced"); sys.exit(1)
+          html = p.read_text(encoding="utf-8")
+          errs = []
+          if len(html) < 100_000:
+              errs.append(f"page too small ({len(html)} bytes) - likely truncated")
+          if "Job Board" not in html:
+              errs.append("missing 'Job Board' shell")
+          m = re.search(r"const JOBS = (\[.*?\]);", html, re.DOTALL)
+          if not m:
+              errs.append("no embedded JOBS array")
+          else:
+              jobs = json.loads(m.group(1).replace("<\\/", "</"))
+              if len(jobs) < 5:
+                  errs.append(f"only {len(jobs)} jobs - a healthy scan yields dozens; likely a regression")
+          if not re.search(r'"generated": "\d{4}-\d{2}-\d{2}', html):
+              errs.append("no generated date")
+          if errs:
+              print("::error::pre-publish gate FAILED: " + "; ".join(errs)); sys.exit(1)
+          print(f"pre-publish gate OK: {len(html)} bytes, build looks sane")
+          PY
+
       # Artifact = the site bundle only. The audit CSV (operator-only scam
       # reasons) is NOT uploaded: on a public repo, artifacts are downloadable
       # by anyone. Run the scanner locally to get the CSV.
       - name: Upload mobile app bundle
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && success()
         uses: actions/upload-artifact@v4
         with:
           name: jobs-app-${{ github.run_id }}
@@ -95,7 +130,7 @@ jobs:
           retention-days: 14
 
       - name: Publish to gh-pages (this repo)
-        if: steps.gate.outputs.run == 'true'
+        if: steps.gate.outputs.run == 'true' && success()
         shell: bash
         env:
           GITHUB_TOKEN: ${{ github.token }}
