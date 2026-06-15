@@ -122,7 +122,7 @@ jobs:
       # by anyone. Run the scanner locally to get the CSV.
       - name: Upload mobile app bundle
         if: steps.gate.outputs.run == 'true' && success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: jobs-app-${{ github.run_id }}
           path: web/
