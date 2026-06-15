@@ -34,9 +34,11 @@ jobs:
     name: scan (keyless OSS)
     runs-on: ubuntu-latest
     timeout-minutes: 10   # never let a hung scan run forever (CI-hang policy)
-    # Dependabot PRs run with a read-only token; Dependabot's own CVE scanning
-    # gates those, so skip the SAST run there.
-    if: github.actor != 'dependabot[bot]'
+    # Runs on EVERY PR, including Dependabot. This job is now a REQUIRED status
+    # check, and a job skipped via `if:` reports "skipped" — which branch
+    # protection treats as NOT satisfied, blocking the PR. The scan is keyless
+    # (no token needed), so running it on Dependabot PRs is harmless and gives a
+    # real pass instead of a blocking skip.
     steps:
       - uses: actions/checkout@v4
 
