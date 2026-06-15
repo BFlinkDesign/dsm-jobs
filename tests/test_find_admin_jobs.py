@@ -402,6 +402,59 @@ def test_unknown_employer_financial_duties_still_scam():
     assert fa.scam_assessment(r, {})["level"] == "scam"
 
 
+def test_remote_posting_naming_trusted_employer_with_financial_duties_is_scam():
+    # Audit fix: a REMOTE posting that merely NAMES a trusted employer + has
+    # financial-duty language is the spoofed-name check-cashing shape, so the
+    # trusted rescue must NOT apply (a real trusted teller/AP role is local).
+    r = _duty_row(
+        "Wells Fargo", "You will process payments and handle money orders from home.", source="remote"
+    )
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+
+
+def test_boolean_predicted_flag_still_hides_wage():
+    # Audit fix: salary_is_predicted as a JSON boolean true must still be treated
+    # as a guess (fail closed) — no number, no $19+ verdict.
+    row = fa.normalize(
+        {
+            "title": "Office Assistant",
+            "company": {"display_name": "X"},
+            "location": {"display_name": "Des Moines, IA"},
+            "salary_min": 41600,
+            "salary_max": 45760,
+            "salary_is_predicted": True,
+            "created": "2026-06-01",
+            "redirect_url": "https://x",
+        },
+        "local",
+    )
+    assert row["predicted"] is True and row["verdict"] == "unlisted"
+    p = fa._jobs_payload([{**row, "scam": {"level": "safe", "reasons": []}}])[0]
+    assert p["pay"] == "Pay not listed" and p["payNum"] == 0.0 and p["good"] is False
+
+
+def test_jobs_with_empty_id_and_url_get_distinct_ids():
+    # Audit fix: a row with no id AND no url must not collapse onto the shared ""
+    # localStorage key (which would bleed Applied/Saved state between jobs).
+    base = {
+        "hourly_min": 20.0,
+        "hourly_max": 24.0,
+        "verdict": "meets",
+        "predicted": False,
+        "created": "2026-06-01",
+        "source": "local",
+        "description": "",
+        "location": "Des Moines, IA",
+        "id": None,
+        "url": "",
+        "scam": {"level": "safe", "reasons": []},
+    }
+    a = {**base, "title": "Receptionist", "company": "Alpha"}
+    b = {**base, "title": "File Clerk", "company": "Beta"}
+    ids = [j["id"] for j in fa._jobs_payload([a, b])]
+    assert ids[0] != ids[1] and "" not in ids
+
+
 def test_hard_tell_overrides_trusted_employer():
     # Fee/off-platform tells are fatal even from a trusted name (spoofed listings).
     r = _duty_row("Wells Fargo", "Interview conducted via telegram. Pay a registration fee to start.")
