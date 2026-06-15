@@ -538,3 +538,61 @@ def test_passes_us_filter_drops_foreign_remote_keeps_us():
     # A foreign marker overrides even a 'local' source (defensive):
     assert fa.passes_us_filter(row("Des Moines, IA", source="local")) is True
     assert fa.passes_us_filter(row("London, UK", source="local")) is False
+
+
+# ── commute radius (let-her-choose distance chooser) ──────────────────
+
+
+def test_commute_minutes_warren_and_story_now_in_range():
+    # Warren/Story towns used to be dropped by the Polk/Dallas-only filter; they
+    # now resolve to a drive time so the in-app radius chooser can include them.
+    assert fa.commute_minutes("Norwalk, IA") == 28  # Warren County
+    assert fa.commute_minutes("Indianola, IA") == 38  # Warren County
+    assert fa.commute_minutes("Ames, IA") == 38  # Story County
+    assert fa.commute_minutes("West Des Moines, IA") == 18  # unchanged Polk value
+
+
+def test_commute_minutes_city_beats_county_fallback():
+    # A named city wins over its county; the county is only a fallback.
+    assert fa.commute_minutes("Grimes, Polk County") == 5
+    assert fa.commute_minutes("Polk County, IA") == 20  # no city -> county fallback
+
+
+def test_commute_minutes_token_match_not_substring():
+    # "ames" inside "James St" must NOT match Ames (token match, not substring).
+    assert fa.commute_minutes("123 James Street, Des Moines, IA") == 20
+    assert fa.commute_minutes("Chicago, IL") is None
+    assert fa.commute_minutes("") is None
+    assert fa.commute_minutes(None) is None
+
+
+def test_commute_gate_keeps_nearby_county_drops_far():
+    # The build-time gate keeps a local job iff it has a known drive time.
+    def commutable(loc):
+        return fa.commute_minutes(loc) is not None
+
+    assert commutable("Norwalk, IA")  # Warren — now kept
+    assert commutable("Ames, IA")  # Story — now kept
+    assert commutable("Des Moines, IA")  # Polk — still kept
+    assert not commutable("Marshalltown, IA")  # too far — dropped (not in map)
+    assert not commutable("Chicago, IL")  # out of region — dropped
+
+
+def test_jobs_payload_carries_commute_min():
+    base = {
+        "title": "Receptionist",
+        "company": "Dallas County",
+        "location": "Adel, IA",
+        "hourly_min": 18.0,
+        "hourly_max": None,
+        "predicted": False,
+        "verdict": fa.salary_verdict(18.0, None, stated=True),
+        "created": "2026-06-10",
+        "url": "https://example.gov/1",
+        "description": "front desk",
+    }
+    local = {**base, "id": "1", "source": "local"}
+    assert fa._jobs_payload([local])[0]["commuteMin"] == 15  # Adel
+    # Remote jobs carry commuteMin None so the radius filter always shows them.
+    remote = {**base, "id": "2", "source": "remote", "location": "Remote, US"}
+    assert fa._jobs_payload([remote])[0]["commuteMin"] is None
