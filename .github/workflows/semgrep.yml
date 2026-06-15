@@ -40,7 +40,7 @@ jobs:
     # (no token needed), so running it on Dependabot PRs is harmless and gives a
     # real pass instead of a blocking skip.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: actions/setup-python@v5
         with:
