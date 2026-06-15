@@ -181,14 +181,18 @@ def test_in_polk_or_dallas_counties_only():
     assert fa.in_polk_or_dallas("Iowa, US") is False
 
 
-def test_county_filter_applies_to_local_rows_only():
-    out_of_county = _job(41600, 45760)
-    out_of_county["location"] = {"display_name": "Norwalk, IA"}
-    local = fa.normalize(out_of_county, "local")
-    remote = fa.normalize(out_of_county, "remote")
-    keep = lambda r: r["source"] != "local" or fa.in_polk_or_dallas(r["location"])  # noqa: E731
-    assert keep(local) is False
-    assert keep(remote) is True  # remote jobs are not county-bound
+def test_commute_gate_applies_to_local_rows_only():
+    # The build-time gate now keeps a LOCAL job iff it's within commute range
+    # (Norwalk/Warren is in range); a too-far town is dropped; remote rows are
+    # never distance-bound. This mirrors the real pipeline gate (commute_minutes).
+    near = _job(41600, 45760)
+    near["location"] = {"display_name": "Norwalk, IA"}  # Warren Co — now in range
+    far = _job(41600, 45760)
+    far["location"] = {"display_name": "Marshalltown, IA"}  # beyond the commute map
+    keep = lambda r: r["source"] != "local" or fa.commute_minutes(r["location"]) is not None  # noqa: E731
+    assert keep(fa.normalize(near, "local")) is True  # was dropped before; now kept
+    assert keep(fa.normalize(far, "local")) is False  # too far -> dropped
+    assert keep(fa.normalize(far, "remote")) is True  # remote jobs are not distance-bound
 
 
 def test_trusted_reason_labels():
