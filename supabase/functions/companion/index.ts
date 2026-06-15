@@ -139,17 +139,26 @@ async function handle(req: Request): Promise<Response> {
   }
   if (!text || text.length > 4000) return json({ error: "message must be 1-4000 chars" }, 400);
 
-  // Per-user rate cap (the only place the paid Anthropic key is reachable):
-  // count this caller's own messages in the last minute (RLS-scoped) and
-  // refuse over the budget so a stuck loop or a misused token can't run up
-  // the bill or starve the real user. Invite-only + this cap = bounded cost.
+  // Store her message FIRST: this makes the rate count below include the
+  // current turn (shrinking the concurrent-burst race) and guarantees we never
+  // spend the paid key on a turn we couldn't persist. A DB failure FAILS CLOSED.
+  const { error: insErr } = await supabase
+    .from("chat_messages").insert({ role: "user", body: text });
+  if (insErr) {
+    return json({ error: "I couldn't save that just now — try again in a sec" }, 503);
+  }
+
+  // Per-user rate cap — the only place the paid Anthropic key is reachable, so a
+  // stuck loop or a misused token can't run up the bill. FAIL CLOSED: a count
+  // error or a null count means we cannot prove we're under budget, so refuse
+  // rather than let spend run unbounded (the old `recent ?? 0` failed OPEN).
   const sinceIso = new Date(Date.now() - 60_000).toISOString();
-  const { count: recent } = await supabase
+  const { count: recent, error: capErr } = await supabase
     .from("chat_messages")
     .select("id", { count: "exact", head: true })
     .eq("role", "user")
     .gte("created_at", sinceIso);
-  if ((recent ?? 0) >= 12) {
+  if (capErr || recent === null || recent > 12) {
     return json({ error: "You're going quick — give me a few seconds and try again 💜" }, 429);
   }
 
