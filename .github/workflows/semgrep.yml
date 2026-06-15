@@ -40,9 +40,9 @@ jobs:
     # (no token needed), so running it on Dependabot PRs is harmless and gives a
     # real pass instead of a blocking skip.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
@@ -81,7 +81,7 @@ jobs:
       #       --config p/github-actions --metrics=off --disable-version-check \
       #       --sarif --output semgrep.sarif || true
       # - name: Upload SARIF to GitHub code scanning
-      #   uses: github/codeql-action/upload-sarif@v3
+      #   uses: github/codeql-action/upload-sarif@dd903d2e4f5405488e5ef1422510ee31c8b32357 # v3
       #   with:
       #     sarif_file: semgrep.sarif
       #   if: always()
