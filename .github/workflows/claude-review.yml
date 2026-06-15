@@ -15,6 +15,7 @@ on:
 permissions:
   pull-requests: write   # post the review comment
   contents: read         # read the diff
+  id-token: write        # claude-code-action exchanges a GitHub OIDC token
 
 jobs:
   review:
