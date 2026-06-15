@@ -1,1 +1,8 @@
 project_id = "tcclohxvhmwgjrtdkkuw"
+
+# Pin the auth gate in source so it survives redeploys and isn't just a
+# deploy-time/dashboard default. The companion holds the paid Anthropic key;
+# verify_jwt rejects unauthenticated requests at the platform edge, and the
+# in-function getUser() check is the genuine second layer (invite-only users).
+[functions.companion]
+verify_jwt = true
