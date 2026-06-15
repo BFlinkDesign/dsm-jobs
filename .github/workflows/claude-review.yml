@@ -1,0 +1,67 @@
+# Claude reviews every pull request — our AI review tier (replaces CodeRabbit).
+#
+# Runs on the ANTHROPIC_API_KEY already configured for the self-repair loop;
+# no third-party app, no signup, no trial. Advisory only: it posts a single
+# sticky review comment and never blocks a merge (CI + Semgrep + the invariant
+# tests are the hard gates). Self-gates on the key (dormant if unset), and skips
+# Dependabot PRs to save tokens.
+
+name: Claude PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  pull-requests: write   # post the review comment
+  contents: read         # read the diff
+
+jobs:
+  review:
+    if: github.actor != 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Gate on ANTHROPIC_API_KEY
+        id: gate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        shell: bash
+        run: |
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::notice::ANTHROPIC_API_KEY not set — Claude review is dormant."
+            echo "run=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.run == 'true'
+
+      - name: Review with Claude
+        if: steps.gate.outputs.run == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          use_sticky_comment: true
+          track_progress: false
+          include_fix_links: true
+          claude_args: "--max-turns 6"
+          prompt: |
+            Review this pull request for a job-finder PWA built for ONE
+            vulnerable user (phone-only, no degree, going through a hard time).
+            Be concise: a short summary, then a bulleted list of concrete issues
+            with file:line. If it's clean, say so briefly. Skip nitpicks
+            (formatting, naming) unless they cause a real bug.
+
+            Prioritize, in order:
+            - Safety invariants (read CLAUDE.md and the tests in
+              tests/test_invariants_end_to_end.py): a guessed/predicted wage must
+              NEVER render as a number; scams are HIDDEN, not labeled; every
+              rendered field is XSS-escaped via esc()/safeUrl(); the attainability
+              filter keeps experienced-admin roles and drops only exec tiers.
+            - Security on a PUBLIC repo: no secret or PII in committed files, in
+              Actions logs, or in the generated page; no unsafe apply URLs; the
+              companion function never logs user message content.
+            - Correctness and regressions, then quality. Runtime stays
+              STDLIB-ONLY — flag any new third-party runtime dependency.
