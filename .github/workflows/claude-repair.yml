@@ -1,0 +1,94 @@
+# Self-repair: when an issue is labeled `auto-fix`, Claude drafts a fix PR.
+#
+# This is the "repair" half of the self-healing loop. It does NOT merge anything
+# — it opens a normal PR that must pass CI + Semgrep + CodeRabbit + the
+# invariant tests, and then auto-merge-guard.yml decides (by changed paths)
+# whether to auto-merge or escalate to a human. So a bad fix cannot reach the
+# live site: the invariant tests fail it, or the guard escalates it.
+#
+# SAFETY:
+# - Dormant unless ANTHROPIC_API_KEY is set (so it costs nothing until funded).
+# - Kill switch: create a file named AGENT_STOP at the repo root and the loop
+#   halts immediately.
+# - Circuit breaker: one attempt per issue. The `repair-attempted` label is
+#   added on start; a second `auto-fix` label does nothing until a human removes
+#   it. No infinite retry loops.
+
+name: Claude Self-Repair
+
+on:
+  issues:
+    types: [labeled]
+
+# Least privilege: read the issue, write code on a branch, open a PR.
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  repair:
+    if: github.event.label.name == 'auto-fix' && github.event.issue.state == 'open'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gate + circuit breakers
+        id: gate
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ github.event.issue.number }}
+          LABELS: ${{ join(github.event.issue.labels.*.name, ',') }}
+        shell: bash
+        run: |
+          set -o pipefail
+          if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+            echo "::notice::ANTHROPIC_API_KEY not set — self-repair is dormant."
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          if [ -f AGENT_STOP ]; then
+            echo "::warning::AGENT_STOP present — self-repair halted by kill switch."
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          # One attempt per issue: if already attempted, do nothing until a human
+          # removes the label. This is the dead-end / no-infinite-retry breaker.
+          if printf '%s' "$LABELS" | tr ',' '\n' | grep -qx 'repair-attempted'; then
+            echo "::notice::Issue #$ISSUE already had a repair attempt — skipping."
+            echo "run=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          gh issue edit "$ISSUE" --add-label repair-attempted
+          echo "run=true" >> "$GITHUB_OUTPUT"
+
+      - name: Draft a fix with Claude
+        if: steps.gate.outputs.run == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            A monitor opened this issue. Diagnose the root cause and open a pull
+            request with the SMALLEST fix that resolves it. This repo serves a
+            real, vulnerable person — correctness and restraint matter more than
+            cleverness.
+
+            Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}
+
+            ${{ github.event.issue.body }}
+
+            Hard rules (read CLAUDE.md for the invariants and follow them):
+            - Make the minimal change. No unrelated refactoring.
+            - Run `python -m pytest -q --timeout=60` and `python -m ruff check .`
+              before opening the PR. If you cannot make them pass, do NOT open a
+              PR — instead comment on the issue explaining what you found and
+              what a human needs to decide.
+            - NEVER change these without stopping and asking for human review in a
+              comment instead: anything under supabase/ or portal/ (stateful
+              backend, her saved data and auth), scam_blocklist.txt (a wrong edit
+              un-hides a known scam), or anything under .github/ (the safety
+              workflows themselves).
+            - Never weaken an invariant to make a test pass: a guessed wage is
+              never shown as a number; scams are hidden, not labeled; all rendered
+              fields stay XSS-escaped.
+            - In the PR description, say plainly that this is an automated repair
+              draft and summarize exactly what changed and why.
