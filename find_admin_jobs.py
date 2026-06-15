@@ -624,9 +624,11 @@ def scam_assessment(row, spam_index):
     for p in SCAM_TITLE_FLAGS:
         if p in title:
             reasons.append(f"scam-prone title ('{p}')")
-    # Financial-duty phrases: ordinary teller/cashier/AP work at a trusted
-    # employer, scam-shaped anywhere else.
-    if not trusted:
+    # Financial-duty phrases: ordinary teller/cashier/AP work at a trusted LOCAL
+    # employer, scam-shaped anywhere else. A REMOTE posting that merely NAMES a
+    # trusted employer is the spoofed-name check-cashing shape, so it does NOT
+    # get the trusted rescue (a real trusted employer's teller/AP role is local).
+    if not trusted or remote:
         for p in SCAM_FINANCIAL_DUTY_FLAGS:
             if p in desc:
                 reasons.append(f"description mentions '{p}'")
@@ -683,7 +685,12 @@ def normalize(job, source):
     location = (job.get("location") or {}).get("display_name") or ""
     smin = job.get("salary_min")
     smax = job.get("salary_max")
-    predicted = str(job.get("salary_is_predicted", "0")) == "1"
+    # Fail CLOSED: a wage counts as employer-STATED only when the flag is an
+    # explicit not-predicted value. A boolean true, an int 1, "2", or any
+    # unexpected shape -> treated as a GUESS (invariant #1: never show a guessed
+    # wage as a number). Adzuna sends "0"/"1" strings today; this survives a
+    # type change to bool/int without ever failing open.
+    predicted = str(job.get("salary_is_predicted", "1")).strip().lower() not in ("0", "false", "no")
 
     hourly_min = to_hourly(smin)
     hourly_max = to_hourly(smax)
@@ -858,8 +865,14 @@ def _jobs_payload(safe_rows):
         # Only an EMPLOYER-STATED salary shows a number; predicted/none -> "Pay not listed".
         stated = (not r["predicted"]) and (r["hourly_min"] is not None or r["hourly_max"] is not None)
         floor = r["hourly_min"] if r["hourly_min"] is not None else (r["hourly_max"] or 0)
+        # Stable per-job id. Falling back to "" (when both id and url are empty)
+        # would collapse multiple jobs onto one localStorage key, so an "Applied"
+        # tap on one would flip another (and corrupt her work-search log). Use
+        # the content tuple as a last-resort distinct key.
+        jid = r.get("id") or r.get("url") or "|".join(
+            (r.get("title") or "", r.get("company") or "", r.get("location") or ""))
         jobs.append({
-            "id": str(r.get("id") or r["url"]),
+            "id": str(jid),
             "title": r["title"],
             "company": r["company"],
             "location": r["location"],
