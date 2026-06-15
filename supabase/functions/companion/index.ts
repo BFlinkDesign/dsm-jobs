@@ -34,6 +34,15 @@ if (SENTRY_DSN) {
       delete event.server_name;
       return event;
     },
+    beforeSendTransaction(event) {
+      // Performance transactions + spans (including the default fetch
+      // instrumentation of the Anthropic call) must not carry request data or
+      // user content either — beforeSend only covers error events.
+      delete event.request;
+      delete event.contexts;
+      delete event.user;
+      return event;
+    },
   });
 }
 
@@ -162,8 +171,7 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "You're going quick — give me a few seconds and try again 💜" }, 429);
   }
 
-  // Store her message, load recent history + profile (all RLS-scoped).
-  await supabase.from("chat_messages").insert({ role: "user", body: text });
+  // Load recent history + profile (all RLS-scoped).
   const [{ data: history }, { data: prof }] = await Promise.all([
     supabase.from("chat_messages").select("role, body")
       .order("created_at", { ascending: false }).limit(MAX_TURNS),
