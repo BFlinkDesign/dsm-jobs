@@ -44,9 +44,9 @@ jobs:
       # Sentry DSN is PUBLIC/embeddable, so it's a repo Variable, not a Secret.
       SENTRY_DSN: ${{ vars.SENTRY_DSN }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
 
@@ -122,7 +122,7 @@ jobs:
       # by anyone. Run the scanner locally to get the CSV.
       - name: Upload mobile app bundle
         if: steps.gate.outputs.run == 'true' && success()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: jobs-app-${{ github.run_id }}
           path: web/
@@ -167,7 +167,7 @@ jobs:
 
       - name: Open/refresh an issue if the daily scan failed
         if: failure()
-        uses: actions/github-script@v9
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const body = `The daily job scan failed at ${new Date().toISOString()}. ` +
