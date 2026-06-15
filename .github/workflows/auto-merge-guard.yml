@@ -25,13 +25,21 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+# One guard run per PR; a new push supersedes the prior arming.
+concurrency:
+  group: guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
   guard:
-    if: startsWith(github.head_ref, 'claude/')
+    # claude/* is the bot's branch prefix, but a branch name is spoofable, so
+    # also require the PR author to actually be a bot account. A human's
+    # claude/* PR is therefore never auto-merged.
+    if: startsWith(github.head_ref, 'claude/') && github.event.pull_request.user.type == 'Bot'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
