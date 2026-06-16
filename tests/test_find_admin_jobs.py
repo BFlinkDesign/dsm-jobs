@@ -600,3 +600,32 @@ def test_jobs_payload_carries_commute_min():
     # Remote jobs carry commuteMin None so the radius filter always shows them.
     remote = {**base, "id": "2", "source": "remote", "location": "Remote, US"}
     assert fa._jobs_payload([remote])[0]["commuteMin"] is None
+
+
+# ── gig-bait scam hardening (pre-release review 2026-06-16) ────────────
+
+
+def test_scam_shield_flags_gig_panel_bait_title():
+    # "Paid Focus Group Panelist" is gig bait — hidden even as a LOCAL posting
+    # (so it doesn't rely on the remote+unknown rule). Without the title flag this
+    # local/unknown/no-tell row would score 'safe'; the flag makes it 'scam'.
+    r = _row(
+        title="Paid Focus Group Panelist - Des Moines",
+        company="Generic Studio",
+        source="local",
+        desc="Share your opinions and get paid.",
+    )
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+
+
+def test_scam_shield_does_not_false_hide_market_research_coordinator():
+    # A legit "Market Research Coordinator" must NOT be hidden by the gig-bait
+    # flags — they're distinctive ("research panel"/"paid focus group"), not the
+    # broad term "market research".
+    r = _row(
+        title="Market Research Coordinator",
+        company="Wellmark",
+        source="local",
+        desc="Coordinate research projects, scheduling, reports.",
+    )
+    assert fa.scam_assessment(r, {})["level"] == "safe"

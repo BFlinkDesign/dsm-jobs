@@ -142,6 +142,13 @@ SCAM_TITLE_FLAGS = [
     "personal assistant", "executive assistant to", "package handler remote",
     "reshipping", "payment processor", "money transfer", "mystery shopper",
     "data entry from home", "typing job", "envelope",
+    # Gig / "paid panel" bait that targets admin seekers ("Remote Market Research
+    # Panel — Administrative Assistant Welcome", "Paid Focus Group Panelist",
+    # "Product Tester WFH"). DISTINCTIVE phrases only — NOT bare "market research"
+    # — so legit "Market Research Coordinator/Analyst" admin roles are not hidden.
+    # (added 2026-06-16, pre-release review.)
+    "research panel", "paid focus group", "focus group panelist", "product tester",
+    "survey taker", "paid panelist", "online panelist",
 ]
 
 # Recognizable, lower-risk employers (local/government/known). Boosts to SAFE and
