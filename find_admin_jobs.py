@@ -1194,8 +1194,10 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .search{width:100%;font:inherit;font-size:17px;padding:14px 16px 14px 44px;border:1.5px solid var(--line);
  border-radius:12px;background:var(--card);min-height:52px;color:var(--ink)}
 .search:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
-.chips{display:flex;gap:8px;overflow-x:auto;padding:11px 0 5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:6px 0 5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
+.chiplabel{font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;color:#9a92ad;font-weight:700;margin:12px 2px 0}
+.chiplabel:first-of-type{margin-top:4px}
 .chip{flex:0 0 auto;background:var(--card);border:1.5px solid var(--line);border-radius:999px;
  padding:9px 15px;font:inherit;font-size:15px;font-weight:700;color:var(--ink2);min-height:44px;white-space:nowrap;transition:.15s}
 .chip[aria-pressed="true"]{background:var(--green);color:#fff;border-color:var(--green)}
@@ -1433,7 +1435,7 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
           placeholder="Password" aria-label="Password" hidden>
         <button class="authprimary" id="authprimarybtn">Continue</button>
         <button class="authsecondary" id="authmagic">Email me a sign-in link instead</button>
-        <button class="authsecondary" id="authgoogle">
+        <button class="authsecondary" id="authgoogle" hidden>
           <svg viewBox="0 0 24 24" width="17" height="17"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 01-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 01-10.8-3.8H1.2v3.1A12 12 0 0012 24z"/><path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 010-4.6V6.6H1.2a12 12 0 000 10.8z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4A12 12 0 001.2 6.6l4.1 3.1A7.2 7.2 0 0112 4.8z"/></svg>
           Continue with Google
         </button>
@@ -1576,8 +1578,11 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
       <input class="search" id="search" type="search" inputmode="search"
         placeholder="Search job or employer" aria-label="Search jobs">
     </div>
+    <div class="chiplabel">Filter</div>
     <div class="chips" id="chips"></div>
+    <div class="chiplabel" id="catlabel">Job type</div>
     <div class="chips" id="catchips"></div>
+    <div class="chiplabel">How far you'll drive from Grimes</div>
     <div class="chips" id="commutechips" aria-label="How far you will drive"></div>
   </div>
 
@@ -1831,6 +1836,7 @@ function buildChips(){
   }
   const cc = document.getElementById("catchips"); cc.innerHTML="";
   cc.hidden = CATS.length<2;
+  var clbl = document.getElementById("catlabel"); if(clbl) clbl.hidden = CATS.length<2;
   for(const cat of CATS){
     const b=document.createElement("button");
     b.className="chip"; b.textContent=cat; b.setAttribute("aria-pressed","false");
@@ -2204,6 +2210,14 @@ setView("jobs");
 
     var supportsPasskey = !!(window.PublicKeyCredential) && typeof sb.auth.signInWithPasskey === "function";
     if(!supportsPasskey){ var pk = document.getElementById("authpasskey"); if(pk) pk.hidden = true; }
+    // Social sign-in buttons appear ONLY for providers the project actually
+    // enables — so a not-yet-configured Google button is never a dead end. If
+    // Google OAuth is turned on later, the button shows up on its own.
+    fetch(PORTAL.url + "/auth/v1/settings", { headers: { apikey: PORTAL.key } })
+      .then(function(r){ return r.json(); })
+      .then(function(s){ var ext = (s && s.external) || {};
+        var g = document.getElementById("authgoogle"); if(g && ext.google) g.hidden = false; })
+      .catch(function(){});
 
     function setMsg(t, isErr){ msg.textContent = t || ""; msg.className = "authmsg" + (isErr ? " err" : ""); }
     function showOut(){ rowOut.hidden = false; rowIn.hidden = true; }
