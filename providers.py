@@ -560,9 +560,26 @@ NEOGOV_FEED = "https://www.governmentjobs.com/SearchEngine/JobsFeed"
 NEOGOV_AGENCIES = [
     ("iowa", "State of Iowa"),              # 197 items (statewide; metro-filtered downstream)
     ("desmoines", "City of Des Moines"),    # 13
-    ("johnston", "City of Johnston"),       # 36
+    # FIX 2026-06-15: the bare "johnston" slug is *Johnston County, NC* (verified
+    # live: channel <title> = "Johnston County, NC"), not the Iowa city — it was
+    # mislabeled and only ever survived because the Polk/Dallas filter dropped its
+    # NC rows. The Iowa city's real slug is "cityofjohnston".
+    ("cityofjohnston", "City of Johnston"),  # 4 (Johnston, IA 50131 — Polk County)
     ("urbandale", "City of Urbandale"),     # 2
     ("waukee", "City of Waukee"),           # 2
+    # Added 2026-06-15 — Polk/Dallas-County gov feeds verified live (HTTP 200) and
+    # confirmed end-to-end through the full filter chain + scam shield.
+    #   dallascountyia — surfaces a Receptionist (Adel) TODAY (live-tested).
+    #   cityofjohnston, bondurant — Polk-County feeds whose current single posting
+    #     is a non-admin title (Support Specialist / Building Official Coordinator)
+    #     so they yield 0 right now, but they're cheap, high-trust, and will catch a
+    #     clean admin/clerk/receptionist post when one is listed (same rationale as
+    #     the tiny urbandale/waukee feeds above).
+    # Probed + dropped: dmww (location field is the facility name "Water Works Park",
+    #   never a parseable Polk/Dallas city -> can't pass in_polk_or_dallas); Warren-Co
+    #   (norwalkiowa) + Story-Co (cityofames) are outside the Polk/Dallas metro filter.
+    ("dallascountyia", "Dallas County"),    # 2 (Receptionist, Adel — Dallas County)
+    ("bondurant", "City of Bondurant"),     # 1 (Building Official Coordinator; Polk 50035)
 ]
 _NEOGOV_NS = "{http://www.neogov.com/namespaces/JobListing}"
 _NEOGOV_INTERVAL = {  # -> multiplier to hourly; only reliably-convertible units
@@ -669,6 +686,12 @@ WORKDAY_BOARDS = [
     ("corteva", "wd5", "Corteva", "Corteva Agriscience"),   # Johnston HQ
     ("nationwide", "wd1", "Nationwide_Career", "Nationwide"),
     ("godirect", "wd5", "voya_jobs", "Voya Financial"),
+    # Probed 2026-06-15 + REJECTED after live end-to-end testing: hyvee (grocery —
+    # "administrative" returns Pharmacy Clerk / Security Officer, 0 office-admin),
+    # emcins (0 clean metro admin in snapshot), trinityhealth/MercyOne (national
+    # tenant — floods ~100 out-of-state rows; its Des Moines roles carry facility-
+    # name locations like "MMCIA - MercyOne West Grand Clinic" that fail the metro
+    # filter). Re-add only with a location facet that isolates the DSM metro.
 ]
 # CxS searchText matches title+description; a few admin terms keep volume low
 # and precision high vs. pulling every posting from these large employers.
