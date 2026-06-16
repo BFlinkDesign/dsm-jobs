@@ -23,9 +23,11 @@ python -m pytest tests/test_find_admin_jobs.py::test_blocklist_hides_even_truste
 python -m ruff check find_admin_jobs.py tests    # lint (CI runs this)
 
 python -m http.server 8137 --directory web --bind 127.0.0.1   # serve the PWA locally to test (file:// won't run the SW)
+
+pip install -r verify/requirements.txt && python verify/camera.py   # the CAMERA: render the PWA in real Chrome + inspect (8 checks)
 ```
 
-Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install -r requirements-dev.txt` (ruff, pytest, pytest-timeout).
+Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install -r requirements-dev.txt` (ruff, pytest, pytest-timeout, mypy). The **camera** self-verifier (`verify/`) needs `playwright` + system Chrome — verify-only, not a runtime dep.
 
 ## Architecture (the big picture)
 
@@ -39,6 +41,7 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
   - **Update 2026-06-16:** the three filter rows are now **labeled** (`Filter` / `Job type` / `How far you'll drive from Grimes`) so they don't read as one ambiguous wall of pills. The **commute-radius chooser** (Any / 20 / 30 / 45 min) lets the end user pick how far she'll drive; it persists in localStorage and remote jobs always show. Social sign-in buttons (Google) render **only if the project actually enables that provider** (a `/auth/v1/settings` fetch) — so a not-yet-configured Google button is never a dead end.
 - **CI** (`.github/workflows/ci.yml`): ruff + compile + tests + mock pipeline (3.11/3.12) + a self-contained secret-shape scan.
 - **CD** (`.github/workflows/scan.yml`): daily + manual; builds `web/`, uploads the site bundle as an artifact (the audit CSV is deliberately NOT uploaded — artifacts are public), and force-pushes `web/` to this repo's `gh-pages` branch via the built-in `GITHUB_TOKEN` (`permissions: contents: write`; no PAT).
+- **`verify/camera.py`** — the **camera** self-verifier: builds `--mock`, renders the PWA in real Chrome (Playwright via `channel="chrome"`), photographs each view, and inspects the live DOM against the invariants (8 checks incl. **invariant #1 at the render layer**, labeled filter rows, provider-aware auth, no render-garbage). Exit 0 iff all pass. Complements the unit tests: pytest proves the *logic*, the camera proves the *rendered reality*. Re-run before any deploy. Generated `verify/shots/` + `report.json` are gitignored; see `verify/README.md`.
 
 ## Load-bearing invariants (do not regress)
 
@@ -59,6 +62,8 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 - **Commute-radius chooser** + commute-based metro gate (Polk/Dallas/Warren/Story).
 - **Filter-row labels** + provider-aware social buttons.
 - **Auth working end-to-end** (Supabase email signup/login + RLS; Site URL + confirm-email configured).
+- **Scam-shield hardening** — gig/"paid panel" bait titles flagged (distinctive phrases only, so legit Market Research Coordinator roles aren't false-hidden).
+- **The camera self-verifier** (`verify/camera.py`) — renders the PWA in real Chrome + inspects 8 invariant checks; ran 8/8 green + a visual pass on all 4 views.
 
 ## Planned / next
 

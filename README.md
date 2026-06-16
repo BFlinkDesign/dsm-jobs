@@ -85,7 +85,15 @@ pip install -r requirements-dev.txt
 ruff check .
 pytest --timeout=30 --timeout-method=thread
 python find_admin_jobs.py --mock   # end-to-end without a key
+
+pip install -r verify/requirements.txt && python verify/camera.py   # the camera (see verify/README.md)
 ```
+
+The **camera** (`verify/camera.py`) is a render-and-inspect self-verifier: it builds the
+page, opens it in real Chrome, screenshots each view, and checks the live DOM against the
+invariants (no guessed wage shown as a number, labeled filters, social buttons hidden
+unless enabled, no render-garbage). pytest proves the logic; the camera proves the
+rendered reality.
 
 - **CI** (`.github/workflows/ci.yml`): runs ruff + compile + 100+ unit/smoke tests + the
   mock pipeline on every push/PR (Python 3.11 & 3.12), plus a secret-shape scan. Semgrep,
