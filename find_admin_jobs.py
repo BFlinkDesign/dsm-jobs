@@ -248,16 +248,34 @@ NON_US_MARKERS = {
     "emea", "apac", "latam",
 }
 
-# Rough drive times from Grimes (the user's home base) to each metro suburb,
-# in minutes. Matched as a substring of the posting's location, longest first
-# ("west des moines" before "des moines"). Coarse on purpose — it only needs
-# to answer "can I get there?", not navigate.
+# Rough ONE-WAY drive times from Grimes (the user's home base) to each metro /
+# near-metro town, in minutes. These are COARSE ESTIMATES — they only bin a job
+# into a "how far is it?" band for the in-app commute-radius chooser; they are
+# NOT turn-by-turn accurate. This map is ALSO the build-time gate for "is this
+# job commutable?": a local posting whose town isn't here is dropped. So it must
+# cover every Polk/Dallas place in POLK_DALLAS_PLACES (parity — don't regress the
+# old county filter) plus the nearby Warren/Story/Jasper towns the radius chooser
+# now reaches. Token-matched on comma-separated location parts; longest name wins
+# ("west des moines" before "des moines").
 COMMUTE_MINUTES_FROM_GRIMES = {
-    "grimes": 5, "dallas center": 12, "johnston": 12, "urbandale": 12,
-    "polk city": 15, "waukee": 15, "clive": 15, "adel": 15, "windsor heights": 18,
-    "ankeny": 18, "west des moines": 18, "des moines": 20, "saylorville": 20,
-    "altoona": 25, "pleasant hill": 25, "bondurant": 25, "granger": 12,
-    "perry": 30, "van meter": 25, "woodward": 25, "mitchellville": 30,
+    # — Polk County —
+    "grimes": 5, "johnston": 12, "urbandale": 12, "granger": 12, "clive": 15,
+    "polk city": 15, "berwick": 18, "windsor heights": 18, "ankeny": 18,
+    "west des moines": 18, "des moines": 20, "saylorville": 20, "polk county": 20,
+    "alleman": 22, "elkhart": 22, "sheldahl": 22, "altoona": 25, "pleasant hill": 25,
+    "bondurant": 25, "runnells": 30, "mitchellville": 30,
+    # — Dallas County —
+    "dallas center": 12, "waukee": 15, "adel": 15, "dallas county": 22,
+    "van meter": 25, "de soto": 25, "woodward": 25, "minburn": 28, "bouton": 28,
+    "redfield": 30, "perry": 30, "dexter": 32, "dawson": 35, "linden": 38,
+    # — Warren County (south metro; newly reachable via the radius chooser) —
+    "cumming": 22, "norwalk": 28, "carlisle": 32, "warren county": 35,
+    "hartford": 35, "martensdale": 35, "indianola": 38, "new virginia": 45,
+    # — Story County (north) —
+    "slater": 22, "huxley": 28, "cambridge": 33, "kelley": 33, "maxwell": 35,
+    "ames": 38, "story county": 40, "gilbert": 40, "nevada": 45, "story city": 45,
+    # — Jasper County (east; Newton shows up in live results) —
+    "newton": 38,
 }
 
 # Genuinely out-of-scope EXECUTIVE / non-admin tiers -> dropped. NOTE: we do
@@ -545,15 +563,32 @@ def passes_us_filter(row):
     return is_us_location(loc) or "remote" in loc.lower()
 
 
+# County-level keys in COMMUTE_MINUTES_FROM_GRIMES are FALLBACKS: used only when
+# a posting names no specific city, so "Grimes, Polk County" resolves to Grimes
+# (5), not the Polk-County average (20).
+_COMMUTE_COUNTY_TOKENS = {"polk county", "dallas county", "warren county", "story county"}
+
+
+def commute_minutes(location):
+    """Coarse drive-time (minutes) from Grimes for a known metro/near-metro town,
+    else None. Token-matched on the comma-separated location parts so a street
+    name can't fire ('Ames' won't match 'James St'). A named CITY wins over a
+    county fallback (closest city if several are listed). Single source of truth
+    for BOTH the commutable-job gate and the in-app radius chooser, so the drive
+    time shown on a card and the radius it's filtered by can never disagree."""
+    tokens = [t.strip().lower() for t in (location or "").split(",")]
+    cities = [COMMUTE_MINUTES_FROM_GRIMES[t] for t in tokens
+              if t in COMMUTE_MINUTES_FROM_GRIMES and t not in _COMMUTE_COUNTY_TOKENS]
+    if cities:
+        return min(cities)
+    counties = [COMMUTE_MINUTES_FROM_GRIMES[t] for t in tokens if t in _COMMUTE_COUNTY_TOKENS]
+    return min(counties) if counties else None
+
+
 def commute_text(location):
-    """'~15 min drive' for a known metro suburb, else ''. Longest match wins
-    so 'West Des Moines' doesn't get Des Moines' time."""
-    loc = (location or "").lower()
-    best = None
-    for town, minutes in COMMUTE_MINUTES_FROM_GRIMES.items():
-        if town in loc and (best is None or len(town) > best[0]):
-            best = (len(town), minutes)
-    return f"~{best[1]} min drive" if best else ""
+    """'~15 min drive' for a known metro town, else ''."""
+    m = commute_minutes(location)
+    return f"~{m} min drive" if m is not None else ""
 
 
 def snippet(description, limit=240):
@@ -755,7 +790,7 @@ def collect(verbose=True):
             and not title_excluded(r["title"])
             and not requires_degree(r)
             and passes_us_filter(r)
-            and (r["source"] != "local" or in_polk_or_dallas(r["location"]))]
+            and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
     dropped = len(all_rows) - len(rows)
     if verbose and dropped:
         print(f"  (filtered out {dropped} non-admin / senior / skilled / degree / "
@@ -888,6 +923,7 @@ def _jobs_payload(safe_rows):
             "url": r["url"],
             "category": job_category(r["title"]),
             "commute": "" if r["source"] == "remote" else commute_text(r["location"]),
+            "commuteMin": None if r["source"] == "remote" else commute_minutes(r["location"]),
             "about": snippet(r.get("description")),
             "trains": will_train(r.get("description")),
         })
@@ -1158,8 +1194,10 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .search{width:100%;font:inherit;font-size:17px;padding:14px 16px 14px 44px;border:1.5px solid var(--line);
  border-radius:12px;background:var(--card);min-height:52px;color:var(--ink)}
 .search:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
-.chips{display:flex;gap:8px;overflow-x:auto;padding:11px 0 5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+.chips{display:flex;gap:8px;overflow-x:auto;padding:6px 0 5px;-webkit-overflow-scrolling:touch;scrollbar-width:none}
 .chips::-webkit-scrollbar{display:none}
+.chiplabel{font-size:.7rem;letter-spacing:.05em;text-transform:uppercase;color:#9a92ad;font-weight:700;margin:12px 2px 0}
+.chiplabel:first-of-type{margin-top:4px}
 .chip{flex:0 0 auto;background:var(--card);border:1.5px solid var(--line);border-radius:999px;
  padding:9px 15px;font:inherit;font-size:15px;font-weight:700;color:var(--ink2);min-height:44px;white-space:nowrap;transition:.15s}
 .chip[aria-pressed="true"]{background:var(--green);color:#fff;border-color:var(--green)}
@@ -1397,7 +1435,7 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
           placeholder="Password" aria-label="Password" hidden>
         <button class="authprimary" id="authprimarybtn">Continue</button>
         <button class="authsecondary" id="authmagic">Email me a sign-in link instead</button>
-        <button class="authsecondary" id="authgoogle">
+        <button class="authsecondary" id="authgoogle" hidden>
           <svg viewBox="0 0 24 24" width="17" height="17"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 01-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 01-10.8-3.8H1.2v3.1A12 12 0 0012 24z"/><path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 010-4.6V6.6H1.2a12 12 0 000 10.8z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4A12 12 0 001.2 6.6l4.1 3.1A7.2 7.2 0 0112 4.8z"/></svg>
           Continue with Google
         </button>
@@ -1540,8 +1578,12 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
       <input class="search" id="search" type="search" inputmode="search"
         placeholder="Search job or employer" aria-label="Search jobs">
     </div>
+    <div class="chiplabel">Filter</div>
     <div class="chips" id="chips"></div>
+    <div class="chiplabel" id="catlabel">Job type</div>
     <div class="chips" id="catchips"></div>
+    <div class="chiplabel">How far you'll drive from Grimes</div>
+    <div class="chips" id="commutechips" aria-label="How far you will drive"></div>
   </div>
 
   <div class="progress" id="progress"></div>
@@ -1593,10 +1635,12 @@ state.snooze  = state.snooze || {};          // id -> "come back on" date (gentl
 state.appliedLog = state.appliedLog || {};   // id -> {t,c,d,u} captured at apply time, so the
                                              // work-search log survives jobs leaving the feed
 state.profile = state.profile || {};         // quiz answers -> "For you" feed boost
+state.maxCommute = state.maxCommute || "";   // "" = any distance; else a minutes cap ("20"/"30"/"45")
 const prevSeen = new Set(state.seen||[]);
 function persist(){ save({applied:state.applied, saved:[...state.saved], hidden:[...state.hidden],
   notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff,
-  snooze:state.snooze, appliedLog:state.appliedLog, profile:state.profile}); }
+  snooze:state.snooze, appliedLog:state.appliedLog, profile:state.profile,
+  maxCommute:state.maxCommute}); }
 // Ledger backfill: any applied job still in today's feed gets its details kept.
 JOBS.forEach(j=>{ if(state.applied[j.id] && !state.appliedLog[j.id])
   state.appliedLog[j.id]={t:j.title,c:j.company,d:state.applied[j.id],u:j.url}; });
@@ -1611,7 +1655,8 @@ persist();
 
 const openNotes = new Set();
 let filters = { q:"", cat:"", pay:false, inperson:false, remote:false, known:false,
-                saved:false, applied:false, showHidden:false, trains:false };
+                saved:false, applied:false, showHidden:false, trains:false,
+                maxCommute: state.maxCommute || "" };
 function snoozedNow(id){
   const until = state.snooze[id];
   return until && until > today();           // ISO dates compare as strings
@@ -1623,6 +1668,9 @@ const CHIPS = [
   ["applied","Applied"], ["showHidden","Hidden"],
 ];
 const CATS = [...new Set(JOBS.map(j=>j.category).filter(Boolean))];
+// Commute-radius chooser (single-select). "" = any distance; the others cap the
+// drive time in minutes. Lilly picks how far she'll drive; remote jobs always show.
+const COMMUTE_BANDS = [["","Any distance"],["20","Within 20 min"],["30","Within 30 min"],["45","Within 45 min"]];
 const IC = {
   pin:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 21s-6.5-5.7-6.5-10.5a6.5 6.5 0 0113 0C18.5 15.3 12 21 12 21z"/><circle cx="12" cy="10.5" r="2.3"/></svg>',
   home:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/></svg>',
@@ -1655,6 +1703,8 @@ function matches(j){
   if(filters.saved && !state.saved.has(j.id)) return false;
   if(filters.applied && !(j.id in state.applied)) return false;
   if(filters.trains && !j.trains) return false;
+  // Commute radius: remote jobs always pass; local jobs must be within the cap.
+  if(filters.maxCommute && !j.remote && (j.commuteMin==null || j.commuteMin > +filters.maxCommute)) return false;
   return true;
 }
 
@@ -1786,6 +1836,7 @@ function buildChips(){
   }
   const cc = document.getElementById("catchips"); cc.innerHTML="";
   cc.hidden = CATS.length<2;
+  var clbl = document.getElementById("catlabel"); if(clbl) clbl.hidden = CATS.length<2;
   for(const cat of CATS){
     const b=document.createElement("button");
     b.className="chip"; b.textContent=cat; b.setAttribute("aria-pressed","false");
@@ -1795,6 +1846,18 @@ function buildChips(){
       render();
     };
     cc.appendChild(b);
+  }
+  const mc = document.getElementById("commutechips"); mc.innerHTML="";
+  for(const [val,label] of COMMUTE_BANDS){
+    const b=document.createElement("button");
+    b.className="chip"; b.textContent=label;
+    b.setAttribute("aria-pressed", String(val===filters.maxCommute));
+    b.onclick=()=>{
+      filters.maxCommute=val; state.maxCommute=val; persist();
+      [...mc.children].forEach((ch,i)=>ch.setAttribute("aria-pressed", String(COMMUTE_BANDS[i][0]===filters.maxCommute)));
+      render();
+    };
+    mc.appendChild(b);
   }
 }
 
@@ -2147,6 +2210,14 @@ setView("jobs");
 
     var supportsPasskey = !!(window.PublicKeyCredential) && typeof sb.auth.signInWithPasskey === "function";
     if(!supportsPasskey){ var pk = document.getElementById("authpasskey"); if(pk) pk.hidden = true; }
+    // Social sign-in buttons appear ONLY for providers the project actually
+    // enables — so a not-yet-configured Google button is never a dead end. If
+    // Google OAuth is turned on later, the button shows up on its own.
+    fetch(PORTAL.url + "/auth/v1/settings", { headers: { apikey: PORTAL.key } })
+      .then(function(r){ return r.json(); })
+      .then(function(s){ var ext = (s && s.external) || {};
+        var g = document.getElementById("authgoogle"); if(g && ext.google) g.hidden = false; })
+      .catch(function(){});
 
     function setMsg(t, isErr){ msg.textContent = t || ""; msg.className = "authmsg" + (isErr ? " err" : ""); }
     function showOut(){ rowOut.hidden = false; rowIn.hidden = true; }
@@ -2472,7 +2543,7 @@ def collect_mock():
     rows = [r for r in seen.values()
             if is_admin_title(r["title"]) and is_attainable(r["title"])
             and not title_excluded(r["title"])
-            and (r["source"] != "local" or in_polk_or_dallas(r["location"]))]
+            and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
     return dedupe_rows(rows)[0]
 
 
