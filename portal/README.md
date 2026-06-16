@@ -5,8 +5,16 @@ Multi-user portal (~5 invited users) on Supabase: shared jobs feed, per-user
 Google + email magic-link sign-in. AI chat comes **after** the portal works
 (Edge Function calling the Anthropic API; key lives in Supabase secrets).
 
-**Status: scaffold only.** Nothing here is live until the Supabase project
-exists. The static PWA keeps working unchanged — the portal is additive.
+**Status: LIVE as of 2026-06-16.** Project `tcclohxvhmwgjrtdkkuw`
+(`https://tcclohxvhmwgjrtdkkuw.supabase.co`) — `schema.sql` applied (all 5 tables
++ RLS), **email signup/login verified end-to-end** (signup → instant session →
+RLS-isolated saved work). Config that makes it work: **Site URL** =
+`https://bflinkdesign.github.io/dsm-jobs/` (+ that redirect allow-listed) and
+**"Confirm email" OFF** (the default Supabase mailer is too spam-prone to gate a
+phone-only user's first login on). Only the **email** provider is enabled today
+(Google would need a Google Cloud OAuth client; Apple is skipped — $99/yr). The
+static PWA keeps working unchanged without sign-in — the portal is additive. The
+setup steps below remain the canonical runbook for re-creating or auditing it.
 
 ## Setup (operator, one time)
 

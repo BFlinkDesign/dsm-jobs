@@ -3,13 +3,17 @@
 ![CI](https://github.com/BFlinkDesign/dsm-jobs/actions/workflows/ci.yml/badge.svg)
 
 Finds **admin / office / clerical** jobs that are **no-degree / HS-diploma friendly** and
-target **$19+/hr**, across the **Des Moines metro** (~20 mi: Grimes, Ankeny, Waukee, West
-Des Moines, Johnston, Urbandale, Altoona, Clive) **plus remote** roles. You run it, it
-writes a clean HTML page you forward to your friend.
+target **$19+/hr**, across the **Des Moines metro + nearby towns** (Grimes, Ankeny, Waukee,
+West Des Moines, Johnston, Urbandale, Altoona, Clive, plus Dallas/Warren/Story-county towns)
+**plus remote** roles. It publishes a **mobile PWA**: the end user opens it on her phone,
+**chooses how far she'll drive** (a commute-radius filter), and can **sign in to sync** her
+saved / applied / notes across devices.
 
-It uses the **Adzuna** job API (a legitimate aggregator that re-publishes Indeed/etc.
-postings) instead of scraping Indeed/LinkedIn directly — so it won't get IP-banned and
-won't break every week.
+It pulls from **Adzuna** plus several other legitimate sources — **Jooble**, **JSearch**
+(Google-for-Jobs), **government job feeds** (NEOGOV/GovernmentJobs.com), and employer **ATS
+boards** (Greenhouse/Lever/Workday/SmartRecruiters) — instead of scraping Indeed/LinkedIn
+directly, so it won't get IP-banned and won't break every week. Each extra source is
+fail-soft (one bad source never kills the run).
 
 ## One-time setup
 
@@ -83,8 +87,9 @@ pytest --timeout=30 --timeout-method=thread
 python find_admin_jobs.py --mock   # end-to-end without a key
 ```
 
-- **CI** (`.github/workflows/ci.yml`): runs ruff + compile + 13 unit/smoke tests + the
-  mock pipeline on every push/PR (Python 3.11 & 3.12), plus a secret-shape scan.
+- **CI** (`.github/workflows/ci.yml`): runs ruff + compile + 100+ unit/smoke tests + the
+  mock pipeline on every push/PR (Python 3.11 & 3.12), plus a secret-shape scan. Semgrep,
+  CodeRabbit, GitGuardian + Socket also gate every PR.
 - **CD** (`.github/workflows/scan.yml`): scheduled daily live scan. Add repo secrets
   `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` (Settings → Secrets → Actions) to enable it; results
   are published as downloadable workflow artifacts. Until the secrets exist it skips
