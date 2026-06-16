@@ -1,0 +1,3 @@
+# Verify-only (the camera self-verifier). NOT a runtime dependency — the app
+# itself is stdlib-only. Needs system Chrome present (camera uses channel="chrome").
+playwright==1.58.0

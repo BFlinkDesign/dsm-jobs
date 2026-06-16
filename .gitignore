@@ -11,3 +11,7 @@ web/index.html
 # Supabase CLI local state (keep config.toml + functions/ tracked)
 supabase/.temp/
 supabase/.branches/
+
+# Camera self-verifier generated artifacts (verify/camera.py is tracked)
+verify/shots/
+verify/report.json
