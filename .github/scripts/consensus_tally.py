@@ -131,6 +131,28 @@ def fail_followup(repo: str, pr: str, summary: str) -> None:
     )
 
 
+def decide(
+    missing: list[str], completed: int, pass_votes: int, critical: bool
+) -> tuple[bool, str]:
+    """Pure consensus rule (unit-tested separately from the gh I/O).
+
+    Approve only when every required deterministic check is green AND the
+    reviewer quorum is met AND no reviewer flagged a CRITICAL finding.
+    """
+    ok = (
+        not missing
+        and completed >= MIN_REVIEWERS_COMPLETED
+        and pass_votes >= MIN_PASS_VOTES
+        and not critical
+    )
+    summary = (
+        f"deterministic: {'all green' if not missing else 'BLOCKED by ' + ', '.join(missing)}; "
+        f"reviewers completed={completed} (need {MIN_REVIEWERS_COMPLETED}), "
+        f"pass_votes={pass_votes} (need {MIN_PASS_VOTES}), critical={critical}"
+    )
+    return ok, summary
+
+
 def main() -> int:
     repo = os.environ["REPO"]
     pr = os.environ["PR"]
@@ -156,18 +178,7 @@ def main() -> int:
 
     has_critical = review_severity(repo, sha)
 
-    ok = (
-        not missing
-        and completed >= MIN_REVIEWERS_COMPLETED
-        and pass_votes >= MIN_PASS_VOTES
-        and not has_critical
-    )
-
-    summary = (
-        f"deterministic: {'all green' if not missing else 'BLOCKED by ' + ', '.join(missing)}; "
-        f"reviewers completed={completed} (need {MIN_REVIEWERS_COMPLETED}), "
-        f"pass_votes={pass_votes} (need {MIN_PASS_VOTES}), critical={has_critical}"
-    )
+    ok, summary = decide(missing, completed, pass_votes, has_critical)
     print(summary)
 
     if ok:
