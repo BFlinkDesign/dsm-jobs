@@ -2133,7 +2133,10 @@ function startSpook(jobTitle){
     if(msg){ var i=Math.min(stages.length-1, Math.floor(el/(DUR/stages.length))); msg.textContent=stages[i]; }
   },180);
 }
-function stopSpook(){ if(_spookTimer){ clearInterval(_spookTimer); _spookTimer=null; } }
+function stopSpook(){
+  if(_spookTimer){ clearInterval(_spookTimer); _spookTimer=null; }
+  var fill=document.getElementById("spookfill"); if(fill) fill.style.width="100%";  // snap to done
+}
 
 function tailorJob(id){
   var j=jobById.get(id); if(!j) return;
@@ -2151,10 +2154,13 @@ function tailorJob(id){
   }
   openTailorModal();
   startSpook(j.title);
-  window.__tailorInvoke({ resume:resume, jobTitle:j.title, company:j.company,
-      jobText:((j.about||"")+" "+(j.title||"")).trim() })
+  // Promise.resolve wrapper so a synchronous throw from __tailorInvoke still
+  // lands in .catch; stopSpook in .finally so the timer can never leak.
+  Promise.resolve().then(function(){
+    return window.__tailorInvoke({ resume:resume, jobTitle:j.title, company:j.company,
+      jobText:((j.about||"")+" "+(j.title||"")).trim() });
+  })
     .then(function(r){
-      stopSpook();
       var d=r&&r.data;
       if(!d || d.error || !d.resume){
         setTailorBody('<p class="sub">'+esc((d&&d.error)||"I couldn't put that together just now — try again in a minute.")+'</p>');
@@ -2162,7 +2168,8 @@ function tailorJob(id){
       }
       renderTailorResult(j, d);
     })
-    .catch(function(){ stopSpook(); setTailorBody('<p class="sub">No connection right now — try again when you&rsquo;re back online.</p>'); });
+    .catch(function(){ setTailorBody('<p class="sub">No connection right now — try again when you&rsquo;re back online.</p>'); })
+    .finally(function(){ stopSpook(); });
 }
 // Backdrop tap + Escape close the tailor modal.
 (function(){
