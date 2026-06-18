@@ -1819,7 +1819,7 @@ function cardEl(j, i){
     '</div>'+
     '<div class="actions">'+
       '<button class="act'+(note?' on':'')+'" data-act="notes" data-id="'+esc(j.id)+'">'+IC.pen+(note?'My notes':'Add note')+'</button>'+
-      (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Send to '+esc(META.contact||"a friend")+'</button>':'')+
+      (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Share</button>':'')+
     '</div>'+
     '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
       '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — who you talked to, when to follow up">'+esc(note)+'</textarea>'+
