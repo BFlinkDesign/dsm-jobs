@@ -1964,7 +1964,6 @@ function dayHash(){ const d=today(); let h=0; for(let i=0;i<d.length;i++) h=(h*3
 const ENC_LINES = [
   "Job ads are wish lists. If you can do half of it, apply — you're more qualified than you let yourself believe. — Daddy",
   "You showed up today. That's the whole battle, and you won it. — Daddy",
-  "All that admin experience? You basically have your master's degree. Go show them. — Daddy",
   "One application beats five you never send. Small is enough. I'm proud of you. — Daddy",
   "“Pay not listed” isn't a no — it's just a question you get to ask. — Daddy",
   "Rough day? The jobs will keep. Be as kind to yourself as I am to you. — Daddy",
