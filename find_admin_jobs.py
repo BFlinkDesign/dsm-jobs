@@ -85,8 +85,8 @@ TITLES = [
     "human resources assistant", "bank teller", "dispatcher", "mail clerk",
     "customer service representative", "customer service associate",
     "call center representative",
-    # general (no degree) — light, non-labor
-    "retail associate", "cashier", "caregiver",
+    # caregiving (day-friendly, no degree)
+    "caregiver",
 ]
 
 # Subset that genuinely exists as remote work (skip remote calls for in-person roles).
@@ -336,9 +336,6 @@ CATEGORY_TERMS = {
         "customer service", "customer support", "client service", "member service",
         "call center", "bank teller", "teller",
     ],
-    "Store & retail": [
-        "retail associate", "sales associate", "cashier", "stocker",
-    ],
     "Caregiving": [
         "caregiver", "caretaker", "home care",
     ],
@@ -542,6 +539,12 @@ def is_day_shift(job):
     if _OVERNIGHT_RANGE.search(blob) or _LATE_PM_END.search(blob):
         return False
     return True
+
+
+def is_remote_row(row):
+    """Remote / work-from-home postings are EXEMPT from the day-shift gate — she
+    can fit those around her child. In-person jobs must read as daytime (8–5)."""
+    return row.get("source") == "remote" or title_is_remote(row)
 
 
 def is_admin_title(title):
@@ -838,7 +841,7 @@ def collect(verbose=True):
             and is_attainable(r["title"])
             and not title_excluded(r["title"])
             and not requires_degree(r)
-            and is_day_shift(r)
+            and (is_remote_row(r) or is_day_shift(r))
             and passes_us_filter(r)
             and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
     dropped = len(all_rows) - len(rows)
@@ -1471,11 +1474,18 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .faq summary{font-weight:700;cursor:pointer;font-size:16px;color:var(--ink)}
 .faq p{color:var(--ink2);font-size:15px;line-height:1.55;margin:8px 0 2px}
 /* Toast + applied celebration */
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + env(safe-area-inset-bottom));
- z-index:40;display:flex;align-items:center;gap:10px;background:#241738;border:1px solid rgba(192,132,252,.5);
- color:var(--ink);font-size:15px;font-weight:700;padding:12px 18px;border-radius:999px;box-shadow:var(--glow);
- max-width:92vw;animation:rise .25s ease both}
-.toast button{background:none;border:0;color:#c084fc;font:inherit;font-weight:700;cursor:pointer;padding:4px}
+/* Celebration splash — centered, clean, professional. (Big visual overhaul of
+   the whole site is being handled as its own design pass; this is just legible.) */
+.toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);
+ z-index:60;display:flex;align-items:center;justify-content:center;gap:14px;text-align:center;
+ background:#1b1230;color:#f3ecff;font-size:18px;font-weight:700;line-height:1.45;
+ padding:22px 28px;border-radius:16px;max-width:84vw;border:1px solid #3a2a5c;
+ box-shadow:0 24px 60px rgba(0,0,0,.55);
+ opacity:0;animation:splashin .4s cubic-bezier(.16,1,.3,1) forwards}
+@keyframes splashin{to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.toast button{background:#2a1d44;border:1px solid #4a3870;color:#f3ecff;font:inherit;font-weight:700;
+ cursor:pointer;padding:9px 16px;border-radius:10px}
+@media(prefers-reduced-motion:reduce){.toast{animation:none;opacity:1;transform:translate(-50%,-50%)}}
 .burst{position:fixed;z-index:50;pointer-events:none;color:#c084fc;font-size:16px;animation:burst 1s ease-out forwards}
 @keyframes burst{0%{opacity:1;transform:translate(0,0) scale(.6) rotate(0)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(1.3) rotate(120deg)}}
 /* Snooze (Not today) */
@@ -1892,9 +1902,9 @@ function forYouScore(j){
   const p = state.profile; let s = 0;
   if(p.kind){
     const k = j.category||"";
-    if(p.kind==="people" && (k==="Customer service"||k==="Store & retail")) s+=2;
+    if(p.kind==="people" && k==="Customer service") s+=2;
     if(p.kind==="quiet"  && k==="Office") s+=2;
-    if(p.kind==="hands"  && k==="Store & retail") s+=2;
+    if(p.kind==="hands"  && k==="Caregiving") s+=2;
     if(p.kind==="care"   && k==="Caregiving") s+=2;
   }
   if(p.where==="home" && j.remote) s+=2;
@@ -2564,8 +2574,10 @@ function appsThisWeek(){
 
 /* ── Today's 3 picks: deterministic per day, trusted/will-train first ──── */
 function todaysPicks(){
+  // Keep applied jobs in the pool so the day's picks stay put — she can just
+  // tap "Applied" again to undo a mistake (they don't vanish from Today).
   const pool = JOBS.filter(function(j){
-    return !state.applied[j.id] && !state.hidden.has(j.id) && !snoozedNow(j.id);
+    return !state.hidden.has(j.id) && !snoozedNow(j.id);
   });
   const ranked = orderForYou(pool).map(function(j,i){
     return [ (j.trusted?2:0)+(j.trains?1:0), -i, j ];
