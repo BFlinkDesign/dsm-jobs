@@ -525,6 +525,7 @@ NIGHT_SHIFT_HINTS = (
     "closing shift", "pm shift", "p.m. shift", "weekends only", "weekend only",
     "nights and weekends", "evenings and weekends", "must be available nights",
     "must work nights", "must be available evenings",
+    "to midnight", "until midnight", "til midnight", "midnight shift",
 )
 # A time range whose END is in the a.m. (e.g. "3 PM to 12 AM" — crosses midnight).
 _OVERNIGHT_RANGE = re.compile(r"(?:-|–|to|until|till|thru)\s*(?:1[0-2]|[1-9])(?::\d\d)?\s*a\.?\s*m", re.I)

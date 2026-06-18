@@ -189,6 +189,8 @@ def test_is_day_shift():
                                 "description": "Must be available evenings and weekends."})
     assert not fa.is_day_shift({"title": "Office Assistant",
                                 "description": "11 am to 9 pm, some Saturdays."})
+    assert not fa.is_day_shift({"title": "Front Desk Clerk",
+                                "description": "Hours: 4pm to midnight."})
 
 
 def test_in_polk_or_dallas_counties_only():
