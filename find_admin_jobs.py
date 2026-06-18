@@ -1357,6 +1357,13 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .chatrow{display:flex;gap:8px;margin-top:8px}
 .chatrow .search{flex:1;min-height:48px}
 .chatrow .syncbtn{min-width:74px}
+#tailormodal .authcard{max-height:88vh;overflow-y:auto;text-align:left}
+.tailorsec{margin:14px 0}
+.tailorsec h3{margin:0 0 6px;font-size:15px}
+.tailorta{width:100%;min-height:150px;resize:vertical;font-size:14px;line-height:1.5;white-space:pre-wrap}
+.tailorsec .syncbtn{margin-top:8px}
+.reslist{margin:6px 0 0;padding-left:18px;color:var(--ink2);font-size:14px;line-height:1.5}
+.reslist li{margin:3px 0}
 .chatnote{font-size:12px;color:var(--ink2);margin-top:8px;line-height:1.45}
 /* FAQ */
 .faq{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px 16px;margin:10px 0}
@@ -1472,6 +1479,15 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
     </div>
   </div>
 
+  <!-- Résumé tailoring result -->
+  <div class="authov" id="tailormodal" hidden>
+    <div class="authcard" style="position:relative">
+      <button class="authx" data-act="closetailor" aria-label="Close">&times;</button>
+      <h2>Tailor your r&eacute;sum&eacute; <span class="sparkle">&#10022;</span></h2>
+      <div id="tailorbody"></div>
+    </div>
+  </div>
+
   <!-- TODAY view: 3 curated picks, one small win at a time -->
   <section id="todaywrap" hidden>
     <div class="picksintro">
@@ -1515,6 +1531,17 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
       <input class="authfield" id="nm-legal" type="text" autocomplete="name"
         placeholder="Legal name (for your work-search log)" aria-label="Legal name">
       <button class="authprimary" data-act="saveprofile">Save my name</button>
+    </div>
+
+    <div class="quizcard" id="resumecard">
+      <h3>My r&eacute;sum&eacute; <span class="sparkle">&#10022;</span></h3>
+      <p>Paste your r&eacute;sum&eacute; here once. Then on any job you can tap
+      <b>&#10022; Tailor</b> and I&rsquo;ll re-organize <i>your own</i> experience to fit
+      that posting &mdash; never adding anything you didn&rsquo;t write. Saved on this phone.</p>
+      <textarea class="authfield" id="resumebox" rows="6" style="min-height:120px;resize:vertical"
+        placeholder="Paste your r&eacute;sum&eacute; here&hellip;" aria-label="Your r&eacute;sum&eacute;"></textarea>
+      <button class="authprimary" data-act="saveresume">Save my r&eacute;sum&eacute;</button>
+      <div class="authmsg" id="resumemsg" role="status"></div>
     </div>
 
     <div class="rescard">
@@ -1655,6 +1682,7 @@ state.notes   = state.notes || {};
 state.coachOff = !!state.coachOff;
 state.snooze  = state.snooze || {};          // id -> "come back on" date (gentler than Hide)
 state.savedAt = state.savedAt || {};         // id -> date saved (for gentle "still want this?" nudges)
+state.resume  = state.resume  || "";         // her base résumé text (this device only; fed to the tailor)
 state.appliedLog = state.appliedLog || {};   // id -> {t,c,d,u} captured at apply time, so the
                                              // work-search log survives jobs leaving the feed
 state.profile = state.profile || {};         // quiz answers -> "For you" feed boost
@@ -1663,7 +1691,7 @@ const prevSeen = new Set(state.seen||[]);
 function persist(){ save({applied:state.applied, saved:[...state.saved], hidden:[...state.hidden],
   notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff,
   snooze:state.snooze, savedAt:state.savedAt, appliedLog:state.appliedLog, profile:state.profile,
-  maxCommute:state.maxCommute}); }
+  resume:state.resume, maxCommute:state.maxCommute}); }
 // Ledger backfill: any applied job still in today's feed gets its details kept.
 JOBS.forEach(j=>{ if(state.applied[j.id] && !state.appliedLog[j.id])
   state.appliedLog[j.id]={t:j.title,c:j.company,d:state.applied[j.id],u:j.url}; });
@@ -1841,6 +1869,7 @@ function cardEl(j, i){
     '</div>'+
     '<div class="actions">'+
       '<button class="act'+(note?' on':'')+'" data-act="notes" data-id="'+esc(j.id)+'">'+IC.pen+(note?'My notes':'Add note')+'</button>'+
+      '<button class="act" data-act="tailor" data-id="'+esc(j.id)+'">&#10022; Tailor résumé</button>'+
       (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Share</button>':'')+
     '</div>'+
     '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
@@ -1903,6 +1932,72 @@ function markApplied(id, el){
   celebrate(el);
 }
 
+/* ── Résumé tailoring ─────────────────────────────────────────────────────
+   The tailor button is on every card; the actual call is JWT-gated to a signed-
+   in user via the portal's window.__tailorInvoke bridge (set when signed in).
+   Her résumé never leaves this device except in that one authenticated call. */
+function openTailorModal(){ var m=document.getElementById("tailormodal"); if(m) m.hidden=false; }
+function closeTailorModal(){ var m=document.getElementById("tailormodal"); if(m) m.hidden=true; }
+function setTailorBody(html){ var b=document.getElementById("tailorbody"); if(b) b.innerHTML=html; }
+function copyTailor(which){
+  var d=window.__tailorData; if(!d) return;
+  var text = which==="cover" ? (d.cover_note||"") : (d.resume||"");
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ showToast("Copied ✦"); })
+      .catch(function(){ showToast("Couldn't copy — select the text and copy it."); });
+  } else { showToast("Select the text and copy it."); }
+}
+function renderTailorResult(j, d){
+  window.__tailorData = d;
+  var changes = (d.changes||[]).map(function(c){ return '<li>'+esc(c)+'</li>'; }).join("");
+  setTailorBody(
+    '<p class="sub">For <b>'+esc(j.title)+'</b> at '+esc(j.company)+
+      ' — built only from what you wrote. Read it over; it&rsquo;s yours to edit.</p>'+
+    (changes?'<div class="tailorsec"><h3>What I emphasized</h3><ul class="reslist">'+changes+'</ul></div>':'')+
+    '<div class="tailorsec"><h3>Your tailored résumé</h3>'+
+      '<textarea class="authfield tailorta" readonly aria-label="Tailored résumé">'+esc(d.resume)+'</textarea>'+
+      '<button class="syncbtn" data-act="copytailor" data-copy="resume">Copy résumé</button></div>'+
+    (d.cover_note?'<div class="tailorsec"><h3>A short note to send with it</h3>'+
+      '<textarea class="authfield tailorta" readonly aria-label="Cover note">'+esc(d.cover_note)+'</textarea>'+
+      '<button class="syncbtn" data-act="copytailor" data-copy="cover">Copy note</button></div>':'')+
+    '<p class="authnote">Always read it before you send — every line should be true to your real experience.</p>'
+  );
+}
+function tailorJob(id){
+  var j=jobById.get(id); if(!j) return;
+  var resume=(state.resume||"").trim();
+  if(resume.length<40){
+    showToast("Add your résumé in My corner first ✦", "My corner", function(){
+      setView("corner"); var b=document.getElementById("resumebox"); if(b) b.focus();
+    });
+    return;
+  }
+  if(!window.__tailorInvoke){
+    showToast("Sign in (in My corner) to tailor your résumé — it keeps it private.", "My corner",
+      function(){ setView("corner"); });
+    return;
+  }
+  openTailorModal();
+  setTailorBody('<p class="sub">Tailoring for <b>'+esc(j.title)+'</b>… a few seconds ✦</p>');
+  window.__tailorInvoke({ resume:resume, jobTitle:j.title, company:j.company,
+      jobText:((j.about||"")+" "+(j.title||"")).trim() })
+    .then(function(r){
+      var d=r&&r.data;
+      if(!d || d.error || !d.resume){
+        setTailorBody('<p class="sub">'+esc((d&&d.error)||"I couldn't put that together just now — try again in a minute.")+'</p>');
+        return;
+      }
+      renderTailorResult(j, d);
+    })
+    .catch(function(){ setTailorBody('<p class="sub">No connection right now — try again when you&rsquo;re back online.</p>'); });
+}
+// Backdrop tap + Escape close the tailor modal.
+(function(){
+  var m=document.getElementById("tailormodal"); if(!m) return;
+  m.addEventListener("click", function(e){ if(e.target===m) closeTailorModal(); });
+  m.addEventListener("keydown", function(e){ if(e.key==="Escape") closeTailorModal(); });
+})();
+
 // Delegated on the app container so Jobs, Today's picks and My-apps cards
 // all share one set of handlers.
 document.querySelector(".app").addEventListener("click",(e)=>{
@@ -1942,6 +2037,19 @@ document.querySelector(".app").addEventListener("click",(e)=>{
     return;
   }
   if(act==="qopt"){ quizPick(t); return; }
+  if(act==="tailor"){ tailorJob(id); return; }
+  if(act==="closetailor"){ closeTailorModal(); return; }
+  if(act==="copytailor"){ copyTailor(t.getAttribute("data-copy")); return; }
+  if(act==="saveresume"){
+    var rbox=document.getElementById("resumebox");
+    if(rbox){
+      state.resume = rbox.value.trim(); persist();
+      var rmsg=document.getElementById("resumemsg");
+      if(rmsg) rmsg.textContent = state.resume ? "Saved on this phone ✦" : "Cleared.";
+      showToast(state.resume ? "Résumé saved — tap ✦ Tailor on any job ✦" : "Résumé cleared.");
+    }
+    return;
+  }
   if(act==="saveprofile"){
     var L=document.getElementById("nm-legal"), P=document.getElementById("nm-pref");
     if(P) state.profile.preferredName = P.value.trim();
@@ -2323,6 +2431,7 @@ function renderCorner(){
   var nmP=document.getElementById("nm-pref"), nmL=document.getElementById("nm-legal");
   if(nmP) nmP.value = state.profile.preferredName || "";
   if(nmL) nmL.value = state.profile.legalName || "";
+  var rbx=document.getElementById("resumebox"); if(rbx && document.activeElement!==rbx) rbx.value = state.resume || "";
   body.innerHTML = QUIZ.map(function(q){
     return '<div class="qq">'+esc(q[1])+'</div><div class="qopts">'+
       q[2].map(function(o){
@@ -2573,13 +2682,23 @@ setView("jobs");
       var u = session && session.user || null;
       var justIn = !!u && !user;
       user = u;
+      setTailorBridge();
       if(user){ showIn(); closeModal(); if(justIn){ syncAll(); setTimeout(offerPasskey, 1500); } }
       else { showOut(); }
     });
     sb.auth.getSession().then(function(r){
       user = r.data && r.data.session && r.data.session.user || null;
+      setTailorBridge();
       if(user){ showIn(); syncAll(); } else { showOut(); }
     }).catch(function(){ showOut(); });
+
+    // Bridge so the (out-of-scope) card handler can call the JWT-gated tailor
+    // function only while signed in; cleared on sign-out.
+    function setTailorBridge(){
+      window.__tailorInvoke = user
+        ? function(payload){ return sb.functions.invoke("resume-tailor", { body: payload }); }
+        : null;
+    }
 
     /* Pull server state, merge (a flag set anywhere stays set; newest note
        wins), then push back anything only this device knew about — which IS
