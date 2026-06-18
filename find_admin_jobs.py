@@ -1433,6 +1433,32 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .chatrow .search{flex:1;min-height:48px}
 .chatrow .syncbtn{min-width:74px}
 #tailormodal .authcard{max-height:88vh;overflow-y:auto;text-align:left}
+/* Spooky résumé-summoning loader — drifting bats + a glowing moon over a
+   calibrated progress bar. Goth on purpose: she loves black + purple. */
+.spookload{padding:6px 2px 2px}
+.spooksky{position:relative;height:64px;margin:4px 0 16px;border-radius:14px;overflow:hidden;
+ background:radial-gradient(ellipse 120% 90% at 82% 12%, rgba(147,51,234,.24), transparent 60%),
+            linear-gradient(180deg,#130d20,#0e0a16);border:1px solid var(--line)}
+.spookmoon{position:absolute;right:16px;top:10px;width:28px;height:28px;border-radius:50%;
+ background:radial-gradient(circle at 36% 34%, #f3ecff, #c9a8ff 60%, #7e22ce);
+ box-shadow:0 0 22px rgba(201,168,255,.6)}
+.bat{position:absolute;left:-30px;line-height:1;filter:drop-shadow(0 0 5px rgba(168,85,247,.55));
+ will-change:left,transform;animation:batfly linear infinite}
+.bat.b1{top:8%;font-size:20px;animation-duration:3.4s;animation-delay:-.2s}
+.bat.b2{top:44%;font-size:14px;opacity:.85;animation-duration:4.6s;animation-delay:-1.6s}
+.bat.b3{top:62%;font-size:16px;opacity:.9;animation-duration:2.9s;animation-delay:-2.4s}
+@keyframes batfly{
+ 0%{left:-30px;transform:translateY(0) rotate(-5deg)}
+ 25%{transform:translateY(-9px) rotate(5deg)}
+ 50%{transform:translateY(5px) rotate(-5deg)}
+ 75%{transform:translateY(-7px) rotate(5deg)}
+ 100%{left:calc(100% + 30px);transform:translateY(0) rotate(-5deg)}}
+.spookbar{height:11px;border-radius:999px;background:var(--surface);border:1px solid var(--line);overflow:hidden}
+.spookbar i{display:block;height:100%;width:0;border-radius:999px;
+ background:linear-gradient(90deg,#6b21a8,#9333ea,#c084fc);
+ box-shadow:0 0 14px rgba(168,85,247,.7);transition:width .35s cubic-bezier(.3,.7,.3,1)}
+.spookmsg{margin-top:11px;text-align:center;color:var(--green-d);font-size:14px;font-weight:700}
+@media(prefers-reduced-motion:reduce){.bat{display:none}}
 .tailorsec{margin:14px 0}
 .tailorsec h3{margin:0 0 6px;font-size:15px}
 .tailorta{width:100%;min-height:150px;resize:vertical;font-size:14px;line-height:1.5;white-space:pre-wrap}
@@ -2056,7 +2082,7 @@ function markApplied(id, el){
    in user via the portal's window.__tailorInvoke bridge (set when signed in).
    Her résumé never leaves this device except in that one authenticated call. */
 function openTailorModal(){ var m=document.getElementById("tailormodal"); if(m) m.hidden=false; }
-function closeTailorModal(){ var m=document.getElementById("tailormodal"); if(m) m.hidden=true; }
+function closeTailorModal(){ stopSpook(); var m=document.getElementById("tailormodal"); if(m) m.hidden=true; }
 function setTailorBody(html){ var b=document.getElementById("tailorbody"); if(b) b.innerHTML=html; }
 function copyTailor(which){
   var d=window.__tailorData; if(!d) return;
@@ -2082,6 +2108,33 @@ function renderTailorResult(j, d){
     '<p class="authnote">Always read it before you send — every line should be true to your real experience.</p>'
   );
 }
+/* Spooky "time left" loader for the AI wait. The real finish time is the API's
+   to decide, so we calibrate: ease the bar toward ~94% over ~9s (a typical
+   Sonnet tailoring), cycling stage messages, then snap to done when it lands. */
+var _spookTimer = null;
+function spookLoaderHTML(jobTitle){
+  return '<div class="spookload">'+
+    '<div class="spooksky"><span class="spookmoon"></span>'+
+      '<span class="bat b1">&#129415;</span><span class="bat b2">&#129415;</span><span class="bat b3">&#129415;</span></div>'+
+    '<div class="spookbar"><i id="spookfill"></i></div>'+
+    '<div class="spookmsg" id="spookmsg">Summoning your r&eacute;sum&eacute; for '+esc(jobTitle)+'&hellip;</div>'+
+  '</div>';
+}
+function startSpook(jobTitle){
+  setTailorBody(spookLoaderHTML(jobTitle));
+  var fill=document.getElementById("spookfill"), msg=document.getElementById("spookmsg");
+  var stages=["Reading your real experience…","Matching it to this job…",
+              "Choosing what to lead with…","Polishing the wording…","Almost there…"];
+  var t0=Date.now(), DUR=9000;
+  if(_spookTimer) clearInterval(_spookTimer);
+  _spookTimer=setInterval(function(){
+    var el=Date.now()-t0;
+    if(fill) fill.style.width=Math.min(94,(el/DUR)*94).toFixed(1)+"%";
+    if(msg){ var i=Math.min(stages.length-1, Math.floor(el/(DUR/stages.length))); msg.textContent=stages[i]; }
+  },180);
+}
+function stopSpook(){ if(_spookTimer){ clearInterval(_spookTimer); _spookTimer=null; } }
+
 function tailorJob(id){
   var j=jobById.get(id); if(!j) return;
   var resume=(state.resume||"").trim();
@@ -2097,10 +2150,11 @@ function tailorJob(id){
     return;
   }
   openTailorModal();
-  setTailorBody('<p class="sub">Tailoring for <b>'+esc(j.title)+'</b>… a few seconds ✦</p>');
+  startSpook(j.title);
   window.__tailorInvoke({ resume:resume, jobTitle:j.title, company:j.company,
       jobText:((j.about||"")+" "+(j.title||"")).trim() })
     .then(function(r){
+      stopSpook();
       var d=r&&r.data;
       if(!d || d.error || !d.resume){
         setTailorBody('<p class="sub">'+esc((d&&d.error)||"I couldn't put that together just now — try again in a minute.")+'</p>');
@@ -2108,7 +2162,7 @@ function tailorJob(id){
       }
       renderTailorResult(j, d);
     })
-    .catch(function(){ setTailorBody('<p class="sub">No connection right now — try again when you&rsquo;re back online.</p>'); });
+    .catch(function(){ stopSpook(); setTailorBody('<p class="sub">No connection right now — try again when you&rsquo;re back online.</p>'); });
 }
 // Backdrop tap + Escape close the tailor modal.
 (function(){
