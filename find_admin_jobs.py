@@ -1516,22 +1516,20 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
         <h2 id="authtitle">Welcome back <span class="sparkle">&#10022;</span></h2>
         <p class="sub" id="authsub">Sign in so your jobs, notes and chats follow you to any device.</p>
 
-        <button class="pkbtn" id="authpasskey">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.6-3 3-4.5 5.5-4.5"/><path d="M14 10.5c2 0 3.5 1.5 3.5 3.5 0 1.2-.6 2.2-1.4 2.9V21l-1.3-1-1.3 1v-4.1a3.5 3.5 0 01-1-2.4c0-2 1.5-3.5 3.5-3.5z"/></svg>
-          Sign in with Face ID / fingerprint
-        </button>
-
-        <div class="authdiv">or</div>
-
-        <input class="authfield" id="authlegal" type="text" autocomplete="name"
-          placeholder="Your legal name (for your work-search log)" aria-label="Legal name" hidden>
-        <input class="authfield" id="authpref" type="text" autocomplete="given-name"
-          placeholder="What should we call you? (preferred name)" aria-label="Preferred name" hidden>
-        <input class="authfield" id="authemail" type="email" inputmode="email" autocomplete="email"
-          placeholder="Your email address" aria-label="Email">
-        <input class="authfield" id="authpass" type="password" autocomplete="current-password"
-          placeholder="Password" aria-label="Password" hidden>
-        <button class="authprimary" id="authprimarybtn">Continue</button>
+        <!-- Real <form> so phone password managers (Google / Apple) reliably
+             offer to SAVE and autofill the password. Its default submit is
+             neutralized in JS; sign-in still runs through the existing button. -->
+        <form id="authform">
+          <input class="authfield" id="authlegal" type="text" autocomplete="name"
+            placeholder="Your legal name (for your work-search log)" aria-label="Legal name" hidden>
+          <input class="authfield" id="authpref" type="text" autocomplete="given-name"
+            placeholder="What should we call you? (preferred name)" aria-label="Preferred name" hidden>
+          <input class="authfield" id="authemail" type="email" inputmode="email" autocomplete="username"
+            placeholder="Your email address" aria-label="Email">
+          <input class="authfield" id="authpass" type="password" autocomplete="current-password"
+            placeholder="Password" aria-label="Password" hidden>
+          <button type="submit" class="authprimary" id="authprimarybtn">Continue</button>
+        </form>
         <button class="authsecondary" id="authmagic">Email me a sign-in link instead</button>
         <button class="authsecondary" id="authgoogle" hidden>
           <svg viewBox="0 0 24 24" width="17" height="17"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 01-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 01-10.8-3.8H1.2v3.1A12 12 0 0012 24z"/><path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 010-4.6V6.6H1.2a12 12 0 000 10.8z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4A12 12 0 001.2 6.6l4.1 3.1A7.2 7.2 0 0112 4.8z"/></svg>
@@ -1543,8 +1541,16 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
           <button class="authlink" id="authforgot" hidden>Forgot password?</button>
         </div>
         <div class="authmsg" id="authmsg" role="status"></div>
-        <p class="authnote">Passkeys use your phone&rsquo;s Face ID or fingerprint &mdash; nothing to remember,
-        nothing to steal. Your info is private and never shared.</p>
+
+        <!-- Optional, secondary: Face ID / fingerprint. De-emphasized so the
+             password manager flow is the obvious default. -->
+        <div class="authdiv" id="authpkdiv">or, if you like</div>
+        <button class="pkbtn" id="authpasskey">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.6-3 3-4.5 5.5-4.5"/><path d="M14 10.5c2 0 3.5 1.5 3.5 3.5 0 1.2-.6 2.2-1.4 2.9V21l-1.3-1-1.3 1v-4.1a3.5 3.5 0 01-1-2.4c0-2 1.5-3.5 3.5-3.5z"/></svg>
+          Use Face ID / fingerprint instead (optional)
+        </button>
+        <p class="authnote">Your info is private and never shared. Face ID / fingerprint is
+        optional &mdash; an email and password is all you need.</p>
       </div>
 
       <!-- set-new-password panel (shown after a reset link) -->
@@ -2742,7 +2748,10 @@ setView("jobs");
     });
 
     var supportsPasskey = !!(window.PublicKeyCredential) && typeof sb.auth.signInWithPasskey === "function";
-    if(!supportsPasskey){ var pk = document.getElementById("authpasskey"); if(pk) pk.hidden = true; }
+    if(!supportsPasskey){
+      var pk = document.getElementById("authpasskey"); if(pk) pk.hidden = true;
+      var pkd = document.getElementById("authpkdiv"); if(pkd) pkd.hidden = true;
+    }
     // Social sign-in buttons appear ONLY for providers the project actually
     // enables — so a not-yet-configured Google button is never a dead end. If
     // Google OAuth is turned on later, the button shows up on its own.
@@ -2849,6 +2858,13 @@ setView("jobs");
       });
     };
 
+    // Neutralize the form's default submit (no page reload). The submit EVENT
+    // still fires on click / Enter — that's the signal phone password managers
+    // (Google / Apple) use to offer to SAVE the password. The actual sign-in
+    // keeps running through primaryBtn.onclick above, unchanged.
+    var authForm = document.getElementById("authform");
+    if(authForm) authForm.addEventListener("submit", function(e){ e.preventDefault(); });
+
     // Magic link — passwordless.
     document.getElementById("authmagic").onclick = function(){
       var em = emailEl.value.trim();
@@ -2915,7 +2931,7 @@ setView("jobs");
       var justIn = !!u && !user;
       user = u;
       setTailorBridge();
-      if(user){ showIn(); closeModal(); if(justIn){ syncAll(); setTimeout(offerPasskey, 1500); } }
+      if(user){ showIn(); closeModal(); if(justIn){ syncAll(); } }  // no auto passkey nudge
       else { showOut(); }
     });
     sb.auth.getSession().then(function(r){
