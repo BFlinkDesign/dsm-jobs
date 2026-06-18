@@ -1436,6 +1436,10 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 
         <div class="authdiv">or</div>
 
+        <input class="authfield" id="authlegal" type="text" autocomplete="name"
+          placeholder="Your legal name (for your work-search log)" aria-label="Legal name" hidden>
+        <input class="authfield" id="authpref" type="text" autocomplete="given-name"
+          placeholder="What should we call you? (preferred name)" aria-label="Preferred name" hidden>
         <input class="authfield" id="authemail" type="email" inputmode="email" autocomplete="email"
           placeholder="Your email address" aria-label="Email">
         <input class="authfield" id="authpass" type="password" autocomplete="current-password"
@@ -1500,6 +1504,17 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
     <div class="picksintro">
       <h2 id="cornerhi">My corner <span class="sparkle">&#10022;</span></h2>
       <p id="cornergreet"></p>
+    </div>
+
+    <div class="quizcard" id="namecard">
+      <h3>Your name <span class="sparkle">&#10022;</span></h3>
+      <p>In the app we call you by your <b>preferred name</b>. Your <b>legal name</b> is
+      used only on your printable work-search log (for unemployment or court).</p>
+      <input class="authfield" id="nm-pref" type="text" autocomplete="given-name"
+        placeholder="Preferred name (what we call you)" aria-label="Preferred name">
+      <input class="authfield" id="nm-legal" type="text" autocomplete="name"
+        placeholder="Legal name (for your work-search log)" aria-label="Legal name">
+      <button class="authprimary" data-act="saveprofile">Save my name</button>
     </div>
 
     <div class="rescard">
@@ -1661,6 +1676,7 @@ const newCount = Object.keys(isNew).length;
 persist();
 
 const openNotes = new Set();
+let portalSync = null;   // set by the portal IIFE when sign-in is configured; null otherwise
 let filters = { q:"", cat:"", pay:false, inperson:false, remote:false, known:false,
                 saved:false, applied:false, showHidden:false, trains:false,
                 maxCommute: state.maxCommute || "" };
@@ -1875,6 +1891,9 @@ function markApplied(id, el){
     (jobById.get(id) ? {t:jobById.get(id).title, c:jobById.get(id).company,
                         d:today(), u:jobById.get(id).url} : {t:"(job)", c:"", d:today(), u:""});
   state.appliedLog[id].d = state.applied[id];
+  // Full date+time stamp captured the moment she logs it — for unemployment/court
+  // documentation. (It records when the activity was logged in the app.)
+  state.appliedLog[id].ts = new Date().toISOString();
   celebrate(el);
 }
 
@@ -1916,6 +1935,15 @@ document.querySelector(".app").addEventListener("click",(e)=>{
     return;
   }
   if(act==="qopt"){ quizPick(t); return; }
+  if(act==="saveprofile"){
+    var L=document.getElementById("nm-legal"), P=document.getElementById("nm-pref");
+    if(P) state.profile.preferredName = P.value.trim();
+    if(L) state.profile.legalName = L.value.trim();
+    persist(); renderCorner();
+    if(portalSync) portalSync.profile();
+    showToast("Saved. We'll call you " + (state.profile.preferredName || "by your name") + " here. ✦");
+    return;
+  }
   persist(); render();
 });
 
@@ -1960,7 +1988,10 @@ document.getElementById("foot").innerHTML =
   "<div>Tip: tap Share, then <b>Add to Home Screen</b> to keep this on your phone.</div>";
 
 /* ── Gentle engine: encouragement, celebration, toast ─────────────────── */
-function dayHash(){ const d=today(); let h=0; for(let i=0;i<d.length;i++) h=(h*31+d.charCodeAt(i))>>>0; return h; }
+// Words of affirmation — a LARGE pool in Daddy's voice. pickEnc() draws from a
+// shuffled "bag" so every line shows once before any repeats (then reshuffles),
+// and the footer + greeting + each visit get a fresh one — never the same phrase
+// sitting there all day.
 const ENC_LINES = [
   "Job ads are wish lists. If you can do half of it, apply — you're more qualified than you let yourself believe. — Daddy",
   "You showed up today. That's the whole battle, and you won it. — Daddy",
@@ -1968,13 +1999,113 @@ const ENC_LINES = [
   "“Pay not listed” isn't a no — it's just a question you get to ask. — Daddy",
   "Rough day? The jobs will keep. Be as kind to yourself as I am to you. — Daddy",
   "You are not behind. You're exactly where the next right step starts. — Daddy",
+  "Your worth was never up for hire. A job is something you do, not who you are. — Daddy",
+  "Send one. Just one. Then go rest knowing you moved the needle. — Daddy",
+  "A 'no' from one office is just a door pointing you to the right one. — Daddy",
+  "The bravest thing you'll do today is try. You've already got that in you. — Daddy",
+  "Nervous hands still fill out applications. Do it scared — that counts double. — Daddy",
+  "You don't have to feel ready. You just have to begin. I'm right here. — Daddy",
+  "Every screen you fill out is proof you didn't give up. That's everything. — Daddy",
+  "Slow progress is still progress. We're not racing anyone. — Daddy",
+  "I'd hire you in a heartbeat. The right employer will see what I see. — Daddy",
+  "Take the morning gently. The afternoon can hold one small step. — Daddy",
+  "You survived 100% of your hardest days. Today's no match for you. — Daddy",
+  "Rejection isn't a verdict on you. It's just traffic on the way there. — Daddy",
+  "Tidy beats perfect. Send the good-enough application and breathe. — Daddy",
+  "You are allowed to be proud of small wins. I sure am. — Daddy",
+  "The fact that you're still trying tells me everything about your heart. — Daddy",
+  "Rest is part of the work, not a break from it. Lie down guilt-free. — Daddy",
+  "One steady step a day adds up faster than you'd ever guess. — Daddy",
+  "You don't need to have it figured out. You just need to keep showing up. — Daddy",
+  "Whatever today holds, you won't face it alone. — Daddy",
+  "Courage isn't loud. Sometimes it's just opening the app again. — Daddy",
+  "Your past doesn't disqualify you. It made you someone who keeps going. — Daddy",
+  "Apply like someone who's already been believed in — because you have. — Daddy",
+  "The hard part is starting. You're stronger than the blank form. — Daddy",
+  "Good things are coming, and you're doing the work to meet them. — Daddy",
+  "You are not too much, and you are not too late. — Daddy",
+  "Every employer here was checked, so you're safe to just be yourself. — Daddy",
+  "Drink some water, take a breath, and tap one job. That's a full day's brave. — Daddy",
+  "I'm not proud of you because you applied. I'm proud of you, period. — Daddy",
+  "The version of you a year from now is cheering for this exact moment. — Daddy",
+  "You can do hard things gently. There's no prize for white-knuckling it. — Daddy",
+  "If today all you did was open this, that's a start — and starts matter. — Daddy",
+  "Confidence comes after you act, not before. So act, and let it catch up. — Daddy",
+  "You've got a steady, capable mind. Let an employer be lucky to find it. — Daddy",
+  "No experience? You have a lifetime of figuring things out. That's experience. — Daddy",
+  "The right job is looking for someone exactly like you. Help it find you. — Daddy",
+  "Be patient with yourself. Healing and job-hunting run on the same clock. — Daddy",
+  "You don't have to earn rest. But you've earned it anyway today. — Daddy",
+  "Tap one job before the doubt talks you out of it. Quick — I'll wait. — Daddy",
+  "Whatever the inner critic says, I outrank it. And I say you've got this. — Daddy",
+  "Some days 'enough' is just getting out of bed. That's a yes from me. — Daddy",
+  "You are building a life, one small honest step at a time. Keep building. — Daddy",
+  "Showing up imperfectly beats waiting to be perfect every single time. — Daddy",
+  "The work you put in today is a gift to the you of next month. — Daddy",
+  "You're not starting over. You're starting from experience. — Daddy",
+  "I believe in you on the days you can't, so lean on that and keep moving. — Daddy",
+  "A quiet day of trying is still a day you didn't quit. I see it. — Daddy",
+  "Worthy of the job, worthy of rest, worthy of good things. All of it. — Daddy",
+  "One foot, then the other. That's the whole secret. — Daddy",
+  "You handle more than you give yourself credit for. Give yourself credit. — Daddy",
+  "Send it before you're sure. Sure is overrated; brave is everything. — Daddy",
+  "The list felt long, so just take the top one. Done is better than perfect. — Daddy",
+  "Your name on an application is a small act of hope. I love seeing it. — Daddy",
+  "If it was easy you wouldn't need to be brave — and look, you are. — Daddy",
+  "Take up space. You belong in that interview chair. — Daddy",
+  "Progress you can't feel is still progress you're making. Trust it. — Daddy",
+  "You are doing better than the voice in your head is telling you. — Daddy",
+  "Today doesn't have to be a big day. It just has to be a kind one. — Daddy",
+  "Whatever happens with the search, you're still my greatest pride. — Daddy",
+  "The effort is yours to give; the outcome isn't yours to carry alone. — Daddy",
+  "One application is a complete success. Don't let 'more' steal that. — Daddy",
+  "Breathe in: I can try. Breathe out: that's enough. Now tap one. — Daddy",
+  "You've come further than you can see from where you're standing. — Daddy",
+  "Steady wins this. And steady is exactly what you are. — Daddy",
+  "There's no wrong pace for healing or hunting. Yours is the right one. — Daddy",
+  "I'd rather you send one with a calm heart than ten in a panic. — Daddy",
+  "The door you're looking for opens for the people who keep knocking. — Daddy",
+  "You are not a burden for needing time. You're a person, and you're mine. — Daddy",
+  "Small and consistent beats big and burned-out. Go small today. — Daddy",
+  "Each 'apply' is you betting on yourself. Smart bet. I'd take it. — Daddy",
+  "You don't have to be fearless. You just have to be willing. You are. — Daddy",
+  "The right people will be glad you walked in. Go let them. — Daddy",
+  "Give yourself the grace you'd give anyone you love. You deserve it too. — Daddy",
+  "However today goes, you can come back tomorrow. The door stays open. — Daddy",
+  "You're allowed to want a good life. Reaching for it is not too much. — Daddy",
+  "Quiet courage is still courage. You've got more than you know. — Daddy",
+  "One honest try today. That's the assignment, and you're acing it. — Daddy",
+  "Your effort counts even when no one writes back. I'm counting it. — Daddy",
+  "Be brave for ten minutes. That's usually all a step takes. — Daddy",
+  "You are not behind your old self, your friends, or anyone. You're on time. — Daddy",
+  "The hardest worker I know is also allowed to rest. Both are true. — Daddy",
+  "Keep going gently. Gentle and forward is still forward. — Daddy",
+  "If you can read this and try one thing, today was a win. — Daddy",
+  "You're worth the wait, and you're worth the work. Now go, sweetheart. — Daddy",
+  "Whatever you get done today, come back and let me tell you I'm proud. ✦ — Daddy",
 ];
+let _encBag = [];
+function pickEnc(){
+  if(!_encBag.length) _encBag = ENC_LINES.map(function(_, i){ return i; });
+  var k = Math.floor(Math.random() * _encBag.length);
+  var i = _encBag.splice(k, 1)[0];        // pull it OUT so it can't recur this cycle
+  return ENC_LINES[i];
+}
 const KIND_LINES = [
   "That took real effort. Proud of you. ✦ — Daddy",
   "Applied! That's a genuine step forward. ✦ — Daddy",
   "Look at you go. One more out the door. ✦ — Daddy",
   "Done — and it's in your weekly log too. ✦ — Daddy",
   "That's my girl. Keep that momentum. ✦ — Daddy",
+  "Sent! That's courage you can be proud of. ✦ — Daddy",
+  "Another one in. You're on a roll. ✦ — Daddy",
+  "Yes! That's a real step toward a real job. ✦ — Daddy",
+  "Brave done quietly is still brave. Proud of you. ✦ — Daddy",
+  "That's the way. One honest try at a time. ✦ — Daddy",
+  "Logged and counted. You're building something. ✦ — Daddy",
+  "Look at you keeping promises to yourself. ✦ — Daddy",
+  "You did the scary thing. I'm beaming. ✦ — Daddy",
+  "Steady and brave — that's exactly who you are. ✦ — Daddy",
 ];
 let toastTimer = null;
 function showToast(text, label, fn){
@@ -1987,8 +2118,7 @@ function showToast(text, label, fn){
 }
 const REDUCED = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
 function celebrate(el){
-  const n = Object.keys(state.applied).length;
-  showToast(KIND_LINES[n % KIND_LINES.length]);
+  showToast(KIND_LINES[Math.floor(Math.random() * KIND_LINES.length)]);
   if(REDUCED || !el || !el.getBoundingClientRect) return;
   const r = el.getBoundingClientRect();
   for(let i=0;i<8;i++){
@@ -2045,11 +2175,19 @@ function appliedEntries(){
   return Object.keys(state.applied).map(function(id){
     const lg = state.appliedLog[id] || {};
     const j = jobById.get(id);
-    return { id:id, date: state.applied[id] || lg.d || "",
+    return { id:id, date: state.applied[id] || lg.d || "", ts: lg.ts || "",
              title: lg.t || (j&&j.title) || "(job no longer listed)",
              company: lg.c || (j&&j.company) || "",
              url: lg.u || (j&&j.url) || "" };
   }).sort(function(a,b){ return a.date<b.date?1:-1; });
+}
+// A human date+time stamp for the work-search log. Falls back to the date alone
+// for entries logged before timestamps existed.
+function fmtStamp(ts, date){
+  if(ts){ var dt=new Date(ts);
+    if(!isNaN(dt.getTime())) return dt.toLocaleString([],
+      {year:"numeric",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); }
+  return date || "";
 }
 function renderApps(){
   const wrap=document.getElementById("applist"); if(!wrap) return;
@@ -2081,19 +2219,30 @@ function renderApps(){
 }
 function logRowsText(){
   return appliedEntries().map(function(r){
-    return r.date+"  —  "+r.title+(r.company?", "+r.company:"")+"  —  applied online";
+    return fmtStamp(r.ts, r.date)+"  —  "+r.title+(r.company?", "+r.company:"")+"  —  applied online";
   });
 }
 document.getElementById("printlog").onclick = function(){
+  // The log is a legal/unemployment document, so it carries her LEGAL name.
+  // Autofill it; if we don't have it yet, ask once (and remember it).
+  var legal = (state.profile.legalName||"").trim();
+  if(!legal){
+    var entered = window.prompt("Your legal name for the work-search log "+
+      "(used for unemployment or court — you can change it later in My corner):", "");
+    if(entered && entered.trim()){
+      legal = entered.trim(); state.profile.legalName = legal; persist();
+      renderCorner(); if(portalSync) portalSync.profile();
+    }
+  }
   const rows=appliedEntries();
   const wl=document.getElementById("worklog");
   wl.innerHTML =
     "<h1>Work-Search Log</h1>"+
-    "<p>Name: ______________________   Week of "+esc(weekStart())+" (Sunday–Saturday)   "+
+    "<p>Name: "+(legal?esc(legal):"______________________")+"   Week of "+esc(weekStart())+" (Sunday–Saturday)   "+
     "Iowa asks for 4 reemployment activities per week; at least 3 must be job applications.</p>"+
-    "<table><tr><th>Date</th><th>Position</th><th>Employer</th><th>How</th><th>Result / notes</th></tr>"+
+    "<table><tr><th>Logged (date &amp; time)</th><th>Position</th><th>Employer</th><th>How</th><th>Result / notes</th></tr>"+
     rows.map(function(r){
-      return "<tr><td>"+esc(r.date)+"</td><td>"+esc(r.title)+"</td><td>"+esc(r.company)+
+      return "<tr><td>"+esc(fmtStamp(r.ts, r.date))+"</td><td>"+esc(r.title)+"</td><td>"+esc(r.company)+
              "</td><td>Online application</td><td>"+esc((state.notes[r.id]||"").slice(0,80))+"</td></tr>";
     }).join("")+
     (rows.length?"":"<tr><td colspan=5>(no applications logged yet)</td></tr>")+
@@ -2102,7 +2251,8 @@ document.getElementById("printlog").onclick = function(){
   window.print();
 };
 document.getElementById("copylog").onclick = function(){
-  const text="My work-search log\n"+logRowsText().join("\n");
+  var legal=(state.profile.legalName||"").trim();
+  const text=(legal?legal+" — work-search log":"My work-search log")+"\n"+logRowsText().join("\n");
   (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
     .then(function(){ showToast("Copied — paste it into your weekly claim or a text."); })
     .catch(function(){ showToast("Couldn't copy automatically — use Print instead."); });
@@ -2126,8 +2276,13 @@ function renderCorner(){
   const body=document.getElementById("quizbody"); if(!body) return;
   const h=new Date().getHours();
   const part = h<5?"You're up late":(h<12?"Good morning":(h<17?"Good afternoon":"Good evening"));
+  const pref = (state.profile.preferredName||"").trim();   // in-app we use the PREFERRED name only
   document.getElementById("cornergreet").textContent =
-    part+". This page is just for you — no job list, no pressure. "+ENC_LINES[(dayHash()+3)%ENC_LINES.length];
+    part+(pref?", "+pref:"")+". This page is just for you — no job list, no pressure. "+pickEnc();
+  // Name editor reflects whatever's saved (preferred shown in app; legal used on the log).
+  var nmP=document.getElementById("nm-pref"), nmL=document.getElementById("nm-legal");
+  if(nmP) nmP.value = state.profile.preferredName || "";
+  if(nmL) nmL.value = state.profile.legalName || "";
   body.innerHTML = QUIZ.map(function(q){
     return '<div class="qq">'+esc(q[1])+'</div><div class="qopts">'+
       q[2].map(function(o){
@@ -2143,6 +2298,7 @@ function quizPick(t){
   state.profile[q] = (state.profile[q]===v) ? undefined : v;
   if(state.profile[q]===undefined) delete state.profile[q];
   persist(); render();
+  if(portalSync) portalSync.profile();
 }
 
 /* ── Bottom-nav views ───────────────────────────────────────────────────── */
@@ -2171,7 +2327,7 @@ function setView(name){
   if(b) b.onclick=function(){ setView(v); };
 });
 
-document.getElementById("footenc").textContent = ENC_LINES[dayHash()%ENC_LINES.length];
+document.getElementById("footenc").textContent = pickEnc();
 
 buildChips();
 render();
@@ -2205,6 +2361,8 @@ setView("jobs");
         msg = document.getElementById("authmsg");
     var emailEl = document.getElementById("authemail"),
         passEl = document.getElementById("authpass"),
+        legalEl = document.getElementById("authlegal"),
+        prefEl = document.getElementById("authpref"),
         primaryBtn = document.getElementById("authprimarybtn"),
         toggleBtn = document.getElementById("authtoggle"),
         forgotBtn = document.getElementById("authforgot"),
@@ -2257,6 +2415,7 @@ setView("jobs");
       passEl.hidden = false;
       passEl.setAttribute("autocomplete", up ? "new-password" : "current-password");
       passEl.placeholder = up ? "Choose a password (8+ characters)" : "Password";
+      legalEl.hidden = !up; prefEl.hidden = !up;   // names asked only when creating an account
       primaryBtn.textContent = up ? "Create account" : "Sign in";
       toggleBtn.textContent = up ? "Already have an account? Sign in" : "New here? Create an account";
       forgotBtn.hidden = up;
@@ -2281,15 +2440,25 @@ setView("jobs");
       var em = emailEl.value.trim(), pw = passEl.value;
       if(!/.+@.+\..+/.test(em)){ setMsg("That doesn't look like an email address.", true); return; }
       if(pw.length < 8){ setMsg("Password needs at least 8 characters.", true); return; }
+      var legal = legalEl.value.trim(), pref = prefEl.value.trim();
+      if(mode === "signup" && !legal){
+        setMsg("Please add your legal name — it goes on your work-search log.", true); return; }
       setMsg(mode === "signup" ? "Creating your account…" : "Signing you in…");
       var p = mode === "signup"
-        ? sb.auth.signUp({ email: em, password: pw, options: { emailRedirectTo: PAGE } })
+        ? sb.auth.signUp({ email: em, password: pw, options: { emailRedirectTo: PAGE,
+            data: { legal_name: legal, preferred_name: pref || legal.split(" ")[0] } } })
         : sb.auth.signInWithPassword({ email: em, password: pw });
       p.then(function(r){
         if(r.error){ setMsg(friendly(r.error), true); return; }
+        if(mode === "signup"){
+          // Keep names locally now; syncAll pushes them once the session is live.
+          state.profile.legalName = legal;
+          state.profile.preferredName = pref || legal.split(" ")[0];
+          persist(); renderCorner();
+        }
         if(mode === "signup" && r.data && r.data.user && !r.data.session)
           setMsg("Account made! Check your email and tap the confirm link, then come back and sign in.");
-        // session present -> onAuthStateChange closes the modal + syncs.
+        // session present -> onAuthStateChange closes the modal + syncs (incl. profile).
       });
     };
 
@@ -2372,9 +2541,11 @@ setView("jobs");
       Promise.all([
         sb.from("user_job_status").select("job_id,applied,applied_on,saved,hidden"),
         sb.from("job_notes").select("id,job_id,body,created_at").order("created_at", { ascending: false }),
+        sb.from("user_profile").select("profile").maybeSingle(),
       ]).then(function(res){
         if(res[0].error) throw res[0].error;
         if(res[1].error) throw res[1].error;
+        // res[2] (profile) is null for a brand-new user — that's not an error.
         var localIds = {};
         Object.keys(state.applied).forEach(function(id){ localIds[id] = 1; });
         state.saved.forEach(function(id){ localIds[id] = 1; });
@@ -2392,7 +2563,13 @@ setView("jobs");
           sawNote[r.job_id] = 1; noteRowId[r.job_id] = r.id;
           state.notes[r.job_id] = r.body;
         });
-        persist(); render();
+        // Profile (quiz answers + legal/preferred name): server is a backup, local
+        // wins. Fill only keys we don't already have, then push the merged result.
+        var sp = (res[2] && res[2].data && res[2].data.profile) || {};
+        Object.keys(sp).forEach(function(k){
+          if(state.profile[k] === undefined || state.profile[k] === "") state.profile[k] = sp[k];
+        });
+        persist(); render(); renderCorner();
         var toPush = Object.keys(localIds).filter(function(id){
           var s = server[id] || {};
           return (!!state.applied[id]) !== !!s.applied ||
@@ -2401,6 +2578,7 @@ setView("jobs");
         });
         pushStatus(toPush);
         Object.keys(state.notes).forEach(function(id){ if(!sawNote[id]) pushNote(id); });
+        pushProfile();
         showIn();
       }).catch(function(e){
         console.log("[portal] sync failed:", e && e.message || e);
@@ -2439,6 +2617,13 @@ setView("jobs");
           });
       }
     }
+    function pushProfile(){
+      if(!user) return;
+      sb.from("user_profile").upsert({ profile: state.profile }, { onConflict: "user_id" })
+        .then(function(r){ if(r.error) console.log("[portal] profile push:", r.error.message); });
+    }
+    // Let the (non-portal) main script trigger a profile sync after name/quiz edits.
+    portalSync = { profile: pushProfile };
 
     // Live mutations: these delegated listeners run AFTER the main handlers
     // above (same container, registered later), so state is already updated.
