@@ -1911,7 +1911,7 @@ document.querySelector(".app").addEventListener("click",(e)=>{
     if(state.applied[id]){ delete state.applied[id]; }
     else { state.applied[id]=today(); markApplied(id, t); }
   }
-  if(act==="saved"){ state.saved.has(id)?state.saved.delete(id):state.saved.add(id); }
+  if(act==="saved"){ if(state.saved.has(id)){ state.saved.delete(id); } else { state.saved.add(id); haptic(8); } }
   if(act==="hide"){ state.hidden.has(id)?state.hidden.delete(id):state.hidden.add(id); }
   if(act==="snooze"){
     if(snoozedNow(id)){ delete state.snooze[id]; }
@@ -1956,7 +1956,12 @@ document.querySelector(".app").addEventListener("input",(e)=>{
   persist();
 });
 
-document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.target.value; render(); });
+let _searchTimer = null;
+document.getElementById("search").addEventListener("input",(e)=>{
+  filters.q=e.target.value;                          // keep the field responsive
+  clearTimeout(_searchTimer);                         // but debounce the heavy re-render
+  _searchTimer=setTimeout(render, 150);               // so typing stays smooth on a phone
+});
 
 (function callBtn(){
   const b=document.getElementById("callbtn");
@@ -1985,7 +1990,28 @@ document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.ta
 
 document.getElementById("foot").innerHTML =
   "<div>We checked "+META.total+" postings and hid <b>"+META.hidden+"</b> that looked like scams.</div>"+
-  "<div>Tip: tap Share, then <b>Add to Home Screen</b> to keep this on your phone.</div>";
+  "<div>Tip: tap Share, then <b>Add to Home Screen</b> to keep this on your phone.</div>"+
+  "<button id='installbtn' hidden style='margin-top:8px;background:var(--card);border:1px solid var(--line);"+
+  "color:var(--green-d);font:inherit;font-weight:700;font-size:14px;padding:10px 18px;border-radius:999px;"+
+  "min-height:44px;cursor:pointer'>Add this app to your phone</button>";
+// Real one-tap install when the browser offers it (Chrome/Android). On iOS Safari
+// the event never fires, so the Share -> Add to Home Screen tip above remains.
+var deferredInstall = null;
+window.addEventListener("beforeinstallprompt", function(e){
+  e.preventDefault(); deferredInstall = e;
+  var b = document.getElementById("installbtn"); if(b) b.hidden = false;
+});
+(function(){
+  var b = document.getElementById("installbtn"); if(!b) return;
+  b.onclick = function(){
+    if(!deferredInstall) return;
+    deferredInstall.prompt();
+    deferredInstall.userChoice.finally(function(){ deferredInstall = null; b.hidden = true; });
+  };
+})();
+window.addEventListener("appinstalled", function(){
+  var b = document.getElementById("installbtn"); if(b) b.hidden = true;
+});
 
 /* ── Gentle engine: encouragement, celebration, toast ─────────────────── */
 // Words of affirmation — a LARGE pool in Daddy's voice. pickEnc() draws from a
@@ -2117,7 +2143,11 @@ function showToast(text, label, fn){
   clearTimeout(toastTimer); toastTimer=setTimeout(function(){ t.hidden=true; }, 6000);
 }
 const REDUCED = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+// Subtle haptic on positive actions — the kind of thing a phone user feels as
+// quality. Silently no-ops where unsupported (iOS Safari) or reduced-motion is on.
+function haptic(pattern){ if(!REDUCED && navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){} } }
 function celebrate(el){
+  haptic(12);
   showToast(KIND_LINES[Math.floor(Math.random() * KIND_LINES.length)]);
   if(REDUCED || !el || !el.getBoundingClientRect) return;
   const r = el.getBoundingClientRect();
@@ -2425,6 +2455,13 @@ setView("jobs");
     document.getElementById("syncopen").onclick = function(){ setMode("signin"); openModal(); };
     document.getElementById("authclose").onclick = closeModal;
     modal.addEventListener("click", function(e){ if(e.target === modal) closeModal(); });
+    // Expected keyboard behavior: Enter submits the form, Escape closes the modal.
+    modal.addEventListener("keydown", function(e){
+      if(e.key === "Escape"){ closeModal(); return; }
+      if(e.key === "Enter" && !document.getElementById("authmain").hidden){
+        e.preventDefault(); primaryBtn.click();
+      }
+    });
     toggleBtn.onclick = function(){ setMode(mode === "signin" ? "signup" : "signin"); emailEl.focus(); };
 
     // Passkey — Face ID / fingerprint, no password.
