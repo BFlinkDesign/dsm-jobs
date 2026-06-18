@@ -66,21 +66,27 @@ RESULTS_PER_PAGE = 50             # Adzuna max per page
 # Search queries (each is one API call per source). Grouped: admin/clerical,
 # experienced admin (Lilly's level), light office-adjacent, general no-degree.
 TITLES = [
-    # admin / clerical
+    # admin / clerical (the heart of what she wants — kept deliberately broad)
     "administrative assistant", "office assistant", "receptionist", "front desk",
     "data entry", "office clerk", "administrative coordinator", "secretary",
-    "clerical", "file clerk",
+    "clerical", "file clerk", "administrative specialist", "office coordinator",
+    "office administrator", "data entry clerk", "data entry specialist",
+    "clerical assistant", "general office clerk", "administrative associate",
+    "department assistant", "program assistant", "office support",
     # experienced admin — years of admin experience, no degree needed
     "executive assistant", "office manager", "administrative manager",
-    "senior administrative assistant", "operations assistant",
-    # light office-adjacent
-    "scheduler", "medical receptionist", "billing clerk", "accounts payable clerk",
-    "medical records clerk", "bank teller", "customer service representative",
-    "call center representative", "mail clerk",
-    # general (no degree)
-    "retail associate", "cashier", "stocker",
-    "food service worker", "caregiver", "housekeeper", "production associate",
-    "general laborer",
+    "senior administrative assistant", "operations assistant", "executive secretary",
+    "administrative officer",
+    # light office-adjacent / clerical specialties
+    "scheduler", "scheduling coordinator", "medical receptionist", "medical secretary",
+    "billing clerk", "accounts payable clerk", "accounting clerk", "accounting assistant",
+    "payroll clerk", "medical records clerk", "patient access representative",
+    "patient service representative", "registration clerk", "intake coordinator",
+    "human resources assistant", "bank teller", "dispatcher", "mail clerk",
+    "customer service representative", "customer service associate",
+    "call center representative",
+    # general (no degree) — light, non-labor
+    "retail associate", "cashier", "caregiver",
 ]
 
 # Subset that genuinely exists as remote work (skip remote calls for in-person roles).
@@ -306,20 +312,29 @@ CATEGORY_TERMS = {
     "Office": [
         "administrative assistant", "admin assistant", "administrative support",
         "administrative coordinator", "administrative specialist", "administrative aide",
+        "administrative associate", "administrative technician", "administrative officer",
         "receptionist", "front desk", "front office", "office assistant",
         "office administrator", "office coordinator", "office clerk", "office support",
-        "data entry", "file clerk", "clerk typist", "clerical", "secretary",
-        "scheduling coordinator", "scheduler", "office associate", "admin coordinator",
-        "billing", "accounts payable", "accounts receivable", "medical records",
-        "mail clerk", "patient access", "records clerk", "data clerk", "intake",
+        "office associate", "office specialist", "general office", "data entry",
+        "data entry clerk", "data clerk", "data processor", "file clerk", "clerk typist",
+        "clerical", "secretary", "medical secretary", "typist", "word processor",
+        "scheduling coordinator", "scheduler", "scheduling", "admin coordinator",
+        "department assistant", "program assistant", "program coordinator",
+        "project coordinator", "project assistant", "staff assistant", "switchboard",
+        "dispatcher", "billing", "accounts payable", "accounts receivable",
+        "accounting clerk", "accounting assistant", "bookkeeper", "bookkeeping",
+        "payroll", "medical records", "records clerk", "mail clerk", "patient access",
+        "patient service", "registration", "registrar", "intake", "insurance verification",
+        "human resources assistant", "hr assistant", "recruiting coordinator",
         # Experienced-admin roles (Lilly's level — years of admin = a master's):
-        "executive assistant", "executive administrative", "office manager",
-        "administrative manager", "admin manager", "administrative supervisor",
-        "office supervisor", "senior administrative", "lead administrative",
-        "administrative officer", "operations assistant", "executive coordinator",
+        "executive assistant", "executive administrative", "executive secretary",
+        "office manager", "administrative manager", "admin manager",
+        "administrative supervisor", "office supervisor", "senior administrative",
+        "lead administrative", "operations assistant", "executive coordinator",
     ],
     "Customer service": [
-        "customer service", "call center", "bank teller", "teller",
+        "customer service", "customer support", "client service", "member service",
+        "call center", "bank teller", "teller",
     ],
     "Store & retail": [
         "retail associate", "sales associate", "cashier", "stocker",
@@ -327,13 +342,9 @@ CATEGORY_TERMS = {
     "Caregiving": [
         "caregiver", "caretaker", "home care",
     ],
-    "Food & cleaning": [
-        "food service", "dishwasher", "housekeep", "janitor", "custodian",
-    ],
-    "Production & labor": [
-        "production associate", "production worker", "general labor", "laborer",
-        "assembler",
-    ],
+    # NOTE: "Food & cleaning" and "Production & labor" categories were removed on
+    # her request — she's a single mom and those shifts/roles don't fit. Their
+    # terms are gone from the allowlist, so such jobs from any source are dropped.
 }
 ADMIN_TITLE_TERMS = [t for terms in CATEGORY_TERMS.values() for t in terms]
 
@@ -500,6 +511,36 @@ def requires_degree(job):
             if not any(s in window for s in DEGREE_SOFTENERS):
                 return True
     return False
+
+
+# Day-shift gate. She's a single mom with no childcare, so evening / night /
+# overnight / late-ending roles don't work. We drop a posting ONLY when it
+# clearly signals a non-day shift — a job that says nothing about hours is kept
+# (those are standard daytime). Phrase hints first, then explicit time ranges
+# that cross midnight or end late in the evening.
+NIGHT_SHIFT_HINTS = (
+    "2nd shift", "second shift", "3rd shift", "third shift", "2nd/3rd shift",
+    "second and third shift", "night shift", "nights shift", "overnight",
+    "over night", "graveyard", "swing shift", "evening shift", "afternoon shift",
+    "closing shift", "pm shift", "p.m. shift", "weekends only", "weekend only",
+    "nights and weekends", "evenings and weekends", "must be available nights",
+    "must work nights", "must be available evenings",
+)
+# A time range whose END is in the a.m. (e.g. "3 PM to 12 AM" — crosses midnight).
+_OVERNIGHT_RANGE = re.compile(r"(?:-|–|to|until|till|thru)\s*(?:1[0-2]|[1-9])(?::\d\d)?\s*a\.?\s*m", re.I)
+# A time range that ENDS at 8–11 p.m. (too late for evening pickup).
+_LATE_PM_END = re.compile(r"(?:-|–|to|until|till|thru)\s*(?:8|9|10|11)(?::\d\d)?\s*p\.?\s*m", re.I)
+
+
+def is_day_shift(job):
+    """False only when the posting clearly runs evenings/nights/overnight or ends
+    late; True (kept) when it says nothing about shift."""
+    blob = ((job.get("title") or "") + "  " + (job.get("description") or "")).lower()
+    if any(h in blob for h in NIGHT_SHIFT_HINTS):
+        return False
+    if _OVERNIGHT_RANGE.search(blob) or _LATE_PM_END.search(blob):
+        return False
+    return True
 
 
 def is_admin_title(title):
@@ -796,12 +837,13 @@ def collect(verbose=True):
             and is_attainable(r["title"])
             and not title_excluded(r["title"])
             and not requires_degree(r)
+            and is_day_shift(r)
             and passes_us_filter(r)
             and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
     dropped = len(all_rows) - len(rows)
     if verbose and dropped:
         print(f"  (filtered out {dropped} non-admin / senior / skilled / degree / "
-              f"out-of-county postings)")
+              f"night-shift / out-of-county postings)")
     rows, dupes = dedupe_rows(rows)
     if verbose and dupes:
         print(f"  (collapsed {dupes} duplicate postings of the same job)")
@@ -1818,8 +1860,8 @@ function forYouScore(j){
   if(p.kind){
     const k = j.category||"";
     if(p.kind==="people" && (k==="Customer service"||k==="Store & retail")) s+=2;
-    if(p.kind==="quiet"  && (k==="Office"||k==="Production & labor")) s+=2;
-    if(p.kind==="hands"  && (k==="Production & labor"||k==="Food & cleaning")) s+=2;
+    if(p.kind==="quiet"  && k==="Office") s+=2;
+    if(p.kind==="hands"  && k==="Store & retail") s+=2;
     if(p.kind==="care"   && k==="Caregiving") s+=2;
   }
   if(p.where==="home" && j.remote) s+=2;

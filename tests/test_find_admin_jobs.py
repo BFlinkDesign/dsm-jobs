@@ -161,9 +161,34 @@ def test_job_category():
     assert fa.job_category("Call Center Representative") == "Customer service"
     assert fa.job_category("Retail Sales Associate") == "Store & retail"
     assert fa.job_category("Caregiver - Evenings") == "Caregiving"
-    assert fa.job_category("Janitor") == "Food & cleaning"
-    assert fa.job_category("General Laborer") == "Production & labor"
     assert fa.job_category("Quantum Engineer") == ""
+
+
+def test_food_and_labor_categories_removed():
+    # Her request: no food service or labor jobs. These no longer categorize,
+    # and (more importantly) the allowlist drops them entirely.
+    for title in ("Janitor", "General Laborer", "Food Service Worker",
+                  "Dishwasher", "Production Associate", "Housekeeper"):
+        assert fa.job_category(title) == "", title
+        assert not fa.is_admin_title(title), title
+
+
+def test_is_day_shift():
+    # Kept (no shift mention, or clearly daytime):
+    assert fa.is_day_shift({"title": "Administrative Assistant", "description": ""})
+    assert fa.is_day_shift({"title": "Receptionist",
+                            "description": "Monday-Friday, 8am-5pm."})
+    assert fa.is_day_shift({"title": "Office Clerk",
+                            "description": "Hours 9 AM to 5 PM."})
+    # Dropped (evening / night / overnight / late-ending):
+    assert not fa.is_day_shift({"title": "Receptionist - 2nd Shift", "description": ""})
+    assert not fa.is_day_shift({"title": "Data Entry (Overnight)", "description": ""})
+    assert not fa.is_day_shift({"title": "Front Desk",
+                                "description": "Shift is 3:00 PM to 12:00 AM."})
+    assert not fa.is_day_shift({"title": "Scheduler",
+                                "description": "Must be available evenings and weekends."})
+    assert not fa.is_day_shift({"title": "Office Assistant",
+                                "description": "11 am to 9 pm, some Saturdays."})
 
 
 def test_in_polk_or_dallas_counties_only():
