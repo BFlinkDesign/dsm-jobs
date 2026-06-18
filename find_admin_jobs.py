@@ -1182,6 +1182,34 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
  font-size:12px;font-weight:700;padding:6px 10px;border-radius:999px;white-space:nowrap;
  border:1px solid rgba(192,132,252,.35)}
 .summary{color:var(--ink2);font-size:14px;margin-top:6px}
+/* Account control (compact, top-right, expand/collapse) */
+.acctbtn{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;
+ border-radius:50%;background:var(--card);border:1.5px solid var(--line);color:var(--ink2);cursor:pointer;transition:.15s}
+.acctbtn:active{transform:scale(.94)}
+.acctbtn.in{background:var(--green);border-color:var(--green);color:#fff}
+.acctinitial{font:inherit;font-weight:800;font-size:17px;line-height:1}
+.subrow{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
+.subrow .summary{margin-top:0;flex:1;min-width:120px}
+.acctpop{position:absolute;top:60px;right:16px;z-index:30;width:min(290px,84vw);background:var(--card);
+ border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:14px;animation:pop .14s ease both}
+@keyframes pop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.acctcopy{color:var(--ink2);font-size:14px;line-height:1.5;margin-bottom:10px}
+.acctemail{font-weight:700;font-size:15px;color:var(--ink);margin-bottom:10px;word-break:break-all}
+.acctprimary{width:100%;background:var(--green);color:#fff;border:0;border-radius:11px;font:inherit;
+ font-weight:700;font-size:15px;padding:12px;min-height:46px;cursor:pointer}
+.acctitem{width:100%;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:11px;
+ font:inherit;font-weight:700;font-size:15px;padding:11px;min-height:46px;cursor:pointer}
+/* Collapsible filter panel */
+.filtertoggle{display:flex;align-items:center;gap:9px;width:100%;background:var(--card);
+ border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;font:inherit;font-weight:700;
+ font-size:15px;color:var(--ink);min-height:50px;cursor:pointer}
+.filtertoggle .ftlabel{flex:1;text-align:left}
+.filtertoggle .ftchev{transition:transform .2s;color:var(--ink2)}
+.filtertoggle[aria-expanded="true"] .ftchev{transform:rotate(180deg)}
+.filtcount{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;
+ padding:0 6px;border-radius:999px;background:var(--green);color:#fff;font-size:12px;font-weight:800}
+.filterpanel{padding-top:4px;animation:pop .16s ease both}
+.uploadbtn{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
 /* Safety */
 .safety{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--red);
  border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
@@ -1195,7 +1223,7 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
  background:var(--card);border:2px solid var(--red);color:var(--red);text-decoration:none;font-weight:700;
  padding:13px;border-radius:11px;font-size:16px;min-height:52px}
 /* Controls */
-.controls{position:sticky;top:62px;z-index:15;background:var(--paper);padding:10px 0 2px}
+.controls{padding:10px 0 2px}
 .searchwrap{position:relative}
 .searchwrap svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--ink2)}
 .search{width:100%;font:inherit;font-size:17px;padding:14px 16px 14px 44px;border:1.5px solid var(--line);
@@ -1407,24 +1435,29 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
         <div class="eyebrow">Grimes &middot; Des Moines metro</div>
         <div class="word">Job Board</div>
       </div>
-      <span class="safebadge"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Scam-checked</span>
+      <button class="acctbtn" id="acctbtn" aria-label="Your account" aria-expanded="false" aria-haspopup="true">
+        <svg class="accticon" id="accticon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 19.2a6.5 6.5 0 0 1 13 0"/></svg>
+        <span class="acctinitial" id="acctinitial" hidden></span>
+      </button>
     </div>
-    <div class="summary" id="summary"></div>
+    <div class="subrow">
+      <span class="safebadge"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Scam-checked</span>
+      <span class="summary" id="summary"></span>
+    </div>
+    <!-- Account popover (collapsed by default; the account button toggles it) -->
+    <div class="acctpop" id="acctpop" hidden>
+      <div id="acctpop-out">
+        <div class="acctcopy">New phone or tablet? Sign in and your Applied, Saved, notes &amp; chats follow you everywhere.</div>
+        <button class="acctprimary" id="acctsignin">Sign in</button>
+      </div>
+      <div id="acctpop-in" hidden>
+        <div class="acctemail" id="acctemail"></div>
+        <button class="acctitem" id="acctsignout">Sign out</button>
+      </div>
+    </div>
   </header>
 
   <div class="stale" id="stale" hidden></div>
-
-  <section class="sync" id="syncbar" hidden>
-    <div class="syncrow" id="syncrow-out" hidden>
-      <div class="synccopy"><span class="who">Got a new phone, or use a tablet too?</span><br>
-        Sign in and your Applied, Saved, notes &amp; chats follow you everywhere.</div>
-      <button class="syncbtn" id="syncopen">Sign in</button>
-    </div>
-    <div class="syncrow" id="syncrow-in" hidden>
-      <div class="synccopy" id="syncwho"></div>
-      <button class="act syncout" id="syncout">Sign out</button>
-    </div>
-  </section>
 
   <!-- Full-screen auth modal (all modern sign-in methods) -->
   <div class="authov" id="authmodal" hidden>
@@ -1535,11 +1568,16 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 
     <div class="quizcard" id="resumecard">
       <h3>My r&eacute;sum&eacute; <span class="sparkle">&#10022;</span></h3>
-      <p>Paste your r&eacute;sum&eacute; here once. Then on any job you can tap
+      <p>Upload your r&eacute;sum&eacute; (or paste it). Then on any job you can tap
       <b>&#10022; Tailor</b> and I&rsquo;ll re-organize <i>your own</i> experience to fit
       that posting &mdash; never adding anything you didn&rsquo;t write. Saved on this phone.</p>
+      <input type="file" id="resumefile" accept=".docx,.pdf,.md,.markdown,.txt,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+      <button class="authsecondary uploadbtn" data-act="uploadresume">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        Upload a file (.docx, .pdf, .md, .txt)
+      </button>
       <textarea class="authfield" id="resumebox" rows="6" style="min-height:120px;resize:vertical"
-        placeholder="Paste your r&eacute;sum&eacute; here&hellip;" aria-label="Your r&eacute;sum&eacute;"></textarea>
+        placeholder="&hellip;or paste your r&eacute;sum&eacute; text here" aria-label="Your r&eacute;sum&eacute;"></textarea>
       <button class="authprimary" data-act="saveresume">Save my r&eacute;sum&eacute;</button>
       <div class="authmsg" id="resumemsg" role="status"></div>
     </div>
@@ -1622,17 +1660,25 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
   </div>
 
   <div class="controls">
-    <div class="searchwrap">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
-      <input class="search" id="search" type="search" inputmode="search"
-        placeholder="Search job or employer" aria-label="Search jobs">
+    <button class="filtertoggle" id="filtertoggle" aria-expanded="false" aria-controls="filterpanel">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
+      <span class="ftlabel">Search &amp; filter</span>
+      <span class="filtcount" id="filtcount" hidden></span>
+      <svg class="ftchev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div class="filterpanel" id="filterpanel" hidden>
+      <div class="searchwrap">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
+        <input class="search" id="search" type="search" inputmode="search"
+          placeholder="Search job or employer" aria-label="Search jobs">
+      </div>
+      <div class="chiplabel">Filter</div>
+      <div class="chips" id="chips"></div>
+      <div class="chiplabel" id="catlabel">Job type</div>
+      <div class="chips" id="catchips"></div>
+      <div class="chiplabel">How far you'll drive from Grimes</div>
+      <div class="chips" id="commutechips" aria-label="How far you will drive"></div>
     </div>
-    <div class="chiplabel">Filter</div>
-    <div class="chips" id="chips"></div>
-    <div class="chiplabel" id="catlabel">Job type</div>
-    <div class="chips" id="catchips"></div>
-    <div class="chiplabel">How far you'll drive from Grimes</div>
-    <div class="chips" id="commutechips" aria-label="How far you will drive"></div>
   </div>
 
   <div class="progress" id="progress"></div>
@@ -1811,8 +1857,28 @@ function render(){
   if(!list.length){ empty.innerHTML = IC.eye + "<div>Nothing matches those filters right now — that&rsquo;s the filters, not you. Tap one off above to see more, or check back tomorrow; fresh jobs arrive every morning.</div>"; }
 
   list.forEach(function(j,i){ wrap.appendChild(cardEl(j,i)); });
+  updateFilterCount();
   renderPicks(); renderApps(); renderCorner();
 }
+
+// Collapsible filter panel: collapsed by default so jobs are visible immediately;
+// the count badge shows how many filters are active while it's closed.
+function updateFilterCount(){
+  var n = document.querySelectorAll('#chips .chip[aria-pressed="true"], #catchips .chip[aria-pressed="true"]').length;
+  if((filters.q||"").trim()) n++;
+  if(state.maxCommute) n++;
+  var el = document.getElementById("filtcount");
+  if(el){ el.hidden = n===0; if(n) el.textContent = n; }
+}
+(function(){
+  var tog=document.getElementById("filtertoggle"), panel=document.getElementById("filterpanel");
+  if(!tog||!panel) return;
+  tog.addEventListener("click", function(){
+    var willOpen = panel.hidden;
+    panel.hidden = !willOpen;
+    tog.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  });
+})();
 
 function callScriptHTML(j, appliedOn){
   // A word-for-word script takes the fear out of the follow-up call.
@@ -1998,6 +2064,97 @@ function tailorJob(id){
   m.addEventListener("keydown", function(e){ if(e.key==="Escape") closeTailorModal(); });
 })();
 
+/* ── Résumé file upload: .docx / .pdf / .md / .txt -> text ─────────────────
+   docx is parsed in-page with no dependencies (ZIP + DecompressionStream),
+   pdf uses pdf.js loaded on demand, md/txt are read directly. The docx path
+   and a real .pdf were verified against her actual résumé files. */
+async function _inflateRaw(bytes){
+  const ds = new DecompressionStream("deflate-raw");
+  const s = new Response(bytes).body.pipeThrough(ds);
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+function _docxXmlToText(xml){
+  var s = xml.replace(/<w:tab\b[^>]*\/?>/g, "\t").replace(/<\/w:p>/g, "\n")
+    .replace(/<w:p\b[^>]*\/>/g, "\n").replace(/<w:br\b[^>]*\/?>/g, "\n").replace(/<[^>]+>/g, "");
+  s = s.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"')
+       .replace(/&apos;/g,"'").replace(/&#(\d+);/g, function(_,n){ return String.fromCharCode(+n); });
+  return s.replace(/[ \t]+\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
+}
+async function _docxToText(buf){
+  var u8 = new Uint8Array(buf), dv = new DataView(buf), eocd = -1;
+  for(var i=u8.length-22; i>=0; i--){ if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; } }
+  if(eocd<0) throw new Error("That doesn't look like a .docx file.");
+  var cdOff=dv.getUint32(eocd+16,true), cnt=dv.getUint16(eocd+10,true), p=cdOff, t=null;
+  for(var n=0; n<cnt; n++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    var method=dv.getUint16(p+10,true), compSize=dv.getUint32(p+20,true);
+    var nameLen=dv.getUint16(p+28,true), extraLen=dv.getUint16(p+30,true), cmtLen=dv.getUint16(p+32,true);
+    var localOff=dv.getUint32(p+42,true);
+    var name=new TextDecoder().decode(u8.subarray(p+46, p+46+nameLen));
+    if(name==="word/document.xml"){ t={method:method, compSize:compSize, localOff:localOff}; break; }
+    p += 46 + nameLen + extraLen + cmtLen;
+  }
+  if(!t) throw new Error("Couldn't read the text in that .docx.");
+  var lh=t.localOff;
+  if(dv.getUint32(lh,true)!==0x04034b50) throw new Error("That .docx looks damaged.");
+  var dstart = lh + 30 + dv.getUint16(lh+26,true) + dv.getUint16(lh+28,true);
+  var comp = u8.subarray(dstart, dstart + t.compSize), xmlBytes;
+  if(t.method===0) xmlBytes = comp;
+  else if(t.method===8) xmlBytes = await _inflateRaw(comp);
+  else throw new Error("Unsupported compression in that .docx.");
+  return _docxXmlToText(new TextDecoder().decode(xmlBytes));
+}
+var _pdfjs = null;
+async function _loadPdfjs(){
+  if(_pdfjs) return _pdfjs;
+  var lib = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs");
+  lib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs";
+  _pdfjs = lib; return lib;
+}
+async function _pdfToText(buf){
+  var lib = await _loadPdfjs();
+  var pdf = await lib.getDocument({ data: buf }).promise, out = [];
+  for(var i=1; i<=pdf.numPages; i++){
+    var page = await pdf.getPage(i), tc = await page.getTextContent();
+    out.push(tc.items.map(function(it){ return it.str; }).join(" "));
+  }
+  return out.join("\n\n").replace(/[ \t]+\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
+}
+async function extractResumeFile(file){
+  var name = (file.name||"").toLowerCase();
+  if(name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".markdown") ||
+     file.type==="text/plain" || file.type==="text/markdown")
+    return (await file.text()).trim();
+  if(name.endsWith(".docx")) return _docxToText(await file.arrayBuffer());
+  if(name.endsWith(".pdf") || file.type==="application/pdf") return _pdfToText(await file.arrayBuffer());
+  if(name.endsWith(".doc")) throw new Error("Old .doc files aren't supported — save it as .docx, or paste the text.");
+  throw new Error("Use a .docx, .pdf, .md, or .txt file — or paste the text below.");
+}
+(function(){
+  var fi = document.getElementById("resumefile"); if(!fi) return;
+  fi.addEventListener("change", function(){
+    var file = fi.files && fi.files[0]; if(!file) return;
+    var msgEl = document.getElementById("resumemsg");
+    if(file.size > 8*1024*1024){ if(msgEl) msgEl.textContent = "That file's quite large — try a smaller one, or paste the text."; fi.value=""; return; }
+    if(msgEl) msgEl.textContent = "Reading " + file.name + "…";
+    extractResumeFile(file).then(function(text){
+      text = (text||"").trim();
+      if(text.length < 40){
+        if(msgEl) msgEl.textContent = "I couldn't find readable text in that (a scanned PDF, maybe?). Paste your résumé below instead.";
+        fi.value=""; return;
+      }
+      var box = document.getElementById("resumebox"); if(box) box.value = text;
+      state.resume = text; persist();
+      if(msgEl) msgEl.textContent = "Loaded from " + file.name + " ✦ — look it over, then Save.";
+      showToast("Résumé loaded ✦");
+      fi.value="";
+    }).catch(function(err){
+      if(msgEl) msgEl.textContent = (err && err.message) || "I couldn't read that file — try paste instead.";
+      fi.value="";
+    });
+  });
+})();
+
 // Delegated on the app container so Jobs, Today's picks and My-apps cards
 // all share one set of handlers.
 document.querySelector(".app").addEventListener("click",(e)=>{
@@ -2038,6 +2195,7 @@ document.querySelector(".app").addEventListener("click",(e)=>{
   }
   if(act==="qopt"){ quizPick(t); return; }
   if(act==="tailor"){ tailorJob(id); return; }
+  if(act==="uploadresume"){ var fin=document.getElementById("resumefile"); if(fin) fin.click(); return; }
   if(act==="closetailor"){ closeTailorModal(); return; }
   if(act==="copytailor"){ copyTailor(t.getAttribute("data-copy")); return; }
   if(act==="saveresume"){
@@ -2502,10 +2660,13 @@ setView("jobs");
     var sb = window.supabase.createClient(PORTAL.url, PORTAL.key,
       { auth: { experimental: { passkey: true } } });
     var PAGE = location.origin + location.pathname;
-    var bar = document.getElementById("syncbar"),
-        rowOut = document.getElementById("syncrow-out"),
-        rowIn = document.getElementById("syncrow-in"),
-        whoEl = document.getElementById("syncwho"),
+    var acctBtn = document.getElementById("acctbtn"),
+        acctPop = document.getElementById("acctpop"),
+        acctOut = document.getElementById("acctpop-out"),
+        acctIn = document.getElementById("acctpop-in"),
+        acctEmail = document.getElementById("acctemail"),
+        acctInitial = document.getElementById("acctinitial"),
+        acctIcon = document.getElementById("accticon"),
         modal = document.getElementById("authmodal"),
         msg = document.getElementById("authmsg");
     var emailEl = document.getElementById("authemail"),
@@ -2519,7 +2680,19 @@ setView("jobs");
         subEl = document.getElementById("authsub");
     var user = null, mode = "signin";  // "signin" | "signup"
     var noteRowId = {}, noteTimers = {};
-    bar.hidden = false;
+
+    // Account popover: a small top-right control that expands/collapses, instead
+    // of the old full-width band that pushed the job list down.
+    function closeAcct(){ acctPop.hidden = true; acctBtn.setAttribute("aria-expanded", "false"); }
+    acctBtn.onclick = function(e){
+      e.stopPropagation();
+      var willOpen = acctPop.hidden;
+      acctPop.hidden = !willOpen;
+      acctBtn.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    };
+    document.addEventListener("click", function(e){
+      if(!acctPop.hidden && !acctBtn.contains(e.target) && !acctPop.contains(e.target)) closeAcct();
+    });
 
     var supportsPasskey = !!(window.PublicKeyCredential) && typeof sb.auth.signInWithPasskey === "function";
     if(!supportsPasskey){ var pk = document.getElementById("authpasskey"); if(pk) pk.hidden = true; }
@@ -2533,11 +2706,20 @@ setView("jobs");
       .catch(function(){});
 
     function setMsg(t, isErr){ msg.textContent = t || ""; msg.className = "authmsg" + (isErr ? " err" : ""); }
-    function showOut(){ rowOut.hidden = false; rowIn.hidden = true; }
+    function showOut(){
+      acctOut.hidden = false; acctIn.hidden = true;
+      acctBtn.classList.remove("in"); acctIcon.hidden = false; acctInitial.hidden = true;
+      acctBtn.setAttribute("aria-label", "Sign in");
+    }
     function showIn(extra){
-      rowOut.hidden = true; rowIn.hidden = false;
-      whoEl.innerHTML = IC.check + ' <span class="who">' +
-        (extra ? esc(extra) : 'Synced across your devices') + '</span> — ' + esc(user && user.email || 'signed in');
+      acctOut.hidden = true; acctIn.hidden = false;
+      var email = (user && user.email) || "signed in";
+      acctEmail.textContent = email;
+      var nm = ((state.profile && state.profile.preferredName) || "").trim();
+      acctInitial.textContent = (nm || email || "?").charAt(0).toUpperCase();
+      acctInitial.hidden = false; acctIcon.hidden = true;
+      acctBtn.classList.add("in");
+      acctBtn.setAttribute("aria-label", "Your account — signed in as " + email);
     }
     function openModal(){ modal.hidden = false; setMsg(""); document.getElementById("authrecover").hidden = true;
       document.getElementById("authmain").hidden = false; setTimeout(function(){ emailEl.focus(); }, 60); }
@@ -2571,7 +2753,7 @@ setView("jobs");
       setMsg("");
     }
 
-    document.getElementById("syncopen").onclick = function(){ setMode("signin"); openModal(); };
+    document.getElementById("acctsignin").onclick = function(){ closeAcct(); setMode("signin"); openModal(); };
     document.getElementById("authclose").onclick = closeModal;
     modal.addEventListener("click", function(e){ if(e.target === modal) closeModal(); });
     // Expected keyboard behavior: Enter submits the form, Escape closes the modal.
@@ -2656,7 +2838,8 @@ setView("jobs");
       });
     };
 
-    document.getElementById("syncout").onclick = function(){
+    document.getElementById("acctsignout").onclick = function(){
+      closeAcct();
       sb.auth.signOut().catch(function(){});  // onAuthStateChange flips UI; local saves stay
     };
 
