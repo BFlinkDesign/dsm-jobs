@@ -1654,6 +1654,7 @@ state.hidden  = new Set(state.hidden||[]);
 state.notes   = state.notes || {};
 state.coachOff = !!state.coachOff;
 state.snooze  = state.snooze || {};          // id -> "come back on" date (gentler than Hide)
+state.savedAt = state.savedAt || {};         // id -> date saved (for gentle "still want this?" nudges)
 state.appliedLog = state.appliedLog || {};   // id -> {t,c,d,u} captured at apply time, so the
                                              // work-search log survives jobs leaving the feed
 state.profile = state.profile || {};         // quiz answers -> "For you" feed boost
@@ -1661,7 +1662,7 @@ state.maxCommute = state.maxCommute || "";   // "" = any distance; else a minute
 const prevSeen = new Set(state.seen||[]);
 function persist(){ save({applied:state.applied, saved:[...state.saved], hidden:[...state.hidden],
   notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff,
-  snooze:state.snooze, appliedLog:state.appliedLog, profile:state.profile,
+  snooze:state.snooze, savedAt:state.savedAt, appliedLog:state.appliedLog, profile:state.profile,
   maxCommute:state.maxCommute}); }
 // Ledger backfill: any applied job still in today's feed gets its details kept.
 JOBS.forEach(j=>{ if(state.applied[j.id] && !state.appliedLog[j.id])
@@ -1779,7 +1780,7 @@ function render(){
   wrap.innerHTML = "";
   const empty = document.getElementById("empty");
   empty.hidden = list.length>0;
-  if(!list.length){ empty.innerHTML = IC.eye + "<div>No jobs match. Turn off a filter to see more.</div>"; }
+  if(!list.length){ empty.innerHTML = IC.eye + "<div>Nothing matches those filters right now — that&rsquo;s the filters, not you. Tap one off above to see more, or check back tomorrow; fresh jobs arrive every morning.</div>"; }
 
   list.forEach(function(j,i){ wrap.appendChild(cardEl(j,i)); });
   renderPicks(); renderApps(); renderCorner();
@@ -1800,6 +1801,7 @@ function cardEl(j, i){
   const appliedOn = state.applied[j.id], applied = !!appliedOn, saved = state.saved.has(j.id);
   const note = state.notes[j.id] || "";
   const appliedDays = applied ? daysSince(appliedOn) : null;
+  const savedDays = saved ? daysSince(state.savedAt[j.id]) : null;   // null for pre-timestamp saves
   const payCls = j.good ? "good" : "none";
   const verified = j.trusted
     ? '<span class="verified">'+IC.check+'Verified'+(j.trustLabel?' — '+esc(j.trustLabel):' employer')+'</span>'
@@ -1826,6 +1828,10 @@ function cardEl(j, i){
     (applied&&appliedDays!=null&&appliedDays>=5
       ?'<div class="nudge">You applied '+esc(ago(appliedOn))+' — it\'s okay to call and ask about your application.'+
         callScriptHTML(j, appliedOn)+'</div>':'')+
+    (!applied&&saved&&savedDays!=null&&savedDays>=3
+      ?'<div class="nudge">You saved this '+esc(ago(state.savedAt[j.id]))+' — want to apply today? No pressure; I\'m proud of you either way. &#10022;</div>':'')+
+    (postedDays!=null&&postedDays>=30
+      ?'<div class="nudge">This one&rsquo;s been posted a while — worth a quick check that it&rsquo;s still open before you spend time on it.</div>':'')+
     '<a class="apply" href="'+esc(safeUrl(j.url))+'" target="_blank" rel="noopener" data-act="open" data-id="'+esc(j.id)+'">Apply'+IC.arrow+'</a>'+
     '<div class="actions">'+
       '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+IC.check+(applied?'Applied':'I applied')+'</button>'+
@@ -1911,7 +1917,8 @@ document.querySelector(".app").addEventListener("click",(e)=>{
     if(state.applied[id]){ delete state.applied[id]; }
     else { state.applied[id]=today(); markApplied(id, t); }
   }
-  if(act==="saved"){ if(state.saved.has(id)){ state.saved.delete(id); } else { state.saved.add(id); haptic(8); } }
+  if(act==="saved"){ if(state.saved.has(id)){ state.saved.delete(id); delete state.savedAt[id]; }
+    else { state.saved.add(id); state.savedAt[id]=today(); haptic(8); } }
   if(act==="hide"){ state.hidden.has(id)?state.hidden.delete(id):state.hidden.add(id); }
   if(act==="snooze"){
     if(snoozedNow(id)){ delete state.snooze[id]; }
