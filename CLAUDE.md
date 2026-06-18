@@ -51,6 +51,7 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 4. **Attainability filter** drops senior/lead/manager/competitive titles — only realistic entry-level roles.
 5. **XSS-safe rendering** in the embedded JS: all fields go through `esc()` (encodes `& < > " ' \``) and apply links through `safeUrl()` (http/https only). Embedded JSON has `</` escaped. Keep both if you touch `APP_TEMPLATE`.
 6. **Secrets**: `ADZUNA_APP_ID/KEY` (and future provider keys) live in local `.env` (gitignored) and GitHub Actions secrets. Push a value to a GH secret via stdin (`gh secret set NAME` with piped input), never `--body`/argv. Collect into `.env` via the `/add-secret` masked dialog — never paste keys into chat.
+7. **Verify rendered reality with vision, not text-scraping.** Grepping the generated HTML/source silently misses structure, layout, and visual regressions — a string can be present and still render broken, overlapped, or invisible. Screenshots/vision are the catch. Before claiming a UI change works (and before any deploy), confirm it by rendering and *looking* (the `verify/camera.py` camera, or a screenshot), not by string-matching alone. Text checks supplement vision; they never replace it.
 
 ## Deploy / publish
 
