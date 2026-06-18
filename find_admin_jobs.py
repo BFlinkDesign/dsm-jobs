@@ -2014,6 +2014,9 @@ window.addEventListener("appinstalled", function(){
 });
 
 /* ── Gentle engine: encouragement, celebration, toast ─────────────────── */
+// Deterministic per-day hash — used by todaysPicks() to rotate which jobs lead
+// the Today view (stable for a given day so the list doesn't shuffle on every tap).
+function dayHash(){ const d=today(); let h=0; for(let i=0;i<d.length;i++) h=(h*31+d.charCodeAt(i))>>>0; return h; }
 // Words of affirmation — a LARGE pool in Daddy's voice. pickEnc() draws from a
 // shuffled "bag" so every line shows once before any repeats (then reshuffles),
 // and the footer + greeting + each visit get a fresh one — never the same phrase
@@ -2192,7 +2195,7 @@ function renderPicks(){
   const wrap=document.getElementById("picks"); if(!wrap) return;
   wrap.innerHTML="";
   const picks=todaysPicks();
-  document.getElementById("todayenc").textContent = ENC_LINES[dayHash()%ENC_LINES.length];
+  document.getElementById("todayenc").textContent = pickEnc();
   if(!picks.length){
     wrap.innerHTML='<div class="empty">'+IC.check+"<div>You've worked through today's list — genuinely well done. New jobs arrive every morning.</div></div>";
     return;
