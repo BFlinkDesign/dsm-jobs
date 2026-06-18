@@ -1210,6 +1210,10 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
  padding:0 6px;border-radius:999px;background:var(--green);color:#fff;font-size:12px;font-weight:800}
 .filterpanel{padding-top:4px;animation:pop .16s ease both}
 .uploadbtn{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+/* Premium (AI) features stay hidden until signed in — no dead-end buttons that
+   only say "sign in" when tapped. The .authed class is toggled by showIn/showOut. */
+.app:not(.authed) [data-act="tailor"]{display:none}
+.app:not(.authed) #resumecard{display:none}
 /* Safety */
 .safety{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--red);
  border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
@@ -2710,6 +2714,7 @@ setView("jobs");
       acctOut.hidden = false; acctIn.hidden = true;
       acctBtn.classList.remove("in"); acctIcon.hidden = false; acctInitial.hidden = true;
       acctBtn.setAttribute("aria-label", "Sign in");
+      var app = document.querySelector(".app"); if(app) app.classList.remove("authed");
     }
     function showIn(extra){
       acctOut.hidden = true; acctIn.hidden = false;
@@ -2720,6 +2725,7 @@ setView("jobs");
       acctInitial.hidden = false; acctIcon.hidden = true;
       acctBtn.classList.add("in");
       acctBtn.setAttribute("aria-label", "Your account — signed in as " + email);
+      var app = document.querySelector(".app"); if(app) app.classList.add("authed");
     }
     function openModal(){ modal.hidden = false; setMsg(""); document.getElementById("authrecover").hidden = true;
       document.getElementById("authmain").hidden = false; setTimeout(function(){ emailEl.focus(); }, 60); }
