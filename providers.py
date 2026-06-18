@@ -580,6 +580,21 @@ NEOGOV_AGENCIES = [
     #   (norwalkiowa) + Story-Co (cityofames) are outside the Polk/Dallas metro filter.
     ("dallascountyia", "Dallas County"),    # 2 (Receptionist, Adel — Dallas County)
     ("bondurant", "City of Bondurant"),     # 1 (Building Official Coordinator; Polk 50035)
+    # Added 2026-06-18 — more Polk/Dallas-metro gov employers (CANDIDATES, pending
+    # the nightly scan's live confirmation). Gov office/clerk work is an ideal fit:
+    # daytime, benefits, no degree. These are cheap + high-trust; the metro location
+    # filter drops anything that resolves outside Polk/Dallas, a wrong/dead slug just
+    # fails soft, and source-health.yml flags persistently-empty feeds to prune.
+    # Slugs follow GovernmentJobs.com's bare-name convention.
+    ("westdesmoines", "City of West Des Moines"),   # Polk/Dallas, 50265/66
+    ("ankeny", "City of Ankeny"),                   # Polk, 50023
+    ("clive", "City of Clive"),                     # Polk/Dallas, 50325
+    ("altoona", "City of Altoona"),                 # Polk, 50009
+    ("grimes", "City of Grimes"),                   # Polk/Dallas, 50111 (her city)
+    ("pleasanthill", "City of Pleasant Hill"),      # Polk, 50327
+    ("polkcountyiowa", "Polk County"),              # the metro's biggest gov employer
+    ("dmacc", "Des Moines Area Community College"), # Ankeny/DSM campuses
+    ("dmps", "Des Moines Public Schools"),          # clerical / front-office roles
 ]
 _NEOGOV_NS = "{http://www.neogov.com/namespaces/JobListing}"
 _NEOGOV_INTERVAL = {  # -> multiplier to hourly; only reliably-convertible units
