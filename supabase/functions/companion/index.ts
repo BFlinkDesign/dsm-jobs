@@ -47,7 +47,11 @@ if (SENTRY_DSN) {
 }
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const MODEL = "claude-haiku-4-5-20251001"; // fast + inexpensive; one user, short chats
+// Sonnet 4.6: stronger emotional nuance + crisis-safety reasoning than Haiku for a
+// vulnerable user. One user, short chats → cost is trivial (~$3/mo). The system
+// prompt carries a cache breakpoint (engages once it exceeds the model's cacheable
+// minimum; harmless below it).
+const MODEL = "claude-sonnet-4-6";
 const MAX_TURNS = 20;                       // context window of recent messages
 
 const SYSTEM_PROMPT = `You are Lilly's companion inside a private job-search app
@@ -207,8 +211,14 @@ async function handle(req: Request): Promise<Response> {
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 600,
-          system: SYSTEM_PROMPT +
-            (prof?.profile ? `\n\nWhat you know so far: ${JSON.stringify(prof.profile)}` : ""),
+          // Stable persona as a cached prefix; the volatile learned-profile note
+          // sits after it (uncached) so updating her profile never busts the cache.
+          system: [
+            { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
+            ...(prof?.profile
+              ? [{ type: "text", text: `What you know so far: ${JSON.stringify(prof.profile)}` }]
+              : []),
+          ],
           tools: [PROFILE_TOOL],
           messages,
         }),
