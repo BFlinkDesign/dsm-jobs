@@ -73,6 +73,42 @@ sb.document = {
 };
 sb.window = sb; sb.self = sb; sb.globalThis = sb;
 
+// Minimal Supabase stub so the portal init() actually runs (with PORTAL set):
+// getSession resolves SYNCHRONOUSLY with a signed-in session, so showIn() and the
+// signed-in account/chat wiring execute during this synchronous run and any
+// ReferenceError surfaces here. Query builders are chainable synchronous thenables.
+function syncThenable(value){
+  const api = {
+    then(onF){ if(onF) onF(value); return syncThenable(value); },
+    catch(){ return syncThenable(value); },
+    finally(fn){ if(fn) fn(); return syncThenable(value); },
+  };
+  for(const m of ["select","insert","update","upsert","delete","eq","gte","lte","order","limit","maybeSingle","single","or","in","is"])
+    api[m] = () => syncThenable(value);
+  return api;
+}
+const fakeSession = { data: { session: { user: { id: "u1", email: "her@example.com" } } } };
+const fakeAuth = {
+  signInWithPassword: () => syncThenable({ data: {}, error: null }),
+  signUp: () => syncThenable({ data: { user: null, session: null }, error: null }),
+  signInWithOtp: () => syncThenable({ error: null }),
+  signInWithPasskey: () => syncThenable({ error: null }),
+  registerPasskey: () => syncThenable({ error: null }),
+  signInWithOAuth: () => syncThenable({ error: null }),
+  resetPasswordForEmail: () => syncThenable({ error: null }),
+  updateUser: () => syncThenable({ error: null }),
+  signOut: () => syncThenable({ error: null }),
+  getSession: () => syncThenable(fakeSession),
+  onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
+};
+sb.supabase = {
+  createClient: () => ({
+    auth: fakeAuth,
+    from: () => syncThenable({ data: [], error: null, count: 0 }),
+    functions: { invoke: () => syncThenable({ data: {}, error: null }) },
+  }),
+};
+
 // Execute, then drive every view so view-specific functions actually run.
 const wrapped = appJs +
   "\n;try{if(typeof setView==='function'){setView('today');setView('apps');setView('corner');setView('help');setView('jobs');}}catch(e){throw e;}";

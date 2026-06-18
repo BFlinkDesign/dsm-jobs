@@ -54,3 +54,20 @@ def test_generated_js_runs_without_runtime_errors(tmp_path):
     )
     assert res.returncode == 0, f"JS smoke failed:\n{res.stdout}\n{res.stderr}"
     assert "SMOKE OK" in res.stdout, res.stdout
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_generated_js_runs_signed_in(tmp_path):
+    """Portal-configured build: the harness stubs Supabase with a signed-in
+    session, so the account popover / showIn / chat-mount code actually runs."""
+    out = tmp_path / "index.html"
+    faj.write_html(
+        [_mk_row()], 1, 2, str(out), "2026-06-18 06:00", contact="Brady",
+        portal_cfg={"url": "https://abc123.supabase.co", "key": "sb_publishable_x"},
+    )
+    res = subprocess.run(
+        ["node", _HARNESS, str(out)],
+        capture_output=True, text=True, timeout=60,
+    )
+    assert res.returncode == 0, f"signed-in JS smoke failed:\n{res.stdout}\n{res.stderr}"
+    assert "SMOKE OK" in res.stdout, res.stdout
