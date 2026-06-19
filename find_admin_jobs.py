@@ -1621,6 +1621,12 @@ header.bar{position:sticky;top:0;z-index:20;
 .tailorsec .syncbtn{margin-top:8px}
 .reslist{margin:6px 0 0;padding-left:18px;color:var(--ink2);font-size:14px;line-height:1.5}
 .reslist li{margin:3px 0}
+.tailorpaste{width:100%;min-height:120px;resize:vertical;font-size:14px;line-height:1.5}
+.tailorhint{font-size:12.5px;color:var(--ink2);margin:8px 0 2px;line-height:1.45}
+/* The copy/download row under the result — wraps on a narrow phone. */
+.tailorgrab{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 2px}
+.tailorgrab .syncbtn{flex:1 1 calc(50% - 4px);min-width:130px}
+.tailorgrab .syncbtn.alt{background:var(--card);color:var(--ink);border:1.5px solid var(--line)}
 .chatnote{font-size:12px;color:var(--ink2);margin-top:8px;line-height:1.45}
 /* FAQ */
 .faq{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px 16px;margin:10px 0}
@@ -1812,7 +1818,8 @@ header.bar{position:sticky;top:0;z-index:20;
       <h3>My r&eacute;sum&eacute; <span class="sparkle">&#10022;</span></h3>
       <p>Upload your r&eacute;sum&eacute; (or paste it). Then on any job you can tap
       <b>&#10022; Tailor</b> and I&rsquo;ll re-organize <i>your own</i> experience to fit
-      that posting &mdash; never adding anything you didn&rsquo;t write. Saved on this phone.</p>
+      that posting &mdash; never adding anything you didn&rsquo;t write. You can paste the
+      full job description there too, for a sharper match. Saved on this phone.</p>
       <input type="file" id="resumefile" accept=".docx,.pdf,.md,.markdown,.txt,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
       <button class="authsecondary uploadbtn" data-act="uploadresume">
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
@@ -2342,27 +2349,70 @@ function markApplied(id, el){
 function openTailorModal(){ var m=document.getElementById("tailormodal"); if(m) m.hidden=false; }
 function closeTailorModal(){ stopSpook(); var m=document.getElementById("tailormodal"); if(m) m.hidden=true; }
 function setTailorBody(html){ var b=document.getElementById("tailorbody"); if(b) b.innerHTML=html; }
+/* Build the plain text for one part, or both joined with a clear separator so
+   she can paste them into one document without losing her place. */
+function tailorText(which){
+  var d=window.__tailorData; if(!d) return "";
+  var r=(d.resume||""), c=(d.cover_note||"");
+  if(which==="cover") return c;
+  if(which==="both"){
+    return c ? (r+"\n\n\n=== COVER NOTE ===\n\n"+c) : r;
+  }
+  return r;
+}
+/* One clipboard write covers it — "both" puts résumé + a separator + cover note
+   in a single copy, so she never has to copy twice or lose her spot. */
 function copyTailor(which){
-  var d=window.__tailorData; if(!d) return;
-  var text = which==="cover" ? (d.cover_note||"") : (d.resume||"");
+  var text=tailorText(which);
+  if(!text){ showToast("Nothing to copy yet."); return; }
+  var label = which==="both" ? "Copied both ✦" : "Copied ✦";
   if(navigator.clipboard && navigator.clipboard.writeText){
-    navigator.clipboard.writeText(text).then(function(){ showToast("Copied ✦"); })
+    navigator.clipboard.writeText(text).then(function(){ showToast(label); })
       .catch(function(){ showToast("Couldn't copy — select the text and copy it."); });
   } else { showToast("Select the text and copy it."); }
+}
+/* Offline-safe download fallback — saves a .txt she can keep or attach. */
+function downloadTailor(which){
+  var text=tailorText(which);
+  if(!text){ showToast("Nothing to save yet."); return; }
+  var name = which==="cover" ? "cover-note.txt" : which==="both" ? "resume-and-cover-note.txt" : "tailored-resume.txt";
+  try{
+    var blob=new Blob([text],{type:"text/plain"});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement("a");
+    a.href=url; a.download=name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    showToast("Saved "+name+" ✦");
+  }catch(e){ showToast("Couldn't save — copy the text instead."); }
 }
 function renderTailorResult(j, d){
   window.__tailorData = d;
   var changes = (d.changes||[]).map(function(c){ return '<li>'+esc(c)+'</li>'; }).join("");
+  var both = d.cover_note ? 'both' : 'resume';
   setTailorBody(
     '<p class="sub">For <b>'+esc(j.title)+'</b> at '+esc(j.company)+
       ' — built only from what you wrote. Read it over; it&rsquo;s yours to edit.</p>'+
     (changes?'<div class="tailorsec"><h3>What I emphasized</h3><ul class="reslist">'+changes+'</ul></div>':'')+
+    /* Copy/download the whole thing at once — no second clipboard trip needed. */
+    '<div class="tailorgrab">'+
+      '<button class="syncbtn" data-act="copytailor" data-copy="'+both+'">'+
+        (d.cover_note?'Copy both':'Copy résumé')+'</button>'+
+      '<button class="syncbtn alt" data-act="dltailor" data-copy="'+both+'">'+
+        (d.cover_note?'Download both':'Download .txt')+'</button>'+
+    '</div>'+
     '<div class="tailorsec"><h3>Your tailored résumé</h3>'+
       '<textarea class="authfield tailorta" readonly aria-label="Tailored résumé">'+esc(d.resume)+'</textarea>'+
-      '<button class="syncbtn" data-act="copytailor" data-copy="resume">Copy résumé</button></div>'+
+      '<div class="tailorgrab">'+
+        '<button class="syncbtn" data-act="copytailor" data-copy="resume">Copy résumé</button>'+
+        '<button class="syncbtn alt" data-act="dltailor" data-copy="resume">Download</button>'+
+      '</div></div>'+
     (d.cover_note?'<div class="tailorsec"><h3>A short note to send with it</h3>'+
       '<textarea class="authfield tailorta" readonly aria-label="Cover note">'+esc(d.cover_note)+'</textarea>'+
-      '<button class="syncbtn" data-act="copytailor" data-copy="cover">Copy note</button></div>':'')+
+      '<div class="tailorgrab">'+
+        '<button class="syncbtn" data-act="copytailor" data-copy="cover">Copy note</button>'+
+        '<button class="syncbtn alt" data-act="dltailor" data-copy="cover">Download</button>'+
+      '</div></div>':'')+
     '<p class="authnote">Always read it before you send — every line should be true to your real experience.</p>'
   );
 }
@@ -2396,6 +2446,9 @@ function stopSpook(){
   var fill=document.getElementById("spookfill"); if(fill) fill.style.width="100%";  // snap to done
 }
 
+/* Step 1: open the modal on an intro panel that lets her (optionally) paste the
+   FULL job description. We only have a snippet from the listing; the full posting
+   makes the tailoring much sharper. It's optional — she can tap straight through. */
 function tailorJob(id){
   var j=jobById.get(id); if(!j) return;
   var resume=(state.resume||"").trim();
@@ -2410,13 +2463,35 @@ function tailorJob(id){
       function(){ setView("corner"); });
     return;
   }
+  window.__tailorJobId = id;
   openTailorModal();
+  setTailorBody(
+    '<p class="sub">For <b>'+esc(j.title)+'</b> at '+esc(j.company)+'.</p>'+
+    '<div class="tailorsec">'+
+      '<h3>Paste the full job description</h3>'+
+      '<p class="tailorhint">Optional, but it makes the match much better. Open the posting, '+
+        'copy the whole description, and paste it here. Leave it blank and I&rsquo;ll use what we already have.</p>'+
+      '<textarea class="authfield tailorpaste" id="tailorjd" aria-label="Full job description (optional)" '+
+        'placeholder="Paste the job description here (optional)&hellip;"></textarea>'+
+    '</div>'+
+    '<button class="authprimary" data-act="runtailor">Tailor my résumé <span class="sparkle">&#10022;</span></button>'+
+    '<p class="authnote">Built only from what you wrote — never adds anything you didn&rsquo;t.</p>'
+  );
+  var ta=document.getElementById("tailorjd"); if(ta) ta.focus();
+}
+/* Step 2: fire the engine. Prefer the pasted full description; fall back to the
+   listing snippet. stopSpook in .finally so the loader timer can never leak. */
+function runTailor(){
+  var id=window.__tailorJobId;
+  var j=jobById.get(id); if(!j) return;
+  var resume=(state.resume||"").trim();
+  var ta=document.getElementById("tailorjd");
+  var pasted=ta ? (ta.value||"").trim() : "";
+  var snippet=((j.about||"")+" "+(j.title||"")).trim();
+  var jobText = pasted.length>=40 ? pasted : snippet;  // her full paste wins
   startSpook(j.title);
-  // Promise.resolve wrapper so a synchronous throw from __tailorInvoke still
-  // lands in .catch; stopSpook in .finally so the timer can never leak.
   Promise.resolve().then(function(){
-    return window.__tailorInvoke({ resume:resume, jobTitle:j.title, company:j.company,
-      jobText:((j.about||"")+" "+(j.title||"")).trim() });
+    return window.__tailorInvoke({ resume:resume, jobTitle:j.title, company:j.company, jobText:jobText });
   })
     .then(function(r){
       var d=r&&r.data;
@@ -2571,7 +2646,9 @@ document.querySelector(".app").addEventListener("click",(e)=>{
   if(act==="tailor"){ tailorJob(id); return; }
   if(act==="uploadresume"){ var fin=document.getElementById("resumefile"); if(fin) fin.click(); return; }
   if(act==="closetailor"){ closeTailorModal(); return; }
+  if(act==="runtailor"){ runTailor(); return; }
   if(act==="copytailor"){ copyTailor(t.getAttribute("data-copy")); return; }
+  if(act==="dltailor"){ downloadTailor(t.getAttribute("data-copy")); return; }
   if(act==="saveresume"){
     var rbox=document.getElementById("resumebox");
     if(rbox){

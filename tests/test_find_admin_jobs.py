@@ -577,6 +577,30 @@ def test_template_has_no_legacy_theme_leftovers():
         assert warm not in t, f"legacy warm color {warm} still in template"
 
 
+def test_resume_tailor_paste_description_field_present():
+    """The tailor flow lets her paste the FULL job description (optional) so the
+    engine gets more than the Adzuna snippet, and fires the engine separately."""
+    t = fa.APP_TEMPLATE
+    assert 'id="tailorjd"' in t                      # the paste-description textarea
+    assert 'data-act="runtailor"' in t               # the separate "go" button
+    assert "function runTailor(" in t                # reads the paste, prefers it
+    # the pasted text must actually be preferred over the snippet when long enough
+    assert "pasted.length>=40 ? pasted : snippet" in t
+
+
+def test_resume_tailor_copy_both_and_download_present():
+    """She can get BOTH the résumé and cover note in one clipboard write, plus a
+    .txt download — without losing her place (per-section copy stays too)."""
+    t = fa.APP_TEMPLATE
+    # "both" joins résumé + a separator + cover note into ONE clipboard write
+    assert 'which==="both"' in t and "=== COVER NOTE ===" in t
+    assert "var both = d.cover_note ? 'both' : 'resume';" in t  # the combined copy/download button
+    assert 'data-act="dltailor"' in t                # download affordance
+    assert "function downloadTailor(" in t
+    # the existing per-section copy buttons are preserved
+    assert 'data-copy="resume"' in t and 'data-copy="cover"' in t
+
+
 def test_account_teaser_gating_present():
     """No freebies without an account: signed-out users browse jobs but the
     card actions are CSS-hidden behind .app:not(.authed), a per-card lock CTA
