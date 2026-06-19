@@ -1214,12 +1214,18 @@ APP_TEMPLATE = r"""<!doctype html>
 ##PORTAL_SCRIPT##
 <style>
 :root{
- /* Goth violet system. Variable names kept from the light theme so every
-    component re-skins in one place: --green IS the primary (violet) now. */
- --paper:#0e0a16; --card:#171022; --surface:#1e1530; --ink:#f1eaff; --ink2:#b8a8da; --line:#2e2347;
- --green:#9333ea; --green-d:#c9a8ff; --green-soft:rgba(147,51,234,.16);
- --gold:#e9d5ff; --red:#ff7b72; --shadow:0 10px 28px rgba(0,0,0,.35);
- --glow:0 0 16px rgba(168,85,247,.45);
+ /* Premium goth-violet system. Deep ink-black with a violet undertone, a single
+    refined accent, and a LAYERED elevation scale — no neon, no glassmorphism.
+    Variable names kept from the old theme so every component re-skins here. */
+ --paper:#0b0712; --card:#15101f; --surface:#1d1630; --ink:#f3eeff; --ink2:#a99bc9; --line:#291f40;
+ --green:#a855f7; --green-d:#d2b8ff; --green-soft:color-mix(in oklab,#a855f7 18%,transparent);
+ --gold:#e9d5ff; --red:#ff8a80;
+ --accent:linear-gradient(135deg,#a855f7 0%,#7c3aed 58%,#6d28d9 100%);
+ /* Soft, layered, premium — replaces the old neon 0 0 16px glow everywhere. */
+ --shadow:0 1px 2px rgba(0,0,0,.40),0 14px 32px -10px rgba(0,0,0,.55);
+ --shadow-lg:0 2px 6px rgba(0,0,0,.42),0 28px 64px -14px rgba(0,0,0,.62);
+ --glow:0 12px 30px -10px color-mix(in oklab,#a855f7 60%,transparent);
+ --ring:0 0 0 3px color-mix(in oklab,#a855f7 26%,transparent);
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}   /* beat component display rules (flex etc.) */
@@ -1242,19 +1248,17 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 @keyframes twinkle{from{opacity:.55}to{opacity:1}}
 .app{max-width:640px;margin:0 auto;padding:0 16px 120px}
 svg{display:inline-block;vertical-align:-2px}
-/* App bar */
-header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
- backdrop-filter:saturate(1.2) blur(12px);margin:0 -16px;padding:16px;
+/* App bar — solid (no glassmorphism), hairline rule + faint violet wash. */
+header.bar{position:sticky;top:0;z-index:20;
+ background:linear-gradient(180deg,#120c1d,var(--paper));margin:0 -16px;padding:16px;
  border-bottom:1px solid var(--line)}
 .brandrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);font-weight:700}
-.word{font-family:inherit;font-weight:700;font-size:26px;line-height:1.05;letter-spacing:-.01em;
- background:linear-gradient(100deg,#f1eaff 20%,#c084fc 50%,#e9d5ff 80%);
- -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
- position:relative;display:inline-block;padding-right:20px}
-.word::after{content:"\2726";position:absolute;right:0;top:-4px;font-size:14px;
- -webkit-text-fill-color:#c084fc;animation:spark 2.6s ease-in-out infinite}
-@keyframes spark{0%,100%{opacity:.35;transform:scale(.8) rotate(0deg)}50%{opacity:1;transform:scale(1.15) rotate(18deg)}}
+.eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+/* Solid premium wordmark — no gradient-text, no spinning glyph. The accent
+   lives on one word (.word b) for a clean, intentional two-tone. */
+.word{font-family:inherit;font-weight:800;font-size:27px;line-height:1.04;letter-spacing:-.015em;
+ color:var(--ink);display:inline-block}
+.word b{font-weight:800;color:var(--green-d)}
 .safebadge{display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);color:var(--green-d);
  font-size:12px;font-weight:700;padding:6px 10px;border-radius:999px;white-space:nowrap;
  border:1px solid rgba(192,132,252,.35)}
@@ -1353,8 +1357,14 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 /* Lists */
 .progress{display:flex;align-items:center;gap:7px;color:var(--green-d);font-weight:700;font-size:14px;margin:8px 2px 0}
 .count{color:var(--ink2);font-size:13px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin:14px 2px 4px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 14px;margin:12px 0;
+.card{position:relative;background:
+  linear-gradient(180deg,color-mix(in oklab,var(--card) 88%,var(--green-soft)),var(--card));
+ border:1px solid var(--line);border-radius:18px;padding:17px 16px 15px;margin:13px 0;
  box-shadow:var(--shadow);animation:rise .3s cubic-bezier(.2,.7,.3,1) both}
+/* Hairline gradient edge-light along the top for a premium, lit feel. */
+.card::before{content:"";position:absolute;inset:0 0 auto;height:1px;border-radius:18px 18px 0 0;
+ background:linear-gradient(90deg,transparent,color-mix(in oklab,var(--green) 55%,transparent),transparent);
+ pointer-events:none}
 .cardtop{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .pill{display:inline-flex;align-items:center;font-size:13px;font-weight:700;padding:5px 11px;border-radius:8px}
 .pill.good{background:var(--green);color:#fff}
@@ -1365,8 +1375,9 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--ink2);font-size:14px;margin-top:9px}
 .meta span{display:inline-flex;align-items:center;gap:6px}
 .apply{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;
- background:linear-gradient(135deg,#9333ea,#7e22ce);color:#fff;box-shadow:var(--glow);
- text-decoration:none;font-weight:700;padding:15px;border-radius:11px;font-size:17px;min-height:54px;transition:.12s}
+ background:var(--accent);color:#fff;box-shadow:var(--glow),inset 0 1px 0 rgba(255,255,255,.22);
+ text-decoration:none;font-weight:800;padding:15px;border-radius:13px;font-size:17px;min-height:54px;
+ letter-spacing:.01em;transition:transform .12s ease,box-shadow .12s ease}
 .apply:active{transform:scale(.985);background:#6b21a8}
 .actions{display:flex;gap:8px;margin-top:9px}
 .act{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--card);
@@ -1458,18 +1469,18 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .authnote{margin-top:14px;font-size:12px;color:var(--ink2);line-height:1.5;text-align:center}
 /* Bottom tab bar */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:space-around;
- background:rgba(14,10,22,.92);backdrop-filter:blur(14px);border-top:1px solid var(--line);
+ background:#0d0917;border-top:1px solid var(--line);box-shadow:0 -8px 24px -12px rgba(0,0,0,.7);
  padding:6px 4px calc(8px + env(safe-area-inset-bottom))}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;
  color:var(--ink2);font:inherit;font-size:11px;font-weight:700;padding:7px 2px;min-height:52px;cursor:pointer;
  border-radius:10px;transition:.15s}
-.tab[aria-current="true"]{color:#c084fc;text-shadow:0 0 14px rgba(192,132,252,.6)}
+.tab[aria-current="true"]{color:var(--green-d)}
 .tab:active{transform:scale(.94)}
 /* Section intros, encouragement, cards */
 .picksintro h2{margin:18px 0 4px;font-size:22px;font-weight:700}
 .picksintro p{margin:0 0 6px;color:var(--ink2);font-size:15px;line-height:1.5}
 .weekline{font-weight:700;color:var(--green-d)}
-.sparkle{color:#c084fc;animation:spark 2.6s ease-in-out infinite;display:inline-block}
+.sparkle{color:var(--green-d);display:inline-block;opacity:.7;font-size:.82em;vertical-align:.06em}
 .enc{margin:18px 2px 0;color:var(--green-d);font-size:15px;font-weight:700;text-align:center}
 .logbtns{display:flex;gap:8px;margin:6px 0 8px}
 .logbtns .act{flex:1}
@@ -1580,7 +1591,7 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
     <div class="brandrow">
       <div>
         <div class="eyebrow">Grimes &middot; Des Moines metro</div>
-        <div class="word">Job Board</div>
+        <div class="word">Job <b>Board</b></div>
       </div>
       <button class="acctbtn" id="acctbtn" aria-label="Your account" aria-expanded="false" aria-haspopup="true">
         <svg class="accticon" id="accticon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 19.2a6.5 6.5 0 0 1 13 0"/></svg>

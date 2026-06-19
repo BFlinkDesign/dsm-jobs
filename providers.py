@@ -122,6 +122,7 @@ def _request_json(url: str, *, headers: "dict[str, str] | None" = None, body: ob
             if attempt == attempts:
                 raise RuntimeError(f"provider network error: {err.reason}") from err
         time.sleep(5 * attempt)
+    raise RuntimeError("provider request failed after retries")  # unreachable; satisfies type-checker
 
 
 def _request_text(url: str, *, attempts: int = 3,
