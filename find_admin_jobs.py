@@ -1502,14 +1502,92 @@ header.bar{position:sticky;top:0;z-index:20;
  font:inherit;font-size:14px;font-weight:700;padding:10px 14px;min-height:44px;cursor:pointer;transition:.12s}
 .qopt[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#fff;box-shadow:var(--glow)}
 .qdone{color:var(--green-d);font-weight:700;font-size:14px;margin-top:8px}
-/* Companion chat (signed-in only) */
-.chatlog{display:flex;flex-direction:column;gap:8px;margin:10px 0;max-height:50vh;overflow-y:auto}
-.bub{max-width:85%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.5;white-space:pre-wrap}
-.bub.me{align-self:flex-end;background:var(--green);color:#fff;border-bottom-right-radius:6px}
-.bub.ai{align-self:flex-start;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-bottom-left-radius:6px}
-.chatrow{display:flex;gap:8px;margin-top:8px}
-.chatrow .search{flex:1;min-height:48px}
-.chatrow .syncbtn{min-width:74px}
+/* ── Ruby the emotional-support cow (signed-in only) ───────────────────────
+   A designed mascot, not a sticker. Black-and-white cow face with purple
+   accents so she sits inside the goth palette. NO glassmorphism. */
+.rubyface{display:block;width:54px;height:54px;flex:0 0 auto;
+ filter:drop-shadow(0 6px 14px rgba(168,85,247,.30))}
+.rubyface--sm{width:48px;height:48px}
+.rubyface--bar{width:40px;height:40px}
+.rb-head{fill:#0e0a16;stroke:#cdbdf0;stroke-width:1.4}
+.rb-muz{fill:#241a38;stroke:#cdbdf0;stroke-width:1.2}
+.rb-spot{fill:#1c1430;stroke:#a855f7;stroke-width:1.1;opacity:.92}
+.rb-horn{fill:#3a2c5e;stroke:#cdbdf0;stroke-width:1}
+.rb-eye{fill:#e9defb}
+.rb-nos{fill:#7c3aed;opacity:.9}
+.rubyintro{display:flex;align-items:center;gap:14px;margin-bottom:2px}
+.rubyintro h3{margin:0;font-size:19px;display:flex;align-items:center;gap:7px}
+.rubycow{font-size:16px;filter:saturate(.85)}
+.rubytag{margin:2px 0 0;color:var(--green-d);font-size:13px;font-weight:700;letter-spacing:.01em}
+.rubyopen{display:inline-flex;align-items:center;justify-content:center;gap:9px;width:100%;margin-top:12px;
+ background:var(--green);color:#fff;border:0;border-radius:13px;font:inherit;font-weight:700;font-size:16px;
+ padding:14px;min-height:52px;cursor:pointer;box-shadow:var(--glow)}
+.rubyopen:active{transform:scale(.985);background:var(--green-d)}
+
+/* Full-screen overlay — solid surfaces, a soft purple halo behind Ruby. */
+.rubyov{position:fixed;inset:0;z-index:70;background:var(--paper);
+ display:flex;align-items:stretch;justify-content:center;
+ animation:rubyrise .26s cubic-bezier(.2,.7,.2,1) both}
+@keyframes rubyrise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.rubyshell{position:relative;display:flex;flex-direction:column;width:100%;max-width:620px;
+ padding:0 14px env(safe-area-inset-bottom);
+ background:radial-gradient(120% 60% at 50% -8%, rgba(168,85,247,.16), transparent 62%)}
+.rubybar{display:flex;align-items:center;gap:11px;padding:14px 2px 12px;
+ padding-top:calc(14px + env(safe-area-inset-top));border-bottom:1px solid var(--line)}
+.rubybarname{display:flex;flex-direction:column;line-height:1.18;margin-right:auto}
+.rubybarname b{font-size:17px;font-weight:800}
+.rubybarname span{font-size:12.5px;color:var(--ink2)}
+.rubyspk,.rubyclose{flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+ width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card);
+ color:var(--ink2);cursor:pointer;transition:.14s}
+.rubyspk:active,.rubyclose:active{transform:scale(.94)}
+.rubyclose{font-size:28px;line-height:1;color:var(--ink2)}
+.rubyspk .ic-off{display:none}
+.rubyspk[aria-pressed="false"]{color:var(--ink2)}
+.rubyspk[aria-pressed="false"] .ic-on{display:none}
+.rubyspk[aria-pressed="false"] .ic-off{display:block}
+.rubyspk[aria-pressed="true"]{color:var(--green-d);border-color:var(--green-soft)}
+.rubylog{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px;
+ padding:16px 2px;scroll-behavior:smooth}
+.bub{max-width:86%;padding:11px 15px;border-radius:18px;font-size:15.5px;line-height:1.5;white-space:pre-wrap;
+ animation:bubin .2s ease both}
+@keyframes bubin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.bub.me{align-self:flex-end;background:var(--green);color:#fff;border-bottom-right-radius:7px}
+.bub.ai{align-self:flex-start;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-bottom-left-radius:7px}
+.bub.think{color:var(--ink2)}
+.bub.think i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green-d);margin:0 2px;
+ animation:rubythink 1.1s infinite ease-in-out}
+.bub.think i:nth-child(2){animation-delay:.18s}
+.bub.think i:nth-child(3){animation-delay:.36s}
+@keyframes rubythink{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+.rubylisten{display:flex;align-items:center;gap:10px;justify-content:center;padding:8px 0 2px;
+ color:var(--green-d);font-size:14px;font-weight:700}
+.rubywave{display:inline-flex;align-items:center;gap:3px;height:20px}
+.rubywave i{width:3px;height:100%;border-radius:2px;background:var(--green-d);
+ animation:rubywave 1s infinite ease-in-out}
+.rubywave i:nth-child(1){animation-delay:0s}
+.rubywave i:nth-child(2){animation-delay:.12s}
+.rubywave i:nth-child(3){animation-delay:.24s}
+.rubywave i:nth-child(4){animation-delay:.36s}
+.rubywave i:nth-child(5){animation-delay:.48s}
+@keyframes rubywave{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+.rubydock{display:flex;align-items:center;gap:9px;padding:8px 0 14px}
+.rubymic,.rubysend{flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+ width:52px;height:52px;border-radius:14px;border:0;cursor:pointer;transition:.14s}
+.rubymic{background:var(--card);border:1.5px solid var(--line);color:var(--ink)}
+.rubymic:active{transform:scale(.95)}
+.rubymic.on{background:var(--green);border-color:var(--green);color:#fff;box-shadow:var(--glow);
+ animation:rubypulse 1.4s infinite}
+@keyframes rubypulse{0%,100%{box-shadow:0 0 0 0 var(--green-soft)}50%{box-shadow:0 0 0 12px transparent}}
+.rubyinput{flex:1;min-width:0;font:inherit;font-size:16px;padding:14px 15px;
+ border:1.5px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);min-height:52px}
+.rubyinput:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+.rubysend{background:var(--green);color:#fff;box-shadow:var(--glow)}
+.rubysend:active{transform:scale(.95);background:var(--green-d)}
+.rubyfine{margin:0 0 12px;font-size:12px;color:var(--ink2);line-height:1.5;text-align:center}
+@media (prefers-reduced-motion:reduce){
+ .rubyov,.bub,.rubymic.on,.rubywave i,.bub.think i{animation:none}
+}
 #tailormodal .authcard{max-height:88vh;overflow-y:auto;text-align:left}
 /* Spooky résumé-summoning loader — drifting bats + a glowing moon over a
    calibrated progress bar. Goth on purpose: she loves black + purple. */
@@ -1766,12 +1844,81 @@ header.bar{position:sticky;top:0;z-index:20;
     </div>
 
     <div class="chatcard" id="chatcard">
-      <h3>Your companion</h3>
-      <p id="chatstate">A friendly check-in chat that gets to know you and helps with
-      the search &mdash; it turns on once sign-in is set up. Your quiz answers above
-      already make the app smarter today.</p>
+      <div class="rubyintro">
+        <span class="rubyface rubyface--sm" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="100%" height="100%">
+            <path class="rb-horn" d="M14 22c-5-3-8-9-7-13 4 1 8 5 9 11z"/>
+            <path class="rb-horn" d="M50 22c5-3 8-9 7-13-4 1-8 5-9 11z"/>
+            <ellipse class="rb-head" cx="32" cy="34" rx="22" ry="21"/>
+            <path class="rb-spot" d="M16 24c-3 4-3 10 1 12 4-2 5-9 2-13-1-1-2-1-3 1z"/>
+            <path class="rb-spot" d="M47 21c4 1 7 6 5 10-4 0-8-4-7-9 0-1 1-1 2-1z"/>
+            <ellipse class="rb-muz" cx="32" cy="44" rx="13" ry="10"/>
+            <circle class="rb-nos" cx="26" cy="44" r="2.3"/>
+            <circle class="rb-nos" cx="38" cy="44" r="2.3"/>
+            <circle class="rb-eye" cx="24" cy="30" r="2.6"/>
+            <circle class="rb-eye" cx="40" cy="30" r="2.6"/>
+          </svg>
+        </span>
+        <div>
+          <h3>Ruby <span class="rubycow" aria-hidden="true">&#x1F404;</span></h3>
+          <p class="rubytag">Your emotional support cow</p>
+        </div>
+      </div>
+      <p id="chatstate">Ruby is a calm, kind check-in &mdash; she remembers you and helps
+      with the search. You can type to her or just talk out loud. She turns on once
+      sign-in is set up; your quiz answers above already make the app smarter today.</p>
+      <button class="rubyopen" id="rubyopen" type="button" hidden>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-9 8.4L3 21l1.1-9A8.4 8.4 0 1121 11.5z"/></svg>
+        Talk to Ruby
+      </button>
     </div>
   </section>
+
+  <!-- RUBY full-screen companion overlay (signed-in only; mounted/opened from JS).
+       Premium goth, NOT glassmorphism — solid surfaces. Voice via Web Speech API. -->
+  <div class="rubyov" id="rubyov" hidden role="dialog" aria-modal="true" aria-label="Ruby, your emotional support cow">
+    <div class="rubyshell">
+      <header class="rubybar">
+        <span class="rubyface rubyface--bar" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="100%" height="100%">
+            <path class="rb-horn" d="M14 22c-5-3-8-9-7-13 4 1 8 5 9 11z"/>
+            <path class="rb-horn" d="M50 22c5-3 8-9 7-13-4 1-8 5-9 11z"/>
+            <ellipse class="rb-head" cx="32" cy="34" rx="22" ry="21"/>
+            <path class="rb-spot" d="M16 24c-3 4-3 10 1 12 4-2 5-9 2-13-1-1-2-1-3 1z"/>
+            <path class="rb-spot" d="M47 21c4 1 7 6 5 10-4 0-8-4-7-9 0-1 1-1 2-1z"/>
+            <ellipse class="rb-muz" cx="32" cy="44" rx="13" ry="10"/>
+            <circle class="rb-nos" cx="26" cy="44" r="2.3"/>
+            <circle class="rb-nos" cx="38" cy="44" r="2.3"/>
+            <circle class="rb-eye" cx="24" cy="30" r="2.6"/>
+            <circle class="rb-eye" cx="40" cy="30" r="2.6"/>
+          </svg>
+        </span>
+        <div class="rubybarname"><b>Ruby</b><span>Emotional support cow &#x1F404;</span></div>
+        <button class="rubyspk" id="rubyspk" type="button" hidden aria-pressed="true" aria-label="Read Ruby's replies aloud">
+          <svg class="ic-on" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13"/></svg>
+          <svg class="ic-off" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>
+        </button>
+        <button class="rubyclose" id="rubyclose" type="button" aria-label="Close Ruby">&times;</button>
+      </header>
+      <div class="rubylog" id="rubylog" aria-live="polite"></div>
+      <div class="rubylisten" id="rubylisten" hidden aria-hidden="true">
+        <span class="rubywave"><i></i><i></i><i></i><i></i><i></i></span>
+        Listening&hellip;
+      </div>
+      <div class="rubydock">
+        <button class="rubymic" id="rubymic" type="button" hidden aria-label="Talk to Ruby with your voice">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v4"/></svg>
+        </button>
+        <input class="rubyinput" id="rubyinput" type="text" maxlength="4000" autocomplete="off"
+          placeholder="Tell Ruby how you're doing&hellip;" aria-label="Message Ruby">
+        <button class="rubysend" id="rubysend" type="button" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+      <p class="rubyfine" id="rubyfine">Ruby's a kind helper, not a therapist &mdash; if things feel heavy, tap the
+      crisis card above for real people, 24/7. Your chats are saved privately to your account so she remembers you.</p>
+    </div>
+  </div>
 
   <!-- ACCOUNT-BENEFITS screen: shown when a signed-out user taps a locked tab
        (Today / My apps / My corner). "No freebies without an account." -->
@@ -1782,7 +1929,7 @@ header.bar{position:sticky;top:0;z-index:20;
       <ul class="lockperks">
         <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Save &amp; track every application</b> <span>— one tap, and your jobs, “applied” dates and notes follow you to any phone.</span></div></li>
         <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>AI résumé tailoring</b> <span>— rewrites your real experience to fit each job, in your words, never made up.</span></div></li>
-        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Your companion</b> <span>— a kind check-in chat that remembers you and helps with the search.</span></div></li>
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Ruby, your support cow 🐄</b> <span>— a kind check-in you can type or talk to; she remembers you and helps with the search.</span></div></li>
         <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Printable work-search log</b> <span>— your weekly Iowa unemployment list, filled in automatically.</span></div></li>
       </ul>
       <div class="lockbtns">
@@ -2880,7 +3027,7 @@ function tuneLockView(name){
   var msg={
     today:"“Today’s 3 picks” is a free-account feature — a tiny, doable shortlist each morning so the search never feels like too much.",
     apps: "Tracking what you’ve applied to (and your printable Iowa work-search log) saves to your free account so a new phone never loses it.",
-    corner:"Your corner — résumé tailoring, your companion, and your saved details — lives in your free account so it follows you everywhere."
+    corner:"Your corner — résumé tailoring, Ruby (your support cow 🐄), and your saved details — lives in your free account so it follows you everywhere."
   }[name];
   sub.textContent = msg || "Browsing is free. Make a free account to actually use the app — it takes 10 seconds and saves everything to you.";
 }
@@ -3269,48 +3416,159 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
     });
     window.addEventListener("online", function(){ if(user) syncAll(); });
 
-    /* Companion chat: appears only signed-in. Calls the 'companion' Edge
-       Function (Anthropic key lives server-side; this page never sees it). */
-    function mountChat(){
+    /* Ruby the emotional-support cow: a full-screen companion, signed-in only.
+       Replies come from the 'companion' Edge Function (the Anthropic key lives
+       server-side; this page never sees it). Voice is 100% browser-native and
+       free: Web Speech mic input + SpeechSynthesis read-aloud, both feature-
+       detected so nothing dead ever shows on an unsupported browser. */
+    function mountRuby(){
       const card=document.getElementById("chatcard"); if(!card) return;
       if(!user){ return; }
       if(card.dataset.live){ return; }
       card.dataset.live="1";
-      document.getElementById("chatstate").hidden=true;
-      const log=document.createElement("div"); log.className="chatlog"; log.id="chatlog";
-      const row=document.createElement("div"); row.className="chatrow";
-      row.innerHTML='<input class="search" id="chatinput" type="text" maxlength="4000" '+
-        'placeholder="Say hi — it remembers you" aria-label="Message your companion">'+
-        '<button class="syncbtn" id="chatsend">Send</button>';
-      const note=document.createElement("div"); note.className="chatnote";
-      note.textContent="A friendly helper, not a therapist — if things feel heavy, the card above has real humans 24/7. Chats are saved privately to your account so it remembers you; they're never sold or shared (only the person who set this up could ever see them).";
-      card.appendChild(log); card.appendChild(row); card.appendChild(note);
-      sb.from("chat_messages").select("role,body").order("created_at",{ascending:false}).limit(12)
-        .then(function(r){ ((r.data||[]).reverse()).forEach(function(m){ addBub(m.role==="user"?"me":"ai", m.body); }); });
+      const openBtn=document.getElementById("rubyopen");
+      const ov=document.getElementById("rubyov");
+      const log=document.getElementById("rubylog");
+      if(!openBtn||!ov||!log) return;
+      openBtn.hidden=false;
+
+      const inp=document.getElementById("rubyinput");
+      const sendBtn=document.getElementById("rubysend");
+      const closeBtn=document.getElementById("rubyclose");
+      const micBtn=document.getElementById("rubymic");
+      const spkBtn=document.getElementById("rubyspk");
+      const listen=document.getElementById("rubylisten");
+
+      /* ── Read-aloud (SpeechSynthesis) — opt-in toggle, calm voice if any. ── */
+      const speechOK = ("speechSynthesis" in window) &&
+        (typeof window.SpeechSynthesisUtterance !== "undefined");
+      let speakOn = speechOK && localStorage.getItem("rubySpeak")!=="0";
+      let voice=null;
+      function pickVoice(){
+        try{
+          const vs=window.speechSynthesis.getVoices()||[];
+          const pref=["Samantha","Google US English","Microsoft Aria","Microsoft Jenny","Victoria","Karen","Moira"];
+          for(const name of pref){ const v=vs.find(function(x){return x.name===name;}); if(v){voice=v;return;} }
+          voice=vs.find(function(x){return /en[-_]US/i.test(x.lang)&&/female|woman/i.test(x.name);})
+               ||vs.find(function(x){return /^en/i.test(x.lang);})||vs[0]||null;
+        }catch(e){}
+      }
+      if(speechOK){
+        spkBtn.hidden=false;
+        spkBtn.setAttribute("aria-pressed", speakOn?"true":"false");
+        pickVoice();
+        try{ window.speechSynthesis.onvoiceschanged=pickVoice; }catch(e){}
+        spkBtn.onclick=function(){
+          speakOn=!speakOn; spkBtn.setAttribute("aria-pressed", speakOn?"true":"false");
+          localStorage.setItem("rubySpeak", speakOn?"1":"0");
+          if(!speakOn){ try{ window.speechSynthesis.cancel(); }catch(e){} }
+        };
+      }
+      function speak(text){
+        if(!speakOn||!speechOK||!text) return;
+        try{
+          window.speechSynthesis.cancel();
+          const u=new window.SpeechSynthesisUtterance(text);
+          if(voice) u.voice=voice;
+          u.rate=0.96; u.pitch=1.0; u.volume=1.0;
+          window.speechSynthesis.speak(u);
+        }catch(e){}
+      }
+
       function addBub(cls, text){
         const b=document.createElement("div"); b.className="bub "+cls; b.textContent=text;
         log.appendChild(b); log.scrollTop=log.scrollHeight; return b;
       }
+      let historyLoaded=false;
+      function loadHistory(){
+        if(historyLoaded) return; historyLoaded=true;
+        sb.from("chat_messages").select("role,body").order("created_at",{ascending:false}).limit(14)
+          .then(function(r){
+            const rows=(r&&r.data||[]).reverse();
+            if(!rows.length){
+              addBub("ai","Hi, sweet thing — I'm Ruby. 🐄 No pressure today; just tell me how you're doing, or tap a job and I'll help you with it. Moo means I'm in your corner.");
+            } else {
+              rows.forEach(function(m){ addBub(m.role==="user"?"me":"ai", m.body); });
+            }
+          })
+          .catch(function(){ addBub("ai","Hi, I'm Ruby. 🐄 Tell me how you're doing whenever you're ready."); });
+      }
+
+      let sending=false;
       function send(){
-        const inp=document.getElementById("chatinput");
-        const msg=inp.value.trim(); if(!msg) return;
-        inp.value=""; addBub("me", msg);
-        const wait=addBub("ai", "…");
+        if(sending) return;
+        const msg=(inp.value||"").trim(); if(!msg) return;
+        sending=true; inp.value=""; addBub("me", msg);
+        const wait=document.createElement("div");
+        wait.className="bub ai think"; wait.innerHTML="<i></i><i></i><i></i>";
+        log.appendChild(wait); log.scrollTop=log.scrollHeight;
         sb.functions.invoke("companion", { body: { message: msg } })
           .then(function(r){
-            wait.textContent = (r.data && r.data.reply) ? r.data.reply
-              : "I'm having trouble right now — your message is saved, try me again in a minute.";
+            const reply=(r&&r.data&&r.data.reply) ? r.data.reply
+              : "I'm having a little trouble right now — your message is saved, try me again in a minute. 💜";
+            wait.className="bub ai"; wait.textContent=reply; log.scrollTop=log.scrollHeight;
+            speak(reply);
           })
-          .catch(function(){ wait.textContent="No connection right now — I'll be here when you're back online."; });
+          .catch(function(){
+            wait.className="bub ai";
+            wait.textContent="No connection right now — I'll be right here when you're back online. 💜";
+          })
+          .finally(function(){ sending=false; });
       }
-      document.getElementById("chatsend").onclick=send;
-      document.getElementById("chatinput").addEventListener("keydown",function(e){
+      sendBtn.onclick=send;
+      inp.addEventListener("keydown",function(e){
         if(e.key==="Enter"){ e.preventDefault(); send(); }
+      });
+
+      /* ── Mic input (SpeechRecognition) — fills the box + auto-sends. ── */
+      const SR = (typeof window.SpeechRecognition!=="undefined") ? window.SpeechRecognition
+               : (typeof window.webkitSpeechRecognition!=="undefined") ? window.webkitSpeechRecognition
+               : null;
+      let rec=null, listening=false;
+      function setListening(on){
+        listening=on;
+        if(micBtn) micBtn.classList.toggle("on", on);
+        if(listen){ listen.hidden=!on; }
+      }
+      if(SR && micBtn){
+        micBtn.hidden=false;
+        micBtn.onclick=function(){
+          if(listening){ try{ rec.stop(); }catch(e){} return; }
+          try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(e){}
+          try{
+            rec=new SR();
+            rec.lang="en-US"; rec.interimResults=false; rec.maxAlternatives=1; rec.continuous=false;
+            rec.onresult=function(ev){
+              let said="";
+              try{ said=ev.results[0][0].transcript||""; }catch(e){}
+              if(said){ inp.value=said; setListening(false); send(); }
+            };
+            rec.onerror=function(){ setListening(false); };
+            rec.onend=function(){ setListening(false); };
+            setListening(true); rec.start();
+          }catch(e){ setListening(false); }
+        };
+      }
+
+      function openRuby(){
+        ov.hidden=false; document.body.style.overflow="hidden";
+        loadHistory();
+        try{ inp.focus(); }catch(e){}
+      }
+      function closeRuby(){
+        ov.hidden=true; document.body.style.overflow="";
+        if(listening){ try{ rec.stop(); }catch(e){} }
+        try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(e){}
+      }
+      openBtn.onclick=openRuby;
+      closeBtn.onclick=closeRuby;
+      document.addEventListener("keydown",function(e){
+        if(e.key==="Escape" && !ov.hidden) closeRuby();
       });
     }
     const _showIn = showIn;
-    showIn = function(extra){ _showIn(extra); mountChat(); };
-    if(user) mountChat();
+    showIn = function(extra){ _showIn(extra); mountRuby(); };
+    if(user) mountRuby();
   }
 })();
 
