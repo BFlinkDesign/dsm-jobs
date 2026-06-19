@@ -132,15 +132,22 @@ def inspect(page):
     }""")
     out.append(check("invariant1_no_predicted_dollar", not inv["bad"] and not inv["conflict"], inv))
 
-    # Bottom-nav view switching.
+    # Bottom-nav view switching. Signed-out (the mock build has no session),
+    # Today + My corner are gated and show the benefits screen (#lockwrap), not
+    # their own content; Jobs and Help stay open.
     nav = {}
-    for tab, sel in [("nav-today", "#todaywrap"), ("nav-corner", "#cornerwrap"), ("nav-help", "#faqwrap")]:
-        page.click(f"#{tab}")
-        page.wait_for_timeout(150)
-        nav[tab] = not page.eval_on_selector(sel, "el => el.hidden")
+    page.click("#nav-today")
+    page.wait_for_timeout(150)
+    nav["today_locked"] = not page.eval_on_selector("#lockwrap", "el => el.hidden")
+    page.click("#nav-corner")
+    page.wait_for_timeout(150)
+    nav["corner_locked"] = not page.eval_on_selector("#lockwrap", "el => el.hidden")
+    page.click("#nav-help")
+    page.wait_for_timeout(150)
+    nav["help"] = not page.eval_on_selector("#faqwrap", "el => el.hidden")
     page.click("#nav-jobs")
     page.wait_for_timeout(150)
-    nav["nav-jobs"] = page.eval_on_selector("#list", "el => !el.hidden")
+    nav["jobs"] = page.eval_on_selector("#list", "el => !el.hidden")
     out.append(check("nav_switches_views", all(nav.values()), nav))
 
     # Auth DOM present + provider-aware: Google hidden, email/pass present.
@@ -188,16 +195,16 @@ def extra_shots(page):
     page.click("#nav-corner")
     page.wait_for_timeout(200)
     page.screenshot(path=str(SHOTS / "06-corner-authed.png"), full_page=True)
-    # Open the Ruby full-screen companion (click its launcher, else unhide).
+    # Open the Ruby full-screen companion. Its launcher handler only exists in
+    # the signed-in portal script (absent in the mock build), so force the
+    # overlay visible directly to photograph its styling.
     opened = page.evaluate(
         """() => {
-            const hit = [...document.querySelectorAll('button,[data-act]')].find(
-                e => /talk to ruby/i.test(e.textContent || '') ||
-                     (e.getAttribute('data-act') || '').toLowerCase().includes('ruby'));
-            if (hit) { hit.click(); return 'launcher'; }
             const ov = document.getElementById('rubyov');
-            if (ov) { ov.hidden = false; return 'forced'; }
-            return ''; }"""
+            if (!ov) return '';
+            ov.hidden = false;
+            document.body.style.overflow = 'hidden';
+            return 'forced'; }"""
     )
     if opened:
         page.wait_for_timeout(300)
