@@ -62,11 +62,11 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Install CSS toolchain (Lightning CSS + stylelint)
+      - name: Install CSS toolchain (Lightning CSS)
         working-directory: verify/css
         run: npm install --no-audit --no-fund
 
-      - name: Validate generated CSS (Lightning CSS + stylelint)
+      - name: Validate generated CSS (Lightning CSS)
         run: python verify/css/lint_css.py
 
   secret-scan:

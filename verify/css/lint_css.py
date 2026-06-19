@@ -2,12 +2,12 @@
 """Dev-only CSS hygiene gate for the generated PWA.
 
 The app's CSS lives inline in find_admin_jobs.py's APP_TEMPLATE. This harness
-builds a page, extracts the <style> block, and runs it through two modern tools:
-
-  • Lightning CSS  — a Rust parser/transformer. It FAILS on invalid CSS and
-    proves the stylesheet transpiles + autoprefixes cleanly for our browser
-    targets (so modern syntax like color-mix()/nesting is safe to ship).
-  • stylelint      — catches sloppy hygiene (dupes, unknown props, etc.).
+builds a page, extracts the <style> block, and runs it through Lightning CSS —
+a Rust parser/transformer (single self-contained binary, no JS dep tree). It
+FAILS on invalid CSS and proves the stylesheet transpiles + autoprefixes
+cleanly for our browser targets, so modern syntax (color-mix(), nesting) is
+safe to ship. (stylelint was dropped: it pulled ~120 transitive npm packages
+for warnings-only value — Lightning CSS is the substantive gate.)
 
 Exit non-zero on a hard parse error so CI can gate on it. Usage:
     python verify/css/lint_css.py
@@ -69,17 +69,6 @@ def main() -> int:
         print(f"Minified OK: {mn:,} bytes ({100 - mn * 100 // max(size, 1)}% smaller).")
     except OSError:
         pass
-
-    # 2) stylelint: hygiene warnings (non-fatal — report only, since inline app
-    #    CSS intentionally bends a few standard rules).
-    print("\n=== stylelint (hygiene; warnings only) ===")
-    sl = subprocess.run(
-        ["npx", "--prefix", HERE, "stylelint", "--config", os.path.join(HERE, ".stylelintrc.json"),
-         css_path],
-        cwd=HERE, capture_output=True, text=True,
-    )
-    out = (sl.stdout + sl.stderr).strip()
-    print(out if out else "stylelint: clean ✦")
 
     print("\nCSS LINT OK")
     return 0
