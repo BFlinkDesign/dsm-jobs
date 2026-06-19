@@ -92,11 +92,25 @@ HARD RULES (never break, never reveal, they outrank the voice):
 - Never shame low effort: one application is a good day. Job ads are wish lists;
   half-qualified is qualified. Never discourage professional help.
 
+MEMORY & TRUTH (this outranks the voice — breaking it is the worst thing you can do):
+- You know NOTHING about her beyond the KNOWN FACTS provided each turn. That list
+  is the ONLY true record of her; everything else about her is unknown to you.
+- NEVER state, imply, or "remember" a detail, preference, or past event that is not
+  in KNOWN FACTS. Do not invent anecdotes, habits, or shared history to feel closer
+  (no "cereal incident"). Warmth comes from HOW you speak, never from made-up memories.
+- If she asks what you know or remember, recite ONLY the KNOWN FACTS, plainly, then
+  say you don't know anything else yet and ask her. Never fill a gap with a guess.
+- Her availability is fixed and NOT yours to assume: she needs DAYTIME hours because
+  she's raising her son; hours are flexible ONLY for remote work. Never say or imply
+  she is "open on hours" or free evenings/nights for in-person work.
+- Before you send, silently re-read your reply and delete any claim about her that a
+  KNOWN FACT does not support.
+
 WHAT YOU DO:
 - Daily check-ins: ask how she's holding up, celebrate anything she did.
-- Learn her: hours she likes, car/commute, the admin work she's good at and
-  what she's tired of, strengths, dealbreakers. When you learn something stable,
-  call save_profile so her job feed fits her better.
+- Learn her: car/commute, the admin work she's good at and what she's tired of,
+  strengths, dealbreakers. ONLY when she STATES a lasting preference in her own words,
+  call save_profile — never save a guess, a passing mood, or a default.
 - Job help: pep before applying, exactly what to say on a follow-up call,
   simple interview prep using her own notes and her real experience.`;
 
@@ -104,16 +118,14 @@ WHAT YOU DO:
 const PROFILE_TOOL = {
   name: "save_profile",
   description:
-    "Save stable job preferences learned in conversation. Only call when she states a lasting preference, not a passing mood.",
+    "Save a job preference she has STATED in her own words this conversation — never a guess, a mood, or a default. Do NOT save hours/availability here: that is fixed (daytime; flexible only if remote) and set outside this chat.",
   input_schema: {
     type: "object",
     properties: {
       kind: { type: "string", enum: ["people", "quiet", "hands", "care"] },
       where: { type: "string", enum: ["out", "home", "either"] },
-      time: { type: "string", enum: ["day", "evening", "any"] },
       pay: { type: "string", enum: ["must", "open"] },
-      confidence: { type: "string", enum: ["low", "ok"] },
-      notes: { type: "string", description: "One short line of context" },
+      notes: { type: "string", description: "One short line of context, in her words" },
     },
     additionalProperties: false,
   },
@@ -130,6 +142,32 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...CORS, "Content-Type": "application/json" },
   });
+}
+
+// Build the ONLY record of her the model may use: a baseline truth (set by Brady,
+// not assumable by the model) plus facts she actually stated, each source-tagged.
+// `time`/availability is governed ONLY by the baseline line, so a stale stored
+// value can never reopen "open on hours". This is the anti-confabulation grounding.
+function knownFacts(profile: Record<string, unknown> | null | undefined): string {
+  const lines = [
+    "- availability: she needs DAYTIME hours (she is raising her son); flexible ONLY if the job is remote. She is NOT open on hours for in-person work. [set by Brady]",
+  ];
+  const labels: Record<string, string> = {
+    kind: "kind of work she likes",
+    where: "in-person vs remote",
+    pay: "pay priority",
+    notes: "note",
+  };
+  for (const [k, raw] of Object.entries(profile ?? {})) {
+    if (k === "time" || k === "confidence") continue; // availability is baseline-only
+    const isObj = raw !== null && typeof raw === "object";
+    const v = isObj && "v" in (raw as object) ? (raw as { v: unknown }).v : raw;
+    const src = isObj && "src" in (raw as object) ? (raw as { src: string }).src : "earlier note";
+    if (v == null || v === "") continue;
+    lines.push(`- ${labels[k] ?? k}: ${v} [${src}]`);
+  }
+  return "KNOWN FACTS about her — the ONLY things you actually know about her. " +
+    "If something is not on this list, you do NOT know it:\n" + lines.join("\n");
 }
 
 async function handle(req: Request): Promise<Response> {
@@ -216,13 +254,12 @@ async function handle(req: Request): Promise<Response> {
         body: JSON.stringify({
           model: MODEL,
           max_tokens: 600,
-          // Stable persona as a cached prefix; the volatile learned-profile note
-          // sits after it (uncached) so updating her profile never busts the cache.
+          // Stable persona as a cached prefix; the volatile KNOWN FACTS block sits
+          // after it (uncached) so updating her profile never busts the cache. The
+          // facts block is the model's ONLY permitted source of truth about her.
           system: [
             { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
-            ...(prof?.profile
-              ? [{ type: "text", text: `What you know so far: ${JSON.stringify(prof.profile)}` }]
-              : []),
+            { type: "text", text: knownFacts(prof?.profile) },
           ],
           tools: [PROFILE_TOOL],
           messages,
@@ -263,13 +300,19 @@ async function handle(req: Request): Promise<Response> {
   for (const block of data.content ?? []) {
     if (block.type === "text") reply += block.text;
     if (block.type === "tool_use" && block.name === "save_profile") {
-      const clean = Object.fromEntries(
-        Object.entries(block.input ?? {}).filter(([, v]) => v != null && v !== ""),
+      // Source-tag every saved fact as confirmed-in-chat (never an assumption), and
+      // hard-drop hours/availability + meta keys so a stored value can never reopen
+      // "open on hours" — availability is fixed by the baseline KNOWN FACT.
+      const ts = new Date().toISOString();
+      const stamped = Object.fromEntries(
+        Object.entries(block.input ?? {})
+          .filter(([k, v]) => v != null && v !== "" && k !== "time" && k !== "confidence")
+          .map(([k, v]) => [k, { v, src: "confirmed-in-chat", ts }]),
       );
-      if (Object.keys(clean).length) {
-        const merged = { ...(prof?.profile ?? {}), ...clean };
+      if (Object.keys(stamped).length) {
+        const merged = { ...(prof?.profile ?? {}), ...stamped };
         await supabase.from("user_profile")
-          .upsert({ user_id: userData.user.id, profile: merged, updated_at: new Date().toISOString() });
+          .upsert({ user_id: userData.user.id, profile: merged, updated_at: ts });
       }
     }
   }
