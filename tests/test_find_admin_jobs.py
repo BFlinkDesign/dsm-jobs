@@ -592,6 +592,29 @@ def test_account_teaser_gating_present():
     assert "988" in t and "lockcrisis" in t
 
 
+def test_ruby_companion_markup_and_voice_present():
+    """Ruby the emotional-support cow: full-screen overlay, a designed cow
+    avatar, browser-native voice (mic + read-aloud), still signed-in only."""
+    t = fa.APP_TEMPLATE
+    # Identity + full-screen overlay (not a tiny card).
+    assert "Ruby" in t
+    assert "emotional support cow" in t.lower()
+    assert 'id="rubyov"' in t                  # the full-screen overlay container
+    assert 'id="rubyopen"' in t                # the "Talk to Ruby" launcher
+    # Designed mascot, not emoji-only: an SVG cow face with spots.
+    assert "rb-head" in t and "rb-spot" in t and "rb-horn" in t
+    # Voice chat: mic input (Web Speech) + read-aloud (SpeechSynthesis), both
+    # feature-detected via typeof so unsupported browsers hide them cleanly.
+    assert "SpeechRecognition" in t and "webkitSpeechRecognition" in t
+    assert "SpeechSynthesisUtterance" in t and "speechSynthesis" in t
+    assert 'id="rubymic"' in t and 'id="rubyspk"' in t
+    # Still gated to signed-in users; replies still come from the edge function.
+    assert ".app:not(.authed) #chatcard{display:none}" in t
+    assert 'invoke("companion"' in t
+    # De-cheesed: no glassmorphism blur surface on Ruby's overlay.
+    assert "backdrop-filter" not in t[t.index("rubyov"):t.index("rubyov") + 1200]
+
+
 # --- US-only hard guard (no European / foreign trash) ---
 
 
