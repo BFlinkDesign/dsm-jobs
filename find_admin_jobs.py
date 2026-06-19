@@ -1200,7 +1200,7 @@ APP_TEMPLATE = r"""<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0e0a16">
+<meta name="theme-color" content="#0c0b0d">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Job Board">
@@ -1210,22 +1210,32 @@ APP_TEMPLATE = r"""<!doctype html>
 ##SENTRY##
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&display=swap" rel="stylesheet">
 ##PORTAL_SCRIPT##
 <style>
 :root{
- /* Premium goth-violet system. Deep ink-black with a violet undertone, a single
-    refined accent, and a LAYERED elevation scale — no neon, no glassmorphism.
-    Variable names kept from the old theme so every component re-skins here. */
- --paper:#0b0712; --card:#15101f; --surface:#1d1630; --ink:#f3eeff; --ink2:#a99bc9; --line:#291f40;
- --green:#a855f7; --green-d:#d2b8ff; --green-soft:color-mix(in oklab,#a855f7 18%,transparent);
- --gold:#e9d5ff; --red:#ff8a80;
- --accent:linear-gradient(135deg,#a855f7 0%,#7c3aed 58%,#6d28d9 100%);
- /* Soft, layered, premium — replaces the old neon 0 0 16px glow everywhere. */
- --shadow:0 1px 2px rgba(0,0,0,.40),0 14px 32px -10px rgba(0,0,0,.55);
- --shadow-lg:0 2px 6px rgba(0,0,0,.42),0 28px 64px -14px rgba(0,0,0,.62);
- --glow:0 12px 30px -10px color-mix(in oklab,#a855f7 60%,transparent);
- --ring:0 0 0 3px color-mix(in oklab,#a855f7 26%,transparent);
+ /* ── Refined editorial-goth system (oxblood) ──────────────────────────────
+    Layered WARM near-blacks (a touch of red-brown, never pure #000 and no
+    purple cast), off-white ink, and a single RESTRAINED oxblood accent. No
+    neon, no glassmorphism, solid surfaces. The variable NAMES are kept from the
+    old violet theme on purpose — `--green*` etc. are the aliases every component
+    already re-skins through, so re-VALUING them here recolors the whole app with
+    a tight diff. (`--green` = the accent; `--green-d` = the light accent used
+    for text/icons ON dark — oxblood itself is too dark to read on near-black, so
+    text-tone stays a warm light rose/clay; `--green` carries #fff text only.) */
+ --paper:#0c0b0d; --card:#171416; --surface:#221d20; --ink:#f4efe9; --ink2:#a99c98; --line:#332a2d;
+ --green:#8c2230; --green-d:#e6a9aa; --green-soft:color-mix(in oklab,#8c2230 22%,transparent);
+ --gold:#e7c9a8; --red:#ff8a80;
+ --accent:linear-gradient(135deg,#9c2a39 0%,#7d1f2c 60%,#651622 100%);
+ /* Soft, layered, premium — no neon glow. Tinted faintly oxblood so the lift
+    reads intentional rather than a generic drop-shadow. */
+ --shadow:0 1px 2px rgba(0,0,0,.42),0 14px 32px -10px rgba(0,0,0,.58);
+ --shadow-lg:0 2px 6px rgba(0,0,0,.44),0 28px 64px -14px rgba(0,0,0,.64);
+ --glow:0 12px 30px -12px color-mix(in oklab,#8c2230 55%,transparent);
+ --ring:0 0 0 3px color-mix(in oklab,#8c2230 30%,transparent);
+ /* Display face for the wordmark + headings; body stays Atkinson Hyperlegible
+    (a deliberate a11y choice for a stressed, phone-only reader). */
+ --display:'Fraunces',Georgia,'Times New Roman',serif;
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}   /* beat component display rules (flex etc.) */
@@ -1233,35 +1243,30 @@ html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--paper);color:var(--ink);
  font-family:'Atkinson Hyperlegible',-apple-system,Segoe UI,Roboto,Arial,sans-serif;
  font-size:17px;line-height:1.55;-webkit-font-smoothing:antialiased}
-/* Star field: pure CSS, fixed, behind everything; gentle twinkle. */
+/* Atmosphere: a single quiet, STATIC oxblood vignette behind everything — no
+   twinkling starfield (that read teen-edgy). Just a faint top-glow + a deep
+   floor wash so the near-black has depth without theatrics. */
 body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
  background:
-  radial-gradient(1.5px 1.5px at 12% 18%, rgba(233,213,255,.55) 50%, transparent 51%),
-  radial-gradient(1px 1px at 78% 9%,  rgba(192,132,252,.5) 50%, transparent 51%),
-  radial-gradient(1.5px 1.5px at 64% 32%, rgba(233,213,255,.35) 50%, transparent 51%),
-  radial-gradient(1px 1px at 31% 56%, rgba(192,132,252,.4) 50%, transparent 51%),
-  radial-gradient(1.5px 1.5px at 88% 64%, rgba(233,213,255,.45) 50%, transparent 51%),
-  radial-gradient(1px 1px at 9% 83%,  rgba(192,132,252,.4) 50%, transparent 51%),
-  radial-gradient(1.5px 1.5px at 47% 92%, rgba(233,213,255,.3) 50%, transparent 51%),
-  radial-gradient(ellipse 120% 60% at 50% -10%, rgba(88,28,135,.28), transparent 60%);
- animation:twinkle 7s ease-in-out infinite alternate}
-@keyframes twinkle{from{opacity:.55}to{opacity:1}}
+  radial-gradient(120% 80% at 50% -12%, rgba(140,34,48,.16), transparent 58%),
+  radial-gradient(120% 70% at 50% 112%, rgba(0,0,0,.5), transparent 55%)}
 .app{max-width:640px;margin:0 auto;padding:0 16px 120px}
 svg{display:inline-block;vertical-align:-2px}
 /* App bar — solid (no glassmorphism), hairline rule + faint violet wash. */
 header.bar{position:sticky;top:0;z-index:20;
- background:linear-gradient(180deg,#120c1d,var(--paper));margin:0 -16px;padding:16px;
+ background:linear-gradient(180deg,#16100f,var(--paper));margin:0 -16px;padding:16px;
  border-bottom:1px solid var(--line)}
 .brandrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink2);font-weight:700}
-/* Solid premium wordmark — no gradient-text, no spinning glyph. The accent
-   lives on one word (.word b) for a clean, intentional two-tone. */
-.word{font-family:inherit;font-weight:800;font-size:27px;line-height:1.04;letter-spacing:-.015em;
+/* Editorial wordmark — characterful display serif, no gradient-text, no spinning
+   glyph. The accent lives on one word (.word b) for a clean, intentional
+   two-tone. Slightly tighter optical tracking; the serif carries the "premium". */
+.word{font-family:var(--display);font-weight:600;font-size:30px;line-height:1.0;letter-spacing:-.01em;
  color:var(--ink);display:inline-block}
-.word b{font-weight:800;color:var(--green-d)}
+.word b{font-weight:600;font-style:italic;color:var(--green-d)}
 .safebadge{display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);color:var(--green-d);
  font-size:12px;font-weight:700;padding:6px 10px;border-radius:999px;white-space:nowrap;
- border:1px solid rgba(192,132,252,.35)}
+ border:1px solid color-mix(in oklab,var(--green) 50%,transparent)}
 .summary{color:var(--ink2);font-size:14px;margin-top:6px}
 /* Account control (compact, top-right, expand/collapse) */
 .acctbtn{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;
@@ -1307,13 +1312,13 @@ header.bar{position:sticky;top:0;z-index:20;
 .lockcta{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;margin-top:14px;
  padding:15px;border:0;border-radius:13px;font:inherit;font-weight:800;font-size:16px;min-height:54px;
  color:#fff;cursor:pointer;letter-spacing:.01em;
- background:linear-gradient(135deg,color-mix(in oklab,var(--green) 92%,#fff) 0%,#7e22ce 60%,#6b21a8 100%);
- box-shadow:0 8px 22px color-mix(in oklab,var(--green) 45%,transparent),inset 0 1px 0 rgba(255,255,255,.22)}
+ background:linear-gradient(135deg,color-mix(in oklab,var(--green) 88%,#fff) 0%,#7d1f2c 60%,#651622 100%);
+ box-shadow:0 8px 22px color-mix(in oklab,var(--green) 45%,transparent),inset 0 1px 0 rgba(255,255,255,.18)}
 .lockcta:active{transform:translateY(1px) scale(.99)}
 .lockcta svg{flex:0 0 auto}
 /* Account-benefits "what you unlock" screen (shown when a locked tab is tapped) */
 .lockview{padding:14px 2px 6px;text-align:center;animation:rise .3s cubic-bezier(.2,.7,.3,1) both}
-.lockhero{font-family:inherit;font-weight:800;font-size:clamp(24px,7vw,30px);line-height:1.12;margin:8px 0 6px;color:var(--ink)}
+.lockhero{font-family:var(--display);font-weight:600;font-size:clamp(25px,7vw,32px);line-height:1.1;margin:8px 0 6px;color:var(--ink);letter-spacing:-.01em}
 .lockhero .hl{color:var(--green-d)}
 .locksub{color:var(--ink2);font-size:16px;line-height:1.5;max-width:30ch;margin:0 auto 18px}
 .lockperks{list-style:none;margin:0 auto 20px;padding:0;max-width:24rem;text-align:left}
@@ -1331,7 +1336,7 @@ header.bar{position:sticky;top:0;z-index:20;
 /* Safety */
 .safety{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--red);
  border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
-.safety h2{margin:0 0 4px;font-family:inherit;font-size:19px;font-weight:600;
+.safety h2{margin:0 0 4px;font-family:var(--display);font-size:19px;font-weight:600;
  display:flex;align-items:center;gap:8px}
 .safety h2 svg{color:var(--red)}
 .safety ul{margin:8px 0;padding-left:20px}
@@ -1370,7 +1375,7 @@ header.bar{position:sticky;top:0;z-index:20;
 .pill.good{background:var(--green);color:#fff}
 .pill.none{background:var(--surface);color:var(--ink2)}
 .verified{display:inline-flex;align-items:center;gap:5px;color:var(--gold);font-size:13px;font-weight:700}
-.title{font-family:inherit;font-size:20px;font-weight:600;line-height:1.18;margin:0 0 3px}
+.title{font-family:var(--display);font-size:20px;font-weight:600;line-height:1.16;margin:0 0 3px;letter-spacing:-.005em}
 .co{font-size:16px;font-weight:700;color:var(--ink)}
 .meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--ink2);font-size:14px;margin-top:9px}
 .meta span{display:inline-flex;align-items:center;gap:6px}
@@ -1378,7 +1383,7 @@ header.bar{position:sticky;top:0;z-index:20;
  background:var(--accent);color:#fff;box-shadow:var(--glow),inset 0 1px 0 rgba(255,255,255,.22);
  text-decoration:none;font-weight:800;padding:15px;border-radius:13px;font-size:17px;min-height:54px;
  letter-spacing:.01em;transition:transform .12s ease,box-shadow .12s ease}
-.apply:active{transform:scale(.985);background:#6b21a8}
+.apply:active{transform:scale(.985);background:#651622}
 .actions{display:flex;gap:8px;margin-top:9px}
 .act{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--card);
  border:1.5px solid var(--line);border-radius:11px;padding:11px 6px;font:inherit;font-size:14px;font-weight:700;
@@ -1393,17 +1398,17 @@ header.bar{position:sticky;top:0;z-index:20;
 /* Enhancements */
 .stale{background:rgba(255,123,114,.1);border:1px solid rgba(255,123,114,.35);color:#ffb4ae;border-radius:12px;
  padding:12px 14px;margin:14px 0 0;font-size:15px;line-height:1.45}
-.coach{background:var(--green-soft);border:1px solid rgba(192,132,252,.3);border-radius:14px;
+.coach{background:var(--green-soft);border:1px solid color-mix(in oklab,var(--green) 42%,transparent);border-radius:14px;
  padding:14px 44px 12px 16px;margin:18px 0;position:relative}
 .coach h2{margin:0 0 4px;font-size:18px;font-weight:700;color:var(--green-d)}
 .coach ul{margin:6px 0 2px;padding-left:20px}
 .coach li{margin:5px 0;font-size:15px}
 .coach .dismiss{position:absolute;top:8px;right:8px;background:none;border:0;font:inherit;
  font-size:22px;line-height:1;color:var(--green-d);padding:8px;cursor:pointer}
-.newtag{display:inline-flex;align-items:center;background:var(--gold);color:#2e1065;font-size:12px;
+.newtag{display:inline-flex;align-items:center;background:var(--gold);color:#3a1216;font-size:12px;
  font-weight:700;padding:4px 9px;border-radius:999px}
-.traintag{display:inline-flex;align-items:center;gap:4px;background:rgba(192,132,252,.18);color:var(--green-d);
- font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;border:1px solid rgba(192,132,252,.4)}
+.traintag{display:inline-flex;align-items:center;gap:4px;background:color-mix(in oklab,var(--green) 26%,transparent);color:var(--green-d);
+ font-size:12px;font-weight:700;padding:4px 9px;border-radius:999px;border:1px solid color-mix(in oklab,var(--green) 50%,transparent)}
 .pillrow{display:inline-flex;align-items:center;gap:7px}
 .about{margin-top:10px;font-size:15px;color:var(--ink2)}
 .about summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
@@ -1417,7 +1422,7 @@ header.bar{position:sticky;top:0;z-index:20;
 .notes textarea:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
 .old{color:var(--ink2)}
 /* Portal sync bar (hidden entirely unless the portal is configured) */
-.sync{background:var(--green-soft);border:1px solid rgba(192,132,252,.3);border-radius:14px;padding:13px 16px;margin:14px 0 0}
+.sync{background:var(--green-soft);border:1px solid color-mix(in oklab,var(--green) 42%,transparent);border-radius:14px;padding:13px 16px;margin:14px 0 0}
 .syncrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
 .synccopy{font-size:15px;color:var(--green-d);line-height:1.45}
 .synccopy .who{font-weight:700}
@@ -1439,12 +1444,12 @@ header.bar{position:sticky;top:0;z-index:20;
  display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:24px 14px calc(24px + env(safe-area-inset-bottom))}
 .authcard{background:var(--card);border:1px solid var(--line);border-radius:20px;width:100%;max-width:420px;
  margin:auto;padding:22px 20px;box-shadow:var(--glow);animation:rise .25s ease both}
-.authcard h2{margin:0 0 2px;font-size:23px;font-weight:700}
+.authcard h2{margin:0 0 2px;font-family:var(--display);font-size:24px;font-weight:600;letter-spacing:-.005em}
 .authcard .sub{color:var(--ink2);font-size:14px;margin:0 0 16px;line-height:1.45}
 .authx{position:absolute;top:14px;right:16px;background:none;border:0;color:var(--ink2);font-size:26px;
  line-height:1;cursor:pointer;padding:6px}
 .pkbtn{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;
- background:linear-gradient(135deg,#9333ea,#7e22ce);color:#fff;box-shadow:var(--glow);
+ background:linear-gradient(135deg,#9c2a39,#7d1f2c);color:#fff;box-shadow:var(--glow);
  border:0;border-radius:13px;font:inherit;font-weight:700;font-size:16px;padding:15px;min-height:54px;cursor:pointer}
 .pkbtn:active{transform:scale(.985)}
 .authdiv{display:flex;align-items:center;gap:10px;color:var(--ink2);font-size:12px;
@@ -1469,7 +1474,7 @@ header.bar{position:sticky;top:0;z-index:20;
 .authnote{margin-top:14px;font-size:12px;color:var(--ink2);line-height:1.5;text-align:center}
 /* Bottom tab bar */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:space-around;
- background:#0d0917;border-top:1px solid var(--line);box-shadow:0 -8px 24px -12px rgba(0,0,0,.7);
+ background:#100d0e;border-top:1px solid var(--line);box-shadow:0 -8px 24px -12px rgba(0,0,0,.7);
  padding:6px 4px calc(8px + env(safe-area-inset-bottom))}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;
  color:var(--ink2);font:inherit;font-size:11px;font-weight:700;padding:7px 2px;min-height:52px;cursor:pointer;
@@ -1477,7 +1482,7 @@ header.bar{position:sticky;top:0;z-index:20;
 .tab[aria-current="true"]{color:var(--green-d)}
 .tab:active{transform:scale(.94)}
 /* Section intros, encouragement, cards */
-.picksintro h2{margin:18px 0 4px;font-size:22px;font-weight:700}
+.picksintro h2{margin:18px 0 4px;font-family:var(--display);font-size:23px;font-weight:600;letter-spacing:-.005em}
 .picksintro p{margin:0 0 6px;color:var(--ink2);font-size:15px;line-height:1.5}
 .weekline{font-weight:700;color:var(--green-d)}
 .sparkle{color:var(--green-d);display:inline-block;opacity:.7;font-size:.82em;vertical-align:.06em}
@@ -1489,12 +1494,12 @@ header.bar{position:sticky;top:0;z-index:20;
  padding:14px 16px;margin:14px 0}
 .rescard h3{margin:0 0 8px;font-size:17px;color:#ffb4ae}
 .resline{margin:7px 0;font-size:15px;line-height:1.5}
-.resline a{color:var(--green-d);font-weight:700;text-decoration:none;border-bottom:1px solid rgba(192,132,252,.4)}
+.resline a{color:var(--green-d);font-weight:700;text-decoration:none;border-bottom:1px solid color-mix(in oklab,var(--green) 50%,transparent)}
 .resnote{margin:10px 0 0;color:var(--ink2);font-size:14px;line-height:1.5}
 .resnote a{color:var(--green-d)}
 .quizcard,.chatcard{background:var(--card);border:1px solid var(--line);border-radius:16px;
  padding:16px;margin:14px 0;box-shadow:var(--shadow)}
-.quizcard h3,.chatcard h3{margin:0 0 6px;font-size:18px}
+.quizcard h3,.chatcard h3{margin:0 0 6px;font-family:var(--display);font-size:19px;font-weight:600}
 .quizcard p,.chatcard p{margin:0 0 10px;color:var(--ink2);font-size:15px;line-height:1.5}
 .qq{margin:12px 0 4px;font-weight:700;font-size:16px}
 .qopts{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
@@ -1502,7 +1507,7 @@ header.bar{position:sticky;top:0;z-index:20;
  font:inherit;font-size:14px;font-weight:700;padding:10px 14px;min-height:44px;cursor:pointer;transition:.12s}
 .qopt[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#fff;box-shadow:var(--glow)}
 .qdone{color:var(--green-d);font-weight:700;font-size:14px;margin-top:8px}
-/* ── Ruby the emotional-support cow (signed-in only) ───────────────────────
+/* ── Rudy the emotional-support cow (signed-in only) ───────────────────────
    A designed mascot, not a sticker. Black-and-white cow face with purple
    accents so she sits inside the goth palette. NO glassmorphism. */
 .rubyface{display:block;width:54px;height:54px;flex:0 0 auto;
@@ -1516,7 +1521,7 @@ header.bar{position:sticky;top:0;z-index:20;
 .rb-eye{fill:#e9defb}
 .rb-nos{fill:#7c3aed;opacity:.9}
 .rubyintro{display:flex;align-items:center;gap:14px;margin-bottom:2px}
-.rubyintro h3{margin:0;font-size:19px;display:flex;align-items:center;gap:7px}
+.rubyintro h3{margin:0;font-family:var(--display);font-size:20px;font-weight:600;display:flex;align-items:center;gap:7px}
 .rubycow{font-size:16px;filter:saturate(.85)}
 .rubytag{margin:2px 0 0;color:var(--green-d);font-size:13px;font-weight:700;letter-spacing:.01em}
 .rubyopen{display:inline-flex;align-items:center;justify-content:center;gap:9px;width:100%;margin-top:12px;
@@ -1524,7 +1529,7 @@ header.bar{position:sticky;top:0;z-index:20;
  padding:14px;min-height:52px;cursor:pointer;box-shadow:var(--glow)}
 .rubyopen:active{transform:scale(.985);background:var(--green-d)}
 
-/* Full-screen overlay — solid surfaces, a soft purple halo behind Ruby. */
+/* Full-screen overlay — solid surfaces, a soft purple halo behind Rudy. */
 .rubyov{position:fixed;inset:0;z-index:70;background:var(--paper);
  display:flex;align-items:stretch;justify-content:center;
  animation:rubyrise .26s cubic-bezier(.2,.7,.2,1) both}
@@ -1535,7 +1540,7 @@ header.bar{position:sticky;top:0;z-index:20;
 .rubybar{display:flex;align-items:center;gap:11px;padding:14px 2px 12px;
  padding-top:calc(14px + env(safe-area-inset-top));border-bottom:1px solid var(--line)}
 .rubybarname{display:flex;flex-direction:column;line-height:1.18;margin-right:auto}
-.rubybarname b{font-size:17px;font-weight:800}
+.rubybarname b{font-family:var(--display);font-size:18px;font-weight:600}
 .rubybarname span{font-size:12.5px;color:var(--ink2)}
 .rubyspk,.rubyclose{flex:0 0 auto;display:flex;align-items:center;justify-content:center;
  width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card);
@@ -1589,30 +1594,32 @@ header.bar{position:sticky;top:0;z-index:20;
  .rubyov,.bub,.rubymic.on,.rubywave i,.bub.think i{animation:none}
 }
 #tailormodal .authcard{max-height:88vh;overflow-y:auto;text-align:left}
-/* Spooky résumé-summoning loader — drifting bats + a glowing moon over a
-   calibrated progress bar. Goth on purpose: she loves black + purple. */
+/* Résumé-tailoring loader — restrained, premium. The old "spooky sky" had a
+   glowing moon + flying bats (read teen-edgy); toned to a quiet oxblood-ember
+   horizon and a calm progress bar. Bats kept in the markup but are now barely
+   visible, slow, and recolored to the accent — atmosphere, not cartoon. */
 .spookload{padding:6px 2px 2px}
 .spooksky{position:relative;height:64px;margin:4px 0 16px;border-radius:14px;overflow:hidden;
- background:radial-gradient(ellipse 120% 90% at 82% 12%, rgba(147,51,234,.24), transparent 60%),
-            linear-gradient(180deg,#130d20,#0e0a16);border:1px solid var(--line)}
-.spookmoon{position:absolute;right:16px;top:10px;width:28px;height:28px;border-radius:50%;
- background:radial-gradient(circle at 36% 34%, #f3ecff, #c9a8ff 60%, #7e22ce);
- box-shadow:0 0 22px rgba(201,168,255,.6)}
-.bat{position:absolute;left:-30px;line-height:1;filter:drop-shadow(0 0 5px rgba(168,85,247,.55));
+ background:radial-gradient(ellipse 130% 100% at 82% 120%, color-mix(in oklab,var(--green) 28%,transparent), transparent 60%),
+            linear-gradient(180deg,#16100f,#0c0b0d);border:1px solid var(--line)}
+/* a low ember on the horizon instead of a moon */
+.spookmoon{position:absolute;right:18px;bottom:-10px;width:30px;height:30px;border-radius:50%;
+ background:radial-gradient(circle at 50% 30%, color-mix(in oklab,var(--green-d) 70%,#fff), var(--green) 70%, transparent);
+ opacity:.7;filter:blur(1px);box-shadow:0 0 22px color-mix(in oklab,var(--green) 45%,transparent)}
+.bat{position:absolute;left:-30px;line-height:1;opacity:.18;
+ filter:grayscale(1) drop-shadow(0 0 3px color-mix(in oklab,var(--green) 40%,transparent));
  will-change:left,transform;animation:batfly linear infinite}
-.bat.b1{top:8%;font-size:20px;animation-duration:3.4s;animation-delay:-.2s}
-.bat.b2{top:44%;font-size:14px;opacity:.85;animation-duration:4.6s;animation-delay:-1.6s}
-.bat.b3{top:62%;font-size:16px;opacity:.9;animation-duration:2.9s;animation-delay:-2.4s}
+.bat.b1{top:14%;font-size:14px;animation-duration:9s;animation-delay:-.2s}
+.bat.b2{top:46%;font-size:11px;opacity:.12;animation-duration:12s;animation-delay:-4s}
+.bat.b3{top:66%;font-size:12px;opacity:.14;animation-duration:10.5s;animation-delay:-7s}
 @keyframes batfly{
- 0%{left:-30px;transform:translateY(0) rotate(-5deg)}
- 25%{transform:translateY(-9px) rotate(5deg)}
- 50%{transform:translateY(5px) rotate(-5deg)}
- 75%{transform:translateY(-7px) rotate(5deg)}
- 100%{left:calc(100% + 30px);transform:translateY(0) rotate(-5deg)}}
+ 0%{left:-30px;transform:translateY(0)}
+ 50%{transform:translateY(-5px)}
+ 100%{left:calc(100% + 30px);transform:translateY(0)}}
 .spookbar{height:11px;border-radius:999px;background:var(--surface);border:1px solid var(--line);overflow:hidden}
 .spookbar i{display:block;height:100%;width:0;border-radius:999px;
- background:linear-gradient(90deg,#6b21a8,#9333ea,#c084fc);
- box-shadow:0 0 14px rgba(168,85,247,.7);transition:width .35s cubic-bezier(.3,.7,.3,1)}
+ background:linear-gradient(90deg,#651622,var(--green),var(--green-d));
+ box-shadow:0 0 12px color-mix(in oklab,var(--green) 55%,transparent);transition:width .35s cubic-bezier(.3,.7,.3,1)}
 .spookmsg{margin-top:11px;text-align:center;color:var(--green-d);font-size:14px;font-weight:700}
 @media(prefers-reduced-motion:reduce){.bat{display:none}}
 .tailorsec{margin:14px 0}
@@ -1637,18 +1644,18 @@ header.bar{position:sticky;top:0;z-index:20;
    the whole site is being handled as its own design pass; this is just legible.) */
 .toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);
  z-index:60;display:flex;align-items:center;justify-content:center;gap:14px;text-align:center;
- background:#1b1230;color:#f3ecff;font-size:18px;font-weight:700;line-height:1.45;
- padding:22px 28px;border-radius:16px;max-width:84vw;border:1px solid #3a2a5c;
+ background:#211a1c;color:#f4efe9;font-size:18px;font-weight:700;line-height:1.45;
+ padding:22px 28px;border-radius:16px;max-width:84vw;border:1px solid #4a3034;
  box-shadow:0 24px 60px rgba(0,0,0,.55);
  opacity:0;animation:splashin .4s cubic-bezier(.16,1,.3,1) forwards}
 @keyframes splashin{to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
-.toast button{background:#2a1d44;border:1px solid #4a3870;color:#f3ecff;font:inherit;font-weight:700;
+.toast button{background:#33282a;border:1px solid #4a3034;color:#f4efe9;font:inherit;font-weight:700;
  cursor:pointer;padding:9px 16px;border-radius:10px}
 @media(prefers-reduced-motion:reduce){.toast{animation:none;opacity:1;transform:translate(-50%,-50%)}}
-.burst{position:fixed;z-index:50;pointer-events:none;color:#c084fc;font-size:16px;animation:burst 1s ease-out forwards}
+.burst{position:fixed;z-index:50;pointer-events:none;color:var(--green-d);font-size:16px;animation:burst 1s ease-out forwards}
 @keyframes burst{0%{opacity:1;transform:translate(0,0) scale(.6) rotate(0)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(1.3) rotate(120deg)}}
 /* Snooze (Not today) */
-.act.snz.on{background:var(--surface);color:var(--green-d);border-color:rgba(192,132,252,.4)}
+.act.snz.on{background:var(--surface);color:var(--green-d);border-color:color-mix(in oklab,var(--green) 50%,transparent)}
 /* Call script */
 .script{margin-top:9px}
 .script summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
@@ -1867,23 +1874,23 @@ header.bar{position:sticky;top:0;z-index:20;
           </svg>
         </span>
         <div>
-          <h3>Ruby <span class="rubycow" aria-hidden="true">&#x1F404;</span></h3>
+          <h3>Rudy <span class="rubycow" aria-hidden="true"></span></h3>
           <p class="rubytag">Your emotional support cow</p>
         </div>
       </div>
-      <p id="chatstate">Ruby is a calm, kind check-in &mdash; she remembers you and helps
+      <p id="chatstate">Rudy is a calm, kind check-in &mdash; she remembers you and helps
       with the search. You can type to her or just talk out loud. She turns on once
       sign-in is set up; your quiz answers above already make the app smarter today.</p>
       <button class="rubyopen" id="rubyopen" type="button" hidden>
         <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-9 8.4L3 21l1.1-9A8.4 8.4 0 1121 11.5z"/></svg>
-        Talk to Ruby
+        Talk to Rudy
       </button>
     </div>
   </section>
 
   <!-- RUBY full-screen companion overlay (signed-in only; mounted/opened from JS).
        Premium goth, NOT glassmorphism — solid surfaces. Voice via Web Speech API. -->
-  <div class="rubyov" id="rubyov" hidden role="dialog" aria-modal="true" aria-label="Ruby, your emotional support cow">
+  <div class="rubyov" id="rubyov" hidden role="dialog" aria-modal="true" aria-label="Rudy, your emotional support cow">
     <div class="rubyshell">
       <header class="rubybar">
         <span class="rubyface rubyface--bar" aria-hidden="true">
@@ -1900,12 +1907,12 @@ header.bar{position:sticky;top:0;z-index:20;
             <circle class="rb-eye" cx="40" cy="30" r="2.6"/>
           </svg>
         </span>
-        <div class="rubybarname"><b>Ruby</b><span>Emotional support cow &#x1F404;</span></div>
-        <button class="rubyspk" id="rubyspk" type="button" hidden aria-pressed="true" aria-label="Read Ruby's replies aloud">
+        <div class="rubybarname"><b>Rudy</b><span>Emotional support cow</span></div>
+        <button class="rubyspk" id="rubyspk" type="button" hidden aria-pressed="true" aria-label="Read Rudy's replies aloud">
           <svg class="ic-on" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13"/></svg>
           <svg class="ic-off" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>
         </button>
-        <button class="rubyclose" id="rubyclose" type="button" aria-label="Close Ruby">&times;</button>
+        <button class="rubyclose" id="rubyclose" type="button" aria-label="Close Rudy">&times;</button>
       </header>
       <div class="rubylog" id="rubylog" aria-live="polite"></div>
       <div class="rubylisten" id="rubylisten" hidden aria-hidden="true">
@@ -1913,16 +1920,16 @@ header.bar{position:sticky;top:0;z-index:20;
         Listening&hellip;
       </div>
       <div class="rubydock">
-        <button class="rubymic" id="rubymic" type="button" hidden aria-label="Talk to Ruby with your voice">
+        <button class="rubymic" id="rubymic" type="button" hidden aria-label="Talk to Rudy with your voice">
           <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v4"/></svg>
         </button>
         <input class="rubyinput" id="rubyinput" type="text" maxlength="4000" autocomplete="off"
-          placeholder="Tell Ruby how you're doing&hellip;" aria-label="Message Ruby">
+          placeholder="Tell Rudy how you're doing&hellip;" aria-label="Message Rudy">
         <button class="rubysend" id="rubysend" type="button" aria-label="Send">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
         </button>
       </div>
-      <p class="rubyfine" id="rubyfine">Ruby's a kind helper, not a therapist &mdash; if things feel heavy, tap the
+      <p class="rubyfine" id="rubyfine">Rudy's a kind helper, not a therapist &mdash; if things feel heavy, tap the
       crisis card above for real people, 24/7. Your chats are saved privately to your account so she remembers you.</p>
     </div>
   </div>
@@ -1936,7 +1943,7 @@ header.bar{position:sticky;top:0;z-index:20;
       <ul class="lockperks">
         <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Save &amp; track every application</b> <span>— one tap, and your jobs, “applied” dates and notes follow you to any phone.</span></div></li>
         <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>AI résumé tailoring</b> <span>— rewrites your real experience to fit each job, in your words, never made up.</span></div></li>
-        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Ruby, your support cow 🐄</b> <span>— a kind check-in you can type or talk to; she remembers you and helps with the search.</span></div></li>
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Rudy, your support cow</b> <span>— a kind check-in you can type or talk to; she remembers you and helps with the search.</span></div></li>
         <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Printable work-search log</b> <span>— your weekly Iowa unemployment list, filled in automatically.</span></div></li>
       </ul>
       <div class="lockbtns">
@@ -3104,7 +3111,7 @@ function tuneLockView(name){
   var msg={
     today:"“Today’s 3 picks” is a free-account feature — a tiny, doable shortlist each morning so the search never feels like too much.",
     apps: "Tracking what you’ve applied to (and your printable Iowa work-search log) saves to your free account so a new phone never loses it.",
-    corner:"Your corner — résumé tailoring, Ruby (your support cow 🐄), and your saved details — lives in your free account so it follows you everywhere."
+    corner:"Your corner — résumé tailoring, Rudy (your support cow), and your saved details — lives in your free account so it follows you everywhere."
   }[name];
   sub.textContent = msg || "Browsing is free. Make a free account to actually use the app — it takes 10 seconds and saves everything to you.";
 }
@@ -3493,7 +3500,7 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
     });
     window.addEventListener("online", function(){ if(user) syncAll(); });
 
-    /* Ruby the emotional-support cow: a full-screen companion, signed-in only.
+    /* Rudy the emotional-support cow: a full-screen companion, signed-in only.
        Replies come from the 'companion' Edge Function (the Anthropic key lives
        server-side; this page never sees it). Voice is 100% browser-native and
        free: Web Speech mic input + SpeechSynthesis read-aloud, both feature-
@@ -3563,12 +3570,12 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
           .then(function(r){
             const rows=(r&&r.data||[]).reverse();
             if(!rows.length){
-              addBub("ai","Hi, sweet thing — I'm Ruby. 🐄 No pressure today; just tell me how you're doing, or tap a job and I'll help you with it. Moo means I'm in your corner.");
+              addBub("ai","Hi, sweet thing — I'm Rudy. No pressure today; just tell me how you're doing, or tap a job and I'll help you with it. Moo means I'm in your corner.");
             } else {
               rows.forEach(function(m){ addBub(m.role==="user"?"me":"ai", m.body); });
             }
           })
-          .catch(function(){ addBub("ai","Hi, I'm Ruby. 🐄 Tell me how you're doing whenever you're ready."); });
+          .catch(function(){ addBub("ai","Hi, I'm Rudy. Tell me how you're doing whenever you're ready."); });
       }
 
       let sending=false;
