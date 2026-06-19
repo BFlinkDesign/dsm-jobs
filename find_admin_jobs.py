@@ -1260,6 +1260,7 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
    only say "sign in" when tapped. The .authed class is toggled by showIn/showOut. */
 .app:not(.authed) [data-act="tailor"]{display:none}
 .app:not(.authed) #resumecard{display:none}
+.app:not(.authed) #chatcard{display:none}
 /* Safety */
 .safety{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--red);
  border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
@@ -2753,6 +2754,10 @@ function setView(name){
     if(btn) btn.setAttribute("aria-current", String(v===name));
   });
   if(name==="jobs") render(); else { renderPicks(); renderApps(); renderCorner(); }
+  // Fresh words of affirmation on every tab entry (and on reload) — never the
+  // same phrase twice in a row that the eye can notice. Today/corner refresh
+  // their own enc inside renderPicks()/renderCorner(); the Jobs footer is here.
+  if(name==="jobs"){ var fe=document.getElementById("footenc"); if(fe) fe.textContent=pickEnc(); }
   window.scrollTo({top:0});
 }
 ["jobs","today","apps","corner","help"].forEach(function(v){
@@ -2760,11 +2765,9 @@ function setView(name){
   if(b) b.onclick=function(){ setView(v); };
 });
 
-document.getElementById("footenc").textContent = pickEnc();
-
 buildChips();
 render();
-setView("jobs");
+setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
 
 /* ── Portal: optional sign-in so saves follow the user across devices. ──────
    The page is fully usable without it: not configured -> this whole block is
