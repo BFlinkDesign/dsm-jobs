@@ -1510,16 +1510,11 @@ header.bar{position:sticky;top:0;z-index:20;
 /* ── Rudy the emotional-support cow (signed-in only) ───────────────────────
    A designed mascot, not a sticker. Black-and-white cow face with purple
    accents so she sits inside the goth palette. NO glassmorphism. */
-.rubyface{display:block;width:54px;height:54px;flex:0 0 auto;
- filter:drop-shadow(0 6px 14px rgba(168,85,247,.30))}
+.rubyface{display:block;width:54px;height:54px;flex:0 0 auto;border-radius:50%;overflow:hidden;
+ box-shadow:0 4px 14px rgba(0,0,0,.55),inset 0 0 0 1.5px rgba(156,42,57,.6)}
 .rubyface--sm{width:48px;height:48px}
 .rubyface--bar{width:40px;height:40px}
-.rb-head{fill:#0e0a16;stroke:#cdbdf0;stroke-width:1.4}
-.rb-muz{fill:#241a38;stroke:#cdbdf0;stroke-width:1.2}
-.rb-spot{fill:#1c1430;stroke:#a855f7;stroke-width:1.1;opacity:.92}
-.rb-horn{fill:#3a2c5e;stroke:#cdbdf0;stroke-width:1}
-.rb-eye{fill:#e9defb}
-.rb-nos{fill:#7c3aed;opacity:.9}
+.rudyimg{width:100%;height:100%;object-fit:cover;display:block}
 .rubyintro{display:flex;align-items:center;gap:14px;margin-bottom:2px}
 .rubyintro h3{margin:0;font-family:var(--display);font-size:20px;font-weight:600;display:flex;align-items:center;gap:7px}
 .rubycow{font-size:16px;filter:saturate(.85)}
@@ -1860,18 +1855,7 @@ header.bar{position:sticky;top:0;z-index:20;
     <div class="chatcard" id="chatcard">
       <div class="rubyintro">
         <span class="rubyface rubyface--sm" aria-hidden="true">
-          <svg viewBox="0 0 64 64" width="100%" height="100%">
-            <path class="rb-horn" d="M14 22c-5-3-8-9-7-13 4 1 8 5 9 11z"/>
-            <path class="rb-horn" d="M50 22c5-3 8-9 7-13-4 1-8 5-9 11z"/>
-            <ellipse class="rb-head" cx="32" cy="34" rx="22" ry="21"/>
-            <path class="rb-spot" d="M16 24c-3 4-3 10 1 12 4-2 5-9 2-13-1-1-2-1-3 1z"/>
-            <path class="rb-spot" d="M47 21c4 1 7 6 5 10-4 0-8-4-7-9 0-1 1-1 2-1z"/>
-            <ellipse class="rb-muz" cx="32" cy="44" rx="13" ry="10"/>
-            <circle class="rb-nos" cx="26" cy="44" r="2.3"/>
-            <circle class="rb-nos" cx="38" cy="44" r="2.3"/>
-            <circle class="rb-eye" cx="24" cy="30" r="2.6"/>
-            <circle class="rb-eye" cx="40" cy="30" r="2.6"/>
-          </svg>
+          <img class="rudyimg" src="rudy.jpg" alt="" width="100%" height="100%">
         </span>
         <div>
           <h3>Rudy <span class="rubycow" aria-hidden="true"></span></h3>
@@ -1894,18 +1878,7 @@ header.bar{position:sticky;top:0;z-index:20;
     <div class="rubyshell">
       <header class="rubybar">
         <span class="rubyface rubyface--bar" aria-hidden="true">
-          <svg viewBox="0 0 64 64" width="100%" height="100%">
-            <path class="rb-horn" d="M14 22c-5-3-8-9-7-13 4 1 8 5 9 11z"/>
-            <path class="rb-horn" d="M50 22c5-3 8-9 7-13-4 1-8 5-9 11z"/>
-            <ellipse class="rb-head" cx="32" cy="34" rx="22" ry="21"/>
-            <path class="rb-spot" d="M16 24c-3 4-3 10 1 12 4-2 5-9 2-13-1-1-2-1-3 1z"/>
-            <path class="rb-spot" d="M47 21c4 1 7 6 5 10-4 0-8-4-7-9 0-1 1-1 2-1z"/>
-            <ellipse class="rb-muz" cx="32" cy="44" rx="13" ry="10"/>
-            <circle class="rb-nos" cx="26" cy="44" r="2.3"/>
-            <circle class="rb-nos" cx="38" cy="44" r="2.3"/>
-            <circle class="rb-eye" cx="24" cy="30" r="2.6"/>
-            <circle class="rb-eye" cx="40" cy="30" r="2.6"/>
-          </svg>
+          <img class="rudyimg" src="rudy.jpg" alt="" width="100%" height="100%">
         </span>
         <div class="rubybarname"><b>Rudy</b><span>Emotional support cow</span></div>
         <button class="rubyspk" id="rubyspk" type="button" hidden aria-pressed="true" aria-label="Read Rudy's replies aloud">
