@@ -159,18 +159,27 @@ def test_warehouse_jobs_removed():
 def test_job_category():
     assert fa.job_category("Administrative Assistant") == "Office"
     assert fa.job_category("Call Center Representative") == "Customer service"
-    assert fa.job_category("Retail Sales Associate") == "Store & retail"
     assert fa.job_category("Caregiver - Evenings") == "Caregiving"
     assert fa.job_category("Quantum Engineer") == ""
 
 
-def test_food_and_labor_categories_removed():
-    # Her request: no food service or labor jobs. These no longer categorize,
-    # and (more importantly) the allowlist drops them entirely.
+def test_food_labor_and_retail_categories_removed():
+    # Her requests: no food service, labor, OR retail jobs. These no longer
+    # categorize, and (more importantly) the allowlist drops them entirely.
     for title in ("Janitor", "General Laborer", "Food Service Worker",
-                  "Dishwasher", "Production Associate", "Housekeeper"):
+                  "Dishwasher", "Production Associate", "Housekeeper",
+                  "Retail Sales Associate", "Cashier", "Stocker"):
         assert fa.job_category(title) == "", title
         assert not fa.is_admin_title(title), title
+
+
+def test_remote_is_exempt_from_day_shift():
+    # In-person evening jobs are dropped, but a remote evening job is kept —
+    # she can fit remote work around her child.
+    night = {"title": "Data Entry", "description": "Shift 3 PM to midnight."}
+    assert not fa.is_day_shift(night)
+    assert fa.is_remote_row({**night, "source": "remote"})       # exempt: kept
+    assert not fa.is_remote_row({**night, "source": "local"})    # in-person: still gated
 
 
 def test_is_day_shift():
