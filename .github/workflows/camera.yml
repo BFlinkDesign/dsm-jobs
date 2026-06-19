@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # to publish the rendered shots to the camera-shots branch
 
 jobs:
   camera:
@@ -34,7 +34,7 @@ jobs:
         run: python verify/camera.py
         continue-on-error: true   # still upload shots even if an invariant check fails
 
-      - name: Upload screenshots
+      - name: Upload screenshots (artifact)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: camera-shots
@@ -43,3 +43,15 @@ jobs:
             verify/report.json
           if-no-files-found: error
           retention-days: 5
+
+      # Also publish the PNGs to a dedicated branch so a browserless sandbox can
+      # `git fetch` and read them (artifact download needs auth we don't have there).
+      - name: Publish shots to camera-shots branch
+        if: always()
+        run: |
+          git config user.name "camera-bot"
+          git config user.email "camera-bot@users.noreply.github.com"
+          git switch -c camera-shots
+          git add -f verify/shots verify/report.json
+          git commit -m "camera shots for ${GITHUB_SHA::8}"
+          git push -f origin camera-shots
