@@ -15,3 +15,10 @@ supabase/.branches/
 # Camera self-verifier generated artifacts (verify/camera.py is tracked)
 verify/shots/
 verify/report.json
+
+# Dev-only CSS toolchain (verify/css) — installed via npm, not committed
+verify/css/node_modules/
+verify/css/package-lock.json
+verify/css/app.css
+verify/css/app.min.css
+verify/css/_page.html

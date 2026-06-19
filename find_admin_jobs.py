@@ -297,9 +297,27 @@ COMMUTE_MINUTES_FROM_GRIMES = {
 # so experienced-admin roles (Office Manager, Executive Assistant, Senior Admin,
 # Admin Supervisor) belong in her feed. The is_admin_title() gate still keeps
 # everything to real admin/clerical work, so a "Sales Manager" is dropped there.
+# Executive / supervisory / above-entry words that disqualify a role — UNLESS
+# the title is one of the experienced-ADMIN exceptions below (she has years of
+# admin, so "Office Manager" / "Senior Administrative Assistant" stay). This is
+# what drops "Client Services Lead", "Member Services Team Lead" and "Senior
+# Client Services Lead" — supervisory roles the old (admin-only) seniority list
+# let through. ALL matched on \b word boundaries: critically, the old plain
+# "coo" substring was silently dropping every "COOrdinator" — fixed here.
 SENIORITY_DROP_TERMS = [
-    "director", "head of", "chief", "vp ", "vice president",
-    "ceo", "cfo", "coo", "c.e.o", " president ",
+    "director", "head of", "chief", "vp", "vice president",
+    "ceo", "cfo", "coo", "president",
+    "team lead", "lead", "senior", "sr", "supervisor", "manager",
+    "principal", "foreman", "superintendent",
+]
+_SENIORITY_RX = re.compile(
+    r"\b(" + "|".join(re.escape(t) for t in SENIORITY_DROP_TERMS) + r")\b")
+# Experienced-admin titles that OUTRANK the supervisory drop (kept on purpose).
+ADMIN_SENIORITY_OK = [
+    "office manager", "administrative manager", "admin manager",
+    "senior administrative", "lead administrative", "administrative supervisor",
+    "office supervisor", "executive assistant", "executive administrative",
+    "executive coordinator", "executive secretary",
 ]
 
 # A job is kept only if its TITLE contains one of these admin/clerical terms.
@@ -667,7 +685,13 @@ def employer_is_trusted(company):
 def is_attainable(title):
     """Drop senior/competitive roles this user realistically won't be hired into."""
     t = (title or "").lower()
-    return not any(term in t for term in SENIORITY_DROP_TERMS)
+    # Experienced-admin titles (Office Manager, Senior Administrative Assistant)
+    # are kept even though they contain a supervisory word.
+    if any(ok in t for ok in ADMIN_SENIORITY_OK):
+        return True
+    # Otherwise any executive/supervisory word (Director / Lead / Senior /
+    # Manager …) means it's above this user's realistic entry level.
+    return not _SENIORITY_RX.search(t)
 
 
 def _norm_company(company):
@@ -711,6 +735,13 @@ def scam_assessment(row, spam_index):
     for p in SCAM_TITLE_FLAGS:
         if p in title:
             reasons.append(f"scam-prone title ('{p}')")
+    # A signing/sign-on bonus advertised IN THE TITLE — usually all-caps with a
+    # dollar figure ("NOW OFFERING A $15K SIGN-ON BONUS!") — is promo-spam shaped;
+    # real entry admin postings don't put a bonus in the title. Title-only + a
+    # dollar amount keeps it distinctive, so a body that mentions a bonus is safe.
+    if re.search(r"sign[\s-]?on bonus|signing bonus", title) or \
+       re.search(r"\$\s?\d[\d,]*\s?k?\b[^.]{0,18}\bbonus\b", title):
+        reasons.append("scam-prone title ('sign-on bonus advertised in title')")
     # Financial-duty phrases: ordinary teller/cashier/AP work at a trusted LOCAL
     # employer, scam-shaped anywhere else. A REMOTE posting that merely NAMES a
     # trusted employer is the spoofed-name check-cashing shape, so it does NOT
@@ -1261,6 +1292,38 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .app:not(.authed) [data-act="tailor"]{display:none}
 .app:not(.authed) #resumecard{display:none}
 .app:not(.authed) #chatcard{display:none}
+/* No freebies without an account. Signed-out users can BROWSE the scam-checked
+   jobs (proof of value), but every action — Apply / Save / track / notes /
+   share — is swapped for one "create a free account" CTA per card, and the
+   Today / My apps / My corner tabs show the benefits screen instead. */
+.app:not(.authed) .card .apply,
+.app:not(.authed) .card .actions,
+.app:not(.authed) .card .notes{display:none}
+.app.authed .lockcta{display:none}
+.lockcta{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;margin-top:14px;
+ padding:15px;border:0;border-radius:13px;font:inherit;font-weight:800;font-size:16px;min-height:54px;
+ color:#fff;cursor:pointer;letter-spacing:.01em;
+ background:linear-gradient(135deg,color-mix(in oklab,var(--green) 92%,#fff) 0%,#7e22ce 60%,#6b21a8 100%);
+ box-shadow:0 8px 22px color-mix(in oklab,var(--green) 45%,transparent),inset 0 1px 0 rgba(255,255,255,.22)}
+.lockcta:active{transform:translateY(1px) scale(.99)}
+.lockcta svg{flex:0 0 auto}
+/* Account-benefits "what you unlock" screen (shown when a locked tab is tapped) */
+.lockview{padding:14px 2px 6px;text-align:center;animation:rise .3s cubic-bezier(.2,.7,.3,1) both}
+.lockhero{font-family:inherit;font-weight:800;font-size:clamp(24px,7vw,30px);line-height:1.12;margin:8px 0 6px;color:var(--ink)}
+.lockhero .hl{color:var(--green-d)}
+.locksub{color:var(--ink2);font-size:16px;line-height:1.5;max-width:30ch;margin:0 auto 18px}
+.lockperks{list-style:none;margin:0 auto 20px;padding:0;max-width:24rem;text-align:left}
+.lockperks li{display:flex;align-items:flex-start;gap:11px;padding:11px 13px;margin:9px 0;border-radius:13px;
+ background:var(--card);border:1px solid var(--line);font-size:15.5px;line-height:1.4;color:var(--ink)}
+.lockperks li svg{flex:0 0 auto;margin-top:2px;color:var(--green-d)}
+.lockperks li b{font-weight:800}
+.lockperks li span{color:var(--ink2);font-weight:500}
+.lockbtns{display:flex;flex-direction:column;gap:10px;max-width:24rem;margin:0 auto}
+.lockbtns .lockcta{margin-top:0}
+.locksecondary{width:100%;background:var(--surface);color:var(--ink);border:1px solid var(--line);
+ border-radius:13px;font:inherit;font-weight:700;font-size:15px;padding:13px;min-height:50px;cursor:pointer}
+.lockcrisis{margin-top:20px;font-size:13px;color:var(--ink2);line-height:1.5}
+.lockcrisis a{color:var(--green-d);font-weight:700}
 /* Safety */
 .safety{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--red);
  border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
@@ -1699,6 +1762,27 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
     </div>
   </section>
 
+  <!-- ACCOUNT-BENEFITS screen: shown when a signed-out user taps a locked tab
+       (Today / My apps / My corner). "No freebies without an account." -->
+  <section id="lockwrap" hidden>
+    <div class="lockview">
+      <div class="lockhero">Your free account <span class="hl">unlocks all of it</span></div>
+      <p class="locksub" id="locksub">Browsing is free. Make a free account to actually use the app — it takes 10 seconds and saves everything to you.</p>
+      <ul class="lockperks">
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Save &amp; track every application</b> <span>— one tap, and your jobs, “applied” dates and notes follow you to any phone.</span></div></li>
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>AI résumé tailoring</b> <span>— rewrites your real experience to fit each job, in your words, never made up.</span></div></li>
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Your companion</b> <span>— a kind check-in chat that remembers you and helps with the search.</span></div></li>
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Printable work-search log</b> <span>— your weekly Iowa unemployment list, filled in automatically.</span></div></li>
+      </ul>
+      <div class="lockbtns">
+        <button class="lockcta" data-act="signup"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2l1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6z"/></svg>Create my free account</button>
+        <button class="locksecondary" data-act="signin">I already have one — sign in</button>
+      </div>
+      <p class="lockcrisis">Need help right now? <b>988</b> (call/text, free, 24/7) ·
+        Your Life Iowa <a href="tel:8555818111">855-581-8111</a>. Always free, no account.</p>
+    </div>
+  </section>
+
   <section class="safety">
     <h2><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/></svg>Before you apply</h2>
     <div>These jobs were checked and look real. Read the posting, then apply.</div>
@@ -1870,6 +1954,8 @@ const IC = {
   car:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>',
   pen:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 013 3L8 19z"/></svg>',
   share:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v8h14v-8"/></svg>',
+  lock:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>',
+  spark:'<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2l1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6z"/></svg>',
 };
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"'`]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c];});}
@@ -2030,7 +2116,10 @@ function cardEl(j, i){
     '</div>'+
     '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
       '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — who you talked to, when to follow up">'+esc(note)+'</textarea>'+
-    '</div>';
+    '</div>'+
+    // Signed-out: the actions above are hidden by CSS and THIS is the only
+    // button — one tap opens the free sign-up. No freebies without an account.
+    '<button class="lockcta" data-act="signup">'+IC.lock+'Create a free account to apply &amp; save</button>';
   return el;
 }
 
@@ -2319,6 +2408,8 @@ document.querySelector(".app").addEventListener("click",(e)=>{
     return;
   }
   if(act==="qopt"){ quizPick(t); return; }
+  if(act==="signup"){ openAuth("signup"); return; }
+  if(act==="signin"){ openAuth("signin"); return; }
   if(act==="tailor"){ tailorJob(id); return; }
   if(act==="uploadresume"){ var fin=document.getElementById("resumefile"); if(fin) fin.click(); return; }
   if(act==="closetailor"){ closeTailorModal(); return; }
@@ -2743,16 +2834,24 @@ const VIEWS = {
   corner: ["#cornerwrap"],
   help:   [".safety","#coach","#faqwrap"],
 };
+// Tabs that need an account. Signed-out, tapping one shows the benefits screen
+// (#lockwrap) instead of its content. Jobs (browse/teaser) and Help (safety +
+// crisis lines) stay open — gating a crisis hotline would be harmful.
+const LOCKED_VIEWS = { today:1, apps:1, corner:1 };
+function isAuthed(){ var a=document.querySelector(".app"); return !!(a && a.classList.contains("authed")); }
 function setView(name){
+  var locked = !!LOCKED_VIEWS[name] && !isAuthed();
   Object.keys(VIEWS).forEach(function(v){
     VIEWS[v].forEach(function(sel){
       const el=document.querySelector(sel);
-      if(el) el.hidden = (v!==name) || (sel==="#coach" && state.coachOff) ||
+      if(el) el.hidden = locked || (v!==name) || (sel==="#coach" && state.coachOff) ||
                          (sel==="#empty" && el.hidden && v===name && name==="jobs");
     });
     const btn=document.getElementById("nav-"+v);
     if(btn) btn.setAttribute("aria-current", String(v===name));
   });
+  var lw=document.getElementById("lockwrap"); if(lw) lw.hidden = !locked;
+  if(locked){ tuneLockView(name); window.scrollTo({top:0}); return; }
   if(name==="jobs") render(); else { renderPicks(); renderApps(); renderCorner(); }
   // Fresh words of affirmation on every tab entry (and on reload) — never the
   // same phrase twice in a row that the eye can notice. Today/corner refresh
@@ -2764,6 +2863,21 @@ function setView(name){
   const b=document.getElementById("nav-"+v);
   if(b) b.onclick=function(){ setView(v); };
 });
+// Tailor the benefits-screen subcopy to whichever locked tab was tapped.
+function tuneLockView(name){
+  var sub=document.getElementById("locksub"); if(!sub) return;
+  var msg={
+    today:"“Today’s 3 picks” is a free-account feature — a tiny, doable shortlist each morning so the search never feels like too much.",
+    apps: "Tracking what you’ve applied to (and your printable Iowa work-search log) saves to your free account so a new phone never loses it.",
+    corner:"Your corner — résumé tailoring, your companion, and your saved details — lives in your free account so it follows you everywhere."
+  }[name];
+  sub.textContent = msg || "Browsing is free. Make a free account to actually use the app — it takes 10 seconds and saves everything to you.";
+}
+// Bridge to the sign-in/up modal (defined in the portal block when configured).
+function openAuth(which){
+  if(window.__openAuth){ window.__openAuth(which); return; }
+  showToast("Sign-in isn’t set up on this device yet — your browsing still works.");
+}
 
 buildChips();
 render();
@@ -2838,11 +2952,20 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
       .catch(function(){});
 
     function setMsg(t, isErr){ msg.textContent = t || ""; msg.className = "authmsg" + (isErr ? " err" : ""); }
+    function reflectView(){
+      // Re-run the active tab so the lock screen ↔ real content swaps the moment
+      // auth state changes (sign in from a locked tab → its content appears).
+      var cur="jobs"; ["jobs","today","apps","corner","help"].forEach(function(v){
+        var b=document.getElementById("nav-"+v);
+        if(b && b.getAttribute("aria-current")==="true") cur=v; });
+      if(typeof setView==="function") setView(cur);
+    }
     function showOut(){
       acctOut.hidden = false; acctIn.hidden = true;
       acctBtn.classList.remove("in"); acctIcon.hidden = false; acctInitial.hidden = true;
       acctBtn.setAttribute("aria-label", "Sign in");
       var app = document.querySelector(".app"); if(app) app.classList.remove("authed");
+      reflectView();
     }
     function showIn(extra){
       acctOut.hidden = true; acctIn.hidden = false;
@@ -2854,6 +2977,7 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
       acctBtn.classList.add("in");
       acctBtn.setAttribute("aria-label", "Your account — signed in as " + email);
       var app = document.querySelector(".app"); if(app) app.classList.add("authed");
+      reflectView();
     }
     function openModal(){ modal.hidden = false; setMsg(""); document.getElementById("authrecover").hidden = true;
       document.getElementById("authmain").hidden = false; setTimeout(function(){ emailEl.focus(); }, 60); }
@@ -3023,6 +3147,9 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
         ? function(payload){ return sb.functions.invoke("resume-tailor", { body: payload }); }
         : null;
     }
+    // Bridge so the lock CTAs (card "Create a free account", benefits screen)
+    // open the real auth modal. Only exists when the portal is configured.
+    window.__openAuth = function(which){ closeAcct(); setMode(which==="signin"?"signin":"signup"); openModal(); };
 
     /* Pull server state, merge (a flag set anywhere stays set; newest note
        wins), then push back anything only this device knew about — which IS
