@@ -342,6 +342,38 @@ def test_attainability_keeps_experienced_admin_drops_exec_tiers():
     assert fa.is_attainable("Chief of Staff") is False
 
 
+def test_attainability_drops_supervisory_customer_service_leads():
+    # The roles the end user flagged in screenshots: supervisory customer-service
+    # titles that slipped through because the old list only dropped admin seniority.
+    assert fa.is_attainable("Client Services Lead") is False
+    assert fa.is_attainable("Member Services Team Lead") is False
+    assert fa.is_attainable("Senior Client Services Lead") is False
+    assert fa.is_attainable("Customer Service Manager") is False
+    assert fa.is_attainable("Operations Supervisor") is False
+
+
+def test_attainability_keeps_coordinators_regression():
+    # Regression: the bare "coo" drop term used to substring-match "COOrdinator"
+    # and silently drop every coordinator. They are valid admin roles — keep them.
+    for t in ("Administrative Coordinator", "Office Coordinator",
+              "Scheduling Coordinator", "Front Desk Coordinator",
+              "Project Coordinator", "Program Coordinator"):
+        assert fa.is_attainable(t) is True, t
+
+
+def test_scam_sign_on_bonus_in_title_is_hidden():
+    # All-caps promo/sign-on-bonus advertised IN THE TITLE is spam/scam-shaped,
+    # even for an otherwise-recognized employer name. (Screenshot example.)
+    def lvl(title, desc=""):
+        row = {"title": title, "company": "Businessolver", "description": desc,
+               "url": "", "source": "remote", "hourly_min": None, "hourly_max": None}
+        return fa.scam_assessment(row, {})["level"]
+    assert lvl("Customer Service Rep - $10K Sign-On Bonus") == "scam"
+    assert lvl("Receptionist (Signing Bonus!)") == "scam"
+    # A body that merely mentions a bonus must NOT be hidden — title-only signal.
+    assert lvl("Administrative Assistant", desc="benefits and a small bonus") == "safe"
+
+
 # --- transient-5xx retry (scheduled scan failed on a one-off Adzuna 503) ---
 
 
@@ -543,6 +575,21 @@ def test_template_has_no_legacy_theme_leftovers():
     assert "Fraunces" not in t  # serif from the pre-Relume theme
     for warm in ("#fff3e2", "#ecd2a8", "#7a5417", "#9aa39e"):
         assert warm not in t, f"legacy warm color {warm} still in template"
+
+
+def test_account_teaser_gating_present():
+    """No freebies without an account: signed-out users browse jobs but the
+    card actions are CSS-hidden behind .app:not(.authed), a per-card lock CTA
+    replaces them, and a benefits screen (#lockwrap) exists for locked tabs."""
+    t = fa.APP_TEMPLATE
+    assert ".app:not(.authed) .card .apply" in t
+    assert ".app:not(.authed) .card .actions" in t
+    assert '.app.authed .lockcta{display:none}' in t
+    assert 'data-act="signup"' in t          # the create-account CTAs
+    assert 'id="lockwrap"' in t              # the benefits screen
+    assert "LOCKED_VIEWS" in t               # today/apps/corner gate in setView
+    # Crisis lines stay reachable on the locked screen (never gate a hotline).
+    assert "988" in t and "lockcrisis" in t
 
 
 # --- US-only hard guard (no European / foreign trash) ---
