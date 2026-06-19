@@ -22,3 +22,6 @@ verify/css/package-lock.json
 verify/css/app.css
 verify/css/app.min.css
 verify/css/_page.html
+
+# Claude Code local dir + transient agent worktrees
+.claude/

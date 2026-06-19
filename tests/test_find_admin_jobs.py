@@ -577,6 +577,30 @@ def test_template_has_no_legacy_theme_leftovers():
         assert warm not in t, f"legacy warm color {warm} still in template"
 
 
+def test_resume_tailor_paste_description_field_present():
+    """The tailor flow lets her paste the FULL job description (optional) so the
+    engine gets more than the Adzuna snippet, and fires the engine separately."""
+    t = fa.APP_TEMPLATE
+    assert 'id="tailorjd"' in t                      # the paste-description textarea
+    assert 'data-act="runtailor"' in t               # the separate "go" button
+    assert "function runTailor(" in t                # reads the paste, prefers it
+    # the pasted text must actually be preferred over the snippet when long enough
+    assert "pasted.length>=40 ? pasted : snippet" in t
+
+
+def test_resume_tailor_copy_both_and_download_present():
+    """She can get BOTH the résumé and cover note in one clipboard write, plus a
+    .txt download — without losing her place (per-section copy stays too)."""
+    t = fa.APP_TEMPLATE
+    # "both" joins résumé + a separator + cover note into ONE clipboard write
+    assert 'which==="both"' in t and "=== COVER NOTE ===" in t
+    assert "var both = d.cover_note ? 'both' : 'resume';" in t  # the combined copy/download button
+    assert 'data-act="dltailor"' in t                # download affordance
+    assert "function downloadTailor(" in t
+    # the existing per-section copy buttons are preserved
+    assert 'data-copy="resume"' in t and 'data-copy="cover"' in t
+
+
 def test_account_teaser_gating_present():
     """No freebies without an account: signed-out users browse jobs but the
     card actions are CSS-hidden behind .app:not(.authed), a per-card lock CTA
@@ -590,6 +614,29 @@ def test_account_teaser_gating_present():
     assert "LOCKED_VIEWS" in t               # today/apps/corner gate in setView
     # Crisis lines stay reachable on the locked screen (never gate a hotline).
     assert "988" in t and "lockcrisis" in t
+
+
+def test_ruby_companion_markup_and_voice_present():
+    """Ruby the emotional-support cow: full-screen overlay, a designed cow
+    avatar, browser-native voice (mic + read-aloud), still signed-in only."""
+    t = fa.APP_TEMPLATE
+    # Identity + full-screen overlay (not a tiny card).
+    assert "Ruby" in t
+    assert "emotional support cow" in t.lower()
+    assert 'id="rubyov"' in t                  # the full-screen overlay container
+    assert 'id="rubyopen"' in t                # the "Talk to Ruby" launcher
+    # Designed mascot, not emoji-only: an SVG cow face with spots.
+    assert "rb-head" in t and "rb-spot" in t and "rb-horn" in t
+    # Voice chat: mic input (Web Speech) + read-aloud (SpeechSynthesis), both
+    # feature-detected via typeof so unsupported browsers hide them cleanly.
+    assert "SpeechRecognition" in t and "webkitSpeechRecognition" in t
+    assert "SpeechSynthesisUtterance" in t and "speechSynthesis" in t
+    assert 'id="rubymic"' in t and 'id="rubyspk"' in t
+    # Still gated to signed-in users; replies still come from the edge function.
+    assert ".app:not(.authed) #chatcard{display:none}" in t
+    assert 'invoke("companion"' in t
+    # De-cheesed: no glassmorphism blur surface on Ruby's overlay.
+    assert "backdrop-filter" not in t[t.index("rubyov"):t.index("rubyov") + 1200]
 
 
 # --- US-only hard guard (no European / foreign trash) ---
