@@ -174,6 +174,37 @@ def shoot(page):
     page.wait_for_timeout(150)
 
 
+def extra_shots(page):
+    """Signed-in surfaces. The mock build has no portal, so force the `authed`
+    class to reveal the premium UI (résumé card, Ruby companion) and force-open
+    the Ruby overlay — for a visual design pass, not a functional one."""
+    SHOTS.mkdir(parents=True, exist_ok=True)
+    # A job card while signed in (real Apply/actions instead of the lock CTA).
+    page.evaluate("document.querySelector('.app').classList.add('authed')")
+    page.click("#nav-jobs")
+    page.wait_for_timeout(150)
+    page.screenshot(path=str(SHOTS / "05-jobs-authed.png"), full_page=False)
+    # My corner, signed in: Ruby intro card + résumé card + companion.
+    page.click("#nav-corner")
+    page.wait_for_timeout(200)
+    page.screenshot(path=str(SHOTS / "06-corner-authed.png"), full_page=True)
+    # Open the Ruby full-screen companion (click its launcher, else unhide).
+    opened = page.evaluate(
+        """() => {
+            const hit = [...document.querySelectorAll('button,[data-act]')].find(
+                e => /talk to ruby/i.test(e.textContent || '') ||
+                     (e.getAttribute('data-act') || '').toLowerCase().includes('ruby'));
+            if (hit) { hit.click(); return 'launcher'; }
+            const ov = document.getElementById('rubyov');
+            if (ov) { ov.hidden = false; return 'forced'; }
+            return ''; }"""
+    )
+    if opened:
+        page.wait_for_timeout(300)
+        page.screenshot(path=str(SHOTS / "07-ruby.png"), full_page=False)
+    return opened
+
+
 def main():
     from playwright.sync_api import sync_playwright
 
@@ -187,6 +218,10 @@ def main():
             page.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
             results = inspect(page)
             shoot(page)
+            try:
+                extra_shots(page)
+            except Exception as e:  # noqa: BLE001 — extra design shots are best-effort
+                print(f"  (extra_shots skipped: {e})")
             b.close()
     finally:
         httpd.shutdown()
