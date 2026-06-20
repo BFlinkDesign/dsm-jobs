@@ -6,9 +6,12 @@ inspects the live DOM against the load-bearing invariants. Exit 0 iff EVERY chec
 passes; otherwise prints the failures and exits 1. Re-run it after any change —
 it is the loop's eyes.
 
-Verify-only tool (NOT a runtime dependency): needs `pip install playwright` and
-system Chrome. On this box Playwright's bundled Chromium download fails, so we
-launch the installed Chrome via channel="chrome".
+Verify-only tool (NOT a runtime dependency). DETERMINISTIC by design: it drives
+Playwright's BUNDLED Chromium, pinned to the playwright version in
+verify/requirements.txt, against the canned --mock build — so the rendered
+pixels are reproducible across runs and machines (CI or local). Setup:
+    pip install -r verify/requirements.txt
+    python -m playwright install --with-deps chromium    # the pinned revision
 
     python verify/camera.py            # build + shoot + inspect
     python verify/camera.py --no-build # inspect the existing web/ build
@@ -220,9 +223,33 @@ def main():
     httpd, port = serve()
     try:
         with sync_playwright() as p:
-            b = p.chromium.launch(channel="chrome", headless=True)
-            page = b.new_page(viewport={"width": 430, "height": 932})
+            # DETERMINISTIC by construction: Playwright's BUNDLED Chromium is
+            # pinned to the playwright version in verify/requirements.txt
+            # (==1.58.0 -> one fixed Chromium revision), NOT system Chrome (which
+            # drifts). Fixed viewport + device scale + reduced-motion + frozen
+            # animations + canned --mock data => the same pixels every run, in CI
+            # or locally. No browser-autodetect, no fallback cascade: if the
+            # pinned Chromium isn't installed, this raises (a clear, repeatable
+            # failure) rather than silently using a different browser.
+            b = p.chromium.launch(headless=True, args=["--force-device-scale-factor=1", "--hide-scrollbars"])
+            page = b.new_page(
+                viewport={"width": 430, "height": 932},
+                device_scale_factor=1,
+                reduced_motion="reduce",
+            )
             page.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
+            # Freeze every animation/transition + the text caret, and wait for
+            # web fonts, so a screenshot can never catch a mid-animation frame.
+            page.add_style_tag(content=(
+                "*,*::before,*::after{animation:none!important;transition:none!important;"
+                "animation-duration:0s!important;caret-color:transparent!important;"
+                "scroll-behavior:auto!important}"
+            ))
+            try:
+                page.evaluate("document.fonts && document.fonts.ready")
+            except Exception:  # noqa: BLE001 — fonts API is best-effort
+                pass
+            page.wait_for_timeout(120)
             results = inspect(page)
             shoot(page)
             try:

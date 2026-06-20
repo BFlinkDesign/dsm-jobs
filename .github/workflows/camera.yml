@@ -1,9 +1,9 @@
 name: Camera (design pass)
 
-# Renders the PWA in REAL Chrome on the runner and uploads the screenshots as an
-# artifact, so a sandbox without a browser can still SEE the rendered reality
-# (invariant #7). Mock data only (no PII). Runs on push to the camera branch and
-# on manual dispatch.
+# Renders the PWA in the pinned bundled Chromium on the runner and uploads the
+# screenshots, so a sandbox without a browser can still SEE the rendered reality
+# (invariant #7). Deterministic: pinned runner + pinned Playwright/Chromium +
+# canned mock data. No PII. Runs on push to the camera branch and on dispatch.
 on:
   push:
     branches: [claude/camera-pass]
@@ -14,7 +14,9 @@ permissions:
 
 jobs:
   camera:
-    runs-on: ubuntu-latest
+    # Pinned runner image (not -latest) + pinned Playwright/Chromium + canned
+    # mock data => a deterministic render every run.
+    runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -24,15 +26,27 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install Playwright + real Chrome
-        run: |
-          python -m pip install --upgrade pip
-          pip install playwright
-          python -m playwright install --with-deps chrome
+      - name: Install pinned Playwright + bundled Chromium
+        run: bash verify/setup-web.sh
 
       - name: Run the camera (build + render + shoot)
         run: python verify/camera.py
         continue-on-error: true   # still upload shots even if an invariant check fails
+
+      - name: Determinism check — re-render the same build, compare pixel hashes
+        run: |
+          set -euo pipefail
+          cp -r verify/shots /tmp/shots_run1
+          rm -rf verify/shots
+          python verify/camera.py --no-build       # same --mock HTML, render again
+          ( cd /tmp/shots_run1 && sha256sum *.png | sort ) > /tmp/h1.txt
+          ( cd verify/shots     && sha256sum *.png | sort ) > /tmp/h2.txt
+          echo "--- run 1 ---"; cat /tmp/h1.txt
+          if diff -u /tmp/h1.txt /tmp/h2.txt; then
+            echo "DETERMINISTIC: identical pixels across two renders of the same build."
+          else
+            echo "NON-DETERMINISTIC: the two renders differ (see diff above)."; exit 1
+          fi
 
       - name: Upload screenshots (artifact)
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
