@@ -237,15 +237,21 @@ def main():
                 device_scale_factor=1,
                 reduced_motion="reduce",
             )
-            # Seed Math.random to a FIXED value before any page script runs, so
-            # the rotating "— Daddy" affirmations (pickEnc) and any other RNG are
-            # reproducible — otherwise full-page shots that capture the footer
-            # phrase differ every render. This is camera-only (a seeded mulberry32);
-            # production randomness is untouched.
+            # Remove the two sources of per-render variance, camera-only, before
+            # any page script runs (production RNG/clock untouched):
+            #   (1) Math.random -> a fixed-seed mulberry32, so the rotating
+            #       "— Daddy" affirmations (pickEnc) are reproducible.
+            #   (2) Date/Date.now -> a frozen instant, so greetings and relative
+            #       "posted N weeks ago" text can't shift between the two renders.
             page.add_init_script(
                 "(function(){var s=0x2545F491;Math.random=function(){"
                 "s|=0;s=s+0x6D2B79F5|0;var t=Math.imul(s^s>>>15,1|s);"
-                "t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};})();"
+                "t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};"
+                "var FIXED=1781913600000,R=Date;function F(a,b,c,d,e,f,g){"
+                "switch(arguments.length){case 0:return new R(FIXED);"
+                "case 1:return new R(a);default:return new R(a,b,c,d,e,f,g);}}"
+                "F.now=function(){return FIXED;};F.parse=R.parse;F.UTC=R.UTC;"
+                "F.prototype=R.prototype;Date=F;window.Date=F;})();"
             )
             page.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
             # Freeze every animation/transition + the text caret, and wait for
