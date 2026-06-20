@@ -572,7 +572,9 @@ def test_title_excluded_word_boundaries():
 
 def test_template_has_no_legacy_theme_leftovers():
     t = fa.APP_TEMPLATE
-    assert "Fraunces" not in t  # serif from the pre-Relume theme
+    # Fraunces serif is now the INTENTIONAL editorial-goth display face (was banned as a
+    # pre-Relume leftover; the goth redesign deliberately brings a serif display back).
+    # Still guard that the old light/warm "Relume" palette stays gone.
     for warm in ("#fff3e2", "#ecd2a8", "#7a5417", "#9aa39e"):
         assert warm not in t, f"legacy warm color {warm} still in template"
 
@@ -625,8 +627,9 @@ def test_ruby_companion_markup_and_voice_present():
     assert "emotional support cow" in t.lower()
     assert 'id="rubyov"' in t                  # the full-screen overlay container
     assert 'id="rubyopen"' in t                # the "Talk to Ruby" launcher
-    # Designed mascot, not emoji-only: an SVG cow face with spots.
-    assert "rb-head" in t and "rb-spot" in t and "rb-horn" in t
+    # Designed mascot, not emoji-only: the real RUDY portrait in a circular avatar
+    # (replaced the old hand-drawn rb-* SVG cow, which read as cheesy/piglet).
+    assert "rudy.jpg" in t and 'class="rudyimg"' in t
     # Voice chat: mic input (Web Speech) + read-aloud (SpeechSynthesis), both
     # feature-detected via typeof so unsupported browsers hide them cleanly.
     assert "SpeechRecognition" in t and "webkitSpeechRecognition" in t
