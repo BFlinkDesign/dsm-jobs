@@ -16,12 +16,15 @@ supabase/.branches/
 verify/shots/
 verify/report.json
 
-# Dev-only CSS toolchain (verify/css) — installed via npm, not committed
+# Dev-only CSS toolchain (verify/css) — node_modules + generated CSS not committed.
+# The lockfile IS committed (deterministic `npm ci` in CI).
 verify/css/node_modules/
-verify/css/package-lock.json
 verify/css/app.css
 verify/css/app.min.css
 verify/css/_page.html
 
-# Claude Code local dir + transient agent worktrees
-.claude/
+# Claude Code local dir + transient agent worktrees — but keep the committed
+# project settings + hooks (the SessionStart hook) tracked.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/

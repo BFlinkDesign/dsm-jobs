@@ -40,7 +40,7 @@ jobs:
     # also require the PR author to actually be a bot account. A human's
     # claude/* PR is therefore never auto-merged.
     if: startsWith(github.head_ref, 'claude/') && github.event.pull_request.user.type == 'Bot'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - name: Decide auto-merge vs escalate by changed paths
