@@ -17,6 +17,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as Sentry from "npm:@sentry/deno@10";
 import { knownFacts } from "./grounding.ts";
+import { checkSpendAllowed, costForUsage, recordSpendAndAlert } from "../_shared/spend_cap.ts";
 
 // Error + AI monitoring, gated on SENTRY_DSN so an unset key is a clean no-op
 // (the function behaves exactly as before). Privacy is the spec: no PII, request
@@ -196,6 +197,16 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "You're going quick — give me a few seconds and try again 💜" }, 429);
   }
 
+  // App-wide monthly Anthropic spend cap (shared with resume-tailor). Check MTD
+  // BEFORE spending; if we're at/over the cap, refuse gently — Ruby "says" the
+  // resting line (returned as {reply} at 200 so the UI shows it like any other
+  // message). FAILS CLOSED: checkSpendAllowed returns allowed:false on any
+  // ledger error, so we never spend when we can't prove we're under budget.
+  const spend = await checkSpendAllowed(supabase);
+  if (!spend.allowed) {
+    return json({ reply: "Ruby's resting until next month 💜" });
+  }
+
   // Load recent history + profile (all RLS-scoped).
   const [{ data: history }, { data: prof }] = await Promise.all([
     supabase.from("chat_messages").select("role, body")
@@ -296,6 +307,12 @@ async function handle(req: Request): Promise<Response> {
   }
   reply = reply.trim() || "I'm here. Tell me more?";
   await supabase.from("chat_messages").insert({ role: "assistant", body: reply });
+
+  // Record the real provider cost for this turn and fire the $20/$25 alerts if
+  // we just crossed a threshold. Post-call, so it cannot fail closed (the spend
+  // already happened) — recordSpendAndAlert logs failures and never throws.
+  await recordSpendAndAlert(supabase, costForUsage(MODEL, data.usage));
+
   return json({ reply });
 }
 

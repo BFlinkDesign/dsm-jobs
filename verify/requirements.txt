@@ -1,3 +1,8 @@
 # Verify-only (the camera self-verifier). NOT a runtime dependency — the app
-# itself is stdlib-only. Needs system Chrome present (camera uses channel="chrome").
-playwright==1.58.0
+# itself is stdlib-only.
+#
+# DETERMINISTIC browser: this pinned playwright version bundles ONE fixed
+# Chromium revision. The camera launches that bundled Chromium (NOT system
+# Chrome, which drifts), so renders are reproducible. Install the browser with:
+#     python -m playwright install --with-deps chromium
+playwright==1.60.0

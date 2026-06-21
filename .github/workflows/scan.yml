@@ -25,7 +25,7 @@ permissions:
 
 jobs:
   scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
@@ -44,7 +44,12 @@ jobs:
       # Sentry DSN is PUBLIC/embeddable, so it's a repo Variable, not a Secret.
       SENTRY_DSN: ${{ vars.SENTRY_DSN }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      # Read-only checkout: the gh-pages publish step below pushes with an
+      # explicit x-access-token URL in a fresh `git init` repo under web/, so it
+      # never uses these persisted credentials. Drop them (zizmor "artipacked").
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:

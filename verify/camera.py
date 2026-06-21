@@ -6,9 +6,12 @@ inspects the live DOM against the load-bearing invariants. Exit 0 iff EVERY chec
 passes; otherwise prints the failures and exits 1. Re-run it after any change —
 it is the loop's eyes.
 
-Verify-only tool (NOT a runtime dependency): needs `pip install playwright` and
-system Chrome. On this box Playwright's bundled Chromium download fails, so we
-launch the installed Chrome via channel="chrome".
+Verify-only tool (NOT a runtime dependency). DETERMINISTIC by design: it drives
+Playwright's BUNDLED Chromium, pinned to the playwright version in
+verify/requirements.txt, against the canned --mock build — so the rendered
+pixels are reproducible across runs and machines (CI or local). Setup:
+    pip install -r verify/requirements.txt
+    python -m playwright install --with-deps chromium    # the pinned revision
 
     python verify/camera.py            # build + shoot + inspect
     python verify/camera.py --no-build # inspect the existing web/ build
@@ -132,15 +135,22 @@ def inspect(page):
     }""")
     out.append(check("invariant1_no_predicted_dollar", not inv["bad"] and not inv["conflict"], inv))
 
-    # Bottom-nav view switching.
+    # Bottom-nav view switching. Signed-out (the mock build has no session),
+    # Today + My corner are gated and show the benefits screen (#lockwrap), not
+    # their own content; Jobs and Help stay open.
     nav = {}
-    for tab, sel in [("nav-today", "#todaywrap"), ("nav-corner", "#cornerwrap"), ("nav-help", "#faqwrap")]:
-        page.click(f"#{tab}")
-        page.wait_for_timeout(150)
-        nav[tab] = not page.eval_on_selector(sel, "el => el.hidden")
+    page.click("#nav-today")
+    page.wait_for_timeout(150)
+    nav["today_locked"] = not page.eval_on_selector("#lockwrap", "el => el.hidden")
+    page.click("#nav-corner")
+    page.wait_for_timeout(150)
+    nav["corner_locked"] = not page.eval_on_selector("#lockwrap", "el => el.hidden")
+    page.click("#nav-help")
+    page.wait_for_timeout(150)
+    nav["help"] = not page.eval_on_selector("#faqwrap", "el => el.hidden")
     page.click("#nav-jobs")
     page.wait_for_timeout(150)
-    nav["nav-jobs"] = page.eval_on_selector("#list", "el => !el.hidden")
+    nav["jobs"] = page.eval_on_selector("#list", "el => !el.hidden")
     out.append(check("nav_switches_views", all(nav.values()), nav))
 
     # Auth DOM present + provider-aware: Google hidden, email/pass present.
@@ -174,6 +184,37 @@ def shoot(page):
     page.wait_for_timeout(150)
 
 
+def extra_shots(page):
+    """Signed-in surfaces. The mock build has no portal, so force the `authed`
+    class to reveal the premium UI (résumé card, Ruby companion) and force-open
+    the Ruby overlay — for a visual design pass, not a functional one."""
+    SHOTS.mkdir(parents=True, exist_ok=True)
+    # A job card while signed in (real Apply/actions instead of the lock CTA).
+    page.evaluate("document.querySelector('.app').classList.add('authed')")
+    page.click("#nav-jobs")
+    page.wait_for_timeout(150)
+    page.screenshot(path=str(SHOTS / "05-jobs-authed.png"), full_page=False)
+    # My corner, signed in: Ruby intro card + résumé card + companion.
+    page.click("#nav-corner")
+    page.wait_for_timeout(200)
+    page.screenshot(path=str(SHOTS / "06-corner-authed.png"), full_page=True)
+    # Open the Ruby full-screen companion. Its launcher handler only exists in
+    # the signed-in portal script (absent in the mock build), so force the
+    # overlay visible directly to photograph its styling.
+    opened = page.evaluate(
+        """() => {
+            const ov = document.getElementById('rubyov');
+            if (!ov) return '';
+            ov.hidden = false;
+            document.body.style.overflow = 'hidden';
+            return 'forced'; }"""
+    )
+    if opened:
+        page.wait_for_timeout(300)
+        page.screenshot(path=str(SHOTS / "07-ruby.png"), full_page=False)
+    return opened
+
+
 def main():
     from playwright.sync_api import sync_playwright
 
@@ -182,11 +223,55 @@ def main():
     httpd, port = serve()
     try:
         with sync_playwright() as p:
-            b = p.chromium.launch(channel="chrome", headless=True)
-            page = b.new_page(viewport={"width": 430, "height": 932})
+            # DETERMINISTIC by construction: Playwright's BUNDLED Chromium is
+            # pinned to the playwright version in verify/requirements.txt
+            # (==1.58.0 -> one fixed Chromium revision), NOT system Chrome (which
+            # drifts). Fixed viewport + device scale + reduced-motion + frozen
+            # animations + canned --mock data => the same pixels every run, in CI
+            # or locally. No browser-autodetect, no fallback cascade: if the
+            # pinned Chromium isn't installed, this raises (a clear, repeatable
+            # failure) rather than silently using a different browser.
+            b = p.chromium.launch(headless=True, args=["--force-device-scale-factor=1", "--hide-scrollbars"])
+            page = b.new_page(
+                viewport={"width": 430, "height": 932},
+                device_scale_factor=1,
+                reduced_motion="reduce",
+            )
+            # Remove the two sources of per-render variance, camera-only, before
+            # any page script runs (production RNG/clock untouched):
+            #   (1) Math.random -> a fixed-seed mulberry32, so the rotating
+            #       "— Daddy" affirmations (pickEnc) are reproducible.
+            #   (2) Date/Date.now -> a frozen instant, so greetings and relative
+            #       "posted N weeks ago" text can't shift between the two renders.
+            page.add_init_script(
+                "(function(){var s=0x2545F491;Math.random=function(){"
+                "s|=0;s=s+0x6D2B79F5|0;var t=Math.imul(s^s>>>15,1|s);"
+                "t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};"
+                "var FIXED=1781913600000,R=Date;function F(a,b,c,d,e,f,g){"
+                "switch(arguments.length){case 0:return new R(FIXED);"
+                "case 1:return new R(a);default:return new R(a,b,c,d,e,f,g);}}"
+                "F.now=function(){return FIXED;};F.parse=R.parse;F.UTC=R.UTC;"
+                "F.prototype=R.prototype;Date=F;window.Date=F;})();"
+            )
             page.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
+            # Freeze every animation/transition + the text caret, and wait for
+            # web fonts, so a screenshot can never catch a mid-animation frame.
+            page.add_style_tag(content=(
+                "*,*::before,*::after{animation:none!important;transition:none!important;"
+                "animation-duration:0s!important;caret-color:transparent!important;"
+                "scroll-behavior:auto!important}"
+            ))
+            try:
+                page.evaluate("document.fonts && document.fonts.ready")
+            except Exception:  # noqa: BLE001 — fonts API is best-effort
+                pass
+            page.wait_for_timeout(120)
             results = inspect(page)
             shoot(page)
+            try:
+                extra_shots(page)
+            except Exception as e:  # noqa: BLE001 — extra design shots are best-effort
+                print(f"  (extra_shots skipped: {e})")
             b.close()
     finally:
         httpd.shutdown()
