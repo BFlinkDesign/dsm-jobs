@@ -31,6 +31,12 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as Sentry from "npm:@sentry/deno@10";
+import {
+  accumulateCost,
+  checkSpendAllowed,
+  recordSpendAndAlert,
+  type Usage,
+} from "../_shared/spend_cap.ts";
 
 const SENTRY_DSN = Deno.env.get("SENTRY_DSN");
 if (SENTRY_DSN) {
@@ -300,6 +306,20 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "You're going quick — give me a couple minutes and try again 💜" }, 429);
   }
 
+  // App-wide monthly Anthropic spend cap (shared with the companion). Check MTD
+  // ONCE here, before the first model call — the whole write -> critique ->
+  // revise loop counts as one tailoring (same philosophy as the rate cap above),
+  // so we don't re-gate mid-loop and strand an in-flight Opus spend. FAILS
+  // CLOSED: checkSpendAllowed returns allowed:false on any ledger error.
+  const spend = await checkSpendAllowed(supabase);
+  if (!spend.allowed) {
+    return json({ error: "The monthly AI budget has been reached — résumé tailoring is paused until next month." }, 503);
+  }
+
+  // Accumulate provider cost across every model call in the loop (Opus writer +
+  // Sonnet critic, billed at different rates). Recorded ONCE after the loop.
+  const spendCalls: Array<{ model: string; usage: Usage }> = [];
+
   const POSTING =
     `JOB POSTING\nTitle: ${jobTitle || "(not given)"}\nEmployer: ${company || "(not given)"}\n` +
     `Description:\n${jobText || "(only the title was provided)"}`;
@@ -324,10 +344,15 @@ async function handle(req: Request): Promise<Response> {
       });
       await Sentry.flush(2000);
     }
+    // The write call may have run and billed even though we couldn't use it;
+    // record whatever it cost before we bail (post-call, never fails closed).
+    await recordSpendAndAlert(supabase, accumulateCost(spendCalls));
     return json({ error: "the résumé helper is resting — try again in a minute" }, 502);
   }
+  spendCalls.push({ model: WRITER_MODEL, usage: (firstWrite.data as { usage?: Usage })?.usage });
   let draft = parseFirstJson(firstWrite.data) as WriterOut | null;
   if (!draft?.resume) {
+    await recordSpendAndAlert(supabase, accumulateCost(spendCalls));  // the write still billed
     return json({ error: "I couldn't put that together cleanly — try once more?" }, 502);
   }
 
@@ -342,6 +367,7 @@ async function handle(req: Request): Promise<Response> {
       `COVER NOTE:\n${draft.cover_note || "(none)"}`;
     const crit = await callModel(apiKey, CRITIC_MODEL, CRITIC_SYSTEM, critUser, CRITIC_SCHEMA, "critique");
     if (!crit.ok) break; // keep the current draft; one bad critique shouldn't sink it
+    spendCalls.push({ model: CRITIC_MODEL, usage: (crit.data as { usage?: Usage })?.usage });
     const verdict = parseFirstJson(crit.data) as CriticOut | null;
     if (!verdict || verdict.ok) break; // satisfied (or unparseable) → ship current draft
 
@@ -360,10 +386,16 @@ async function handle(req: Request): Promise<Response> {
       `\n\nRemember: never add anything that isn't in her real resume.`;
     const rev = await callModel(apiKey, WRITER_MODEL, WRITER_SYSTEM, reviseUser, WRITER_SCHEMA, "revise");
     if (!rev.ok) break; // keep the current draft
+    spendCalls.push({ model: WRITER_MODEL, usage: (rev.data as { usage?: Usage })?.usage });
     const revised = parseFirstJson(rev.data) as WriterOut | null;
     if (!revised?.resume) break; // keep the current draft
     draft = revised;
   }
+
+  // Record the full provider cost of this tailoring (write + every critique +
+  // every revise) once, and fire the $20/$25 alerts if it crossed a threshold.
+  // Post-call: never fails closed (the spend already happened).
+  await recordSpendAndAlert(supabase, accumulateCost(spendCalls));
 
   return json({
     resume: draft.resume,
