@@ -200,6 +200,20 @@ TRUSTED_EMPLOYER_GROUPS = {
 }
 TRUSTED_EMPLOYER_HINTS = [h for hints in TRUSTED_EMPLOYER_GROUPS.values() for h in hints]
 
+
+def _trusted_rx(hints):
+    """Compile hints into a word-bounded matcher. A substring match (`'ups' in
+    'startups'`) wrongly trusts junk names like 'Quick Startups Staffing' or
+    'Marshalling Logistics' ('marsh'), which then rescues them from scam signals
+    and floats them to the top — a real hole for a scam-targeted user. Word
+    boundaries keep every legitimate hit ('CVS Health', 'State of Iowa') while
+    refusing accidental substrings."""
+    return re.compile("|".join(r"\b" + re.escape(h) + r"\b" for h in hints), re.IGNORECASE)
+
+
+_TRUSTED_EMPLOYER_RX = _trusted_rx(TRUSTED_EMPLOYER_HINTS)
+_TRUSTED_GROUP_RX = {label: _trusted_rx(hints) for label, hints in TRUSTED_EMPLOYER_GROUPS.items()}
+
 # Local jobs must be in Polk or Dallas County. Adzuna locations are city-based,
 # so this is an allowlist of every city/CDP in the two counties; a local posting
 # whose location doesn't name one of these places (or the county itself) is
@@ -582,9 +596,9 @@ def job_category(title):
 
 def trusted_reason(company):
     """Why an employer is on the trusted list ('Government', ...), or ''."""
-    c = (company or "").lower()
-    for label, hints in TRUSTED_EMPLOYER_GROUPS.items():
-        if any(h in c for h in hints):
+    c = company or ""
+    for label, rx in _TRUSTED_GROUP_RX.items():
+        if rx.search(c):
             return label
     return ""
 
@@ -678,8 +692,7 @@ def title_is_remote(job):
 
 
 def employer_is_trusted(company):
-    c = (company or "").lower()
-    return any(h in c for h in TRUSTED_EMPLOYER_HINTS)
+    return bool(_TRUSTED_EMPLOYER_RX.search(company or ""))
 
 
 def is_attainable(title):
@@ -770,14 +783,20 @@ def scam_assessment(row, spam_index):
             return {"level": "safe", "reasons": []}
         return {"level": "scam", "reasons": reasons}
 
-    # No explicit flags. Apply extra suspicion to remote + unknown employer.
-    if remote and not trusted:
-        # Unrealistic pay for entry remote admin is bait.
+    # No explicit flags. Remote postings get extra suspicion.
+    if remote:
+        # Unrealistic pay for entry remote admin is bait — even when the posting
+        # NAMES a trusted employer, because a real trusted employer's entry-admin
+        # role isn't a $30+/hr remote gig. A trusted name alone is easy to fake,
+        # so remote doesn't get the trusted rescue here (same spoofed-name logic
+        # as the financial-duty check above).
         if hourly is not None and hourly >= 30:
+            who = "spoofed trusted name" if trusted else "unknown employer"
             return {"level": "scam",
-                    "reasons": [f"remote, unknown employer, pay ${hourly:.0f}/hr is too good for entry admin"]}
-        return {"level": "suspect",
-                "reasons": ["remote role from an employer we couldn't recognize"]}
+                    "reasons": [f"remote, {who}, pay ${hourly:.0f}/hr is too good for entry admin"]}
+        if not trusted:
+            return {"level": "suspect",
+                    "reasons": ["remote role from an employer we couldn't recognize"]}
 
     return {"level": "safe", "reasons": []}
 
