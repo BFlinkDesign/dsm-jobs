@@ -1,0 +1,17 @@
+-- Harden the AI spend-cap RPC grants: revoke EXECUTE from `anon`.
+--
+-- The ai_spend_ledger migration revokes EXECUTE from PUBLIC, but that is NOT
+-- sufficient on a default Supabase project. Supabase's bootstrap runs
+--   ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON FUNCTIONS TO anon, ...
+-- so every new public-schema function is granted EXECUTE to `anon` DIRECTLY.
+-- A `revoke ... from public` does NOT remove that direct grant.
+--
+-- Confirmed live on project tcclohxvhmwgjrtdkkuw: after the revoke-from-public,
+-- has_function_privilege('anon','public.record_ai_spend(numeric)','execute') was
+-- still TRUE. An anonymous caller (the anon key ships in the client bundle) could
+-- POST {"cost_usd": 9999} to /rest/v1/rpc/record_ai_spend and trip the sticky
+-- $25 stop — a DoS that pauses all AI features for the month.
+--
+-- Revoke from anon so ONLY `authenticated` can invoke it. Verified live after:
+-- authenticated=true, anon=false, public=false.
+revoke execute on function public.record_ai_spend(numeric) from anon;
