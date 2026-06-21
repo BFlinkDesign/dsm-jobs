@@ -567,6 +567,21 @@ def test_remote_too_good_pay_scam_even_for_trusted_name():
     assert fa.scam_assessment(ok, {})["level"] == "safe"
 
 
+def test_remote_trusted_name_with_structural_tell_is_not_rescued():
+    # A REMOTE posting that names a trusted brand AND shows a structural tell
+    # (same role spammed across cities) is the spoofed-brand shape — the trusted
+    # rescue must not launder it. A LOCAL trusted posting with the same tell is
+    # still downgraded to safe (a real employer hiring the role in many offices).
+    rows = [_row(title="Administrative Assistant", company="UnityPoint Health",
+                 source="remote", desc="") for _ in range(3)]
+    for i, r in enumerate(rows):
+        r["location"] = f"City{i}, IA"
+    idx = fa.build_spam_index(rows)
+    assert fa.scam_assessment(rows[0], idx)["level"] == "scam"
+    local = {**rows[0], "source": "local"}
+    assert fa.scam_assessment(local, idx)["level"] == "safe"
+
+
 def test_degree_preferred_is_not_required():
     assert (
         fa.requires_degree(

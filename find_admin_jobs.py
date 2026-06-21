@@ -774,12 +774,17 @@ def scam_assessment(row, spam_index):
         reasons.append("no employer name")
 
     if reasons:
-        # Trusted employer can't rescue a hard description tell, but absent those,
-        # a known employer downgrades structural noise to safe.
+        # A trusted employer can't rescue a hard description tell. Absent those, a
+        # known LOCAL employer downgrades structural noise to safe — but a REMOTE
+        # posting never gets the trusted rescue: naming a trusted brand on a
+        # remote listing that ALSO shows a structural tell (cross-city spam, blank
+        # employer, financial-duty language) is the spoofed-brand shape, and a
+        # real trusted employer's entry-admin role is local. A clean remote role
+        # from a trusted name (no tells) still reaches the safe path below.
         hard = any("description mentions" in r or "scam-prone" in r for r in reasons)
         if hard:
             return {"level": "scam", "reasons": reasons}
-        if trusted:
+        if trusted and not remote:
             return {"level": "safe", "reasons": []}
         return {"level": "scam", "reasons": reasons}
 
