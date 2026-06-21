@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   health:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 6
     steps:
       - name: Check out the published build (gh-pages)

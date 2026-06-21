@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   backend-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10          # REQUIRED: never let a hung job run forever
     strategy:
       fail-fast: false
@@ -47,7 +47,7 @@ jobs:
         run: python find_admin_jobs.py --mock
 
   css-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -64,13 +64,13 @@ jobs:
 
       - name: Install CSS toolchain (Lightning CSS)
         working-directory: verify/css
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund    # exact, from the committed lockfile
 
       - name: Validate generated CSS (Lightning CSS)
         run: python verify/css/lint_css.py
 
   secret-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
@@ -91,3 +91,26 @@ jobs:
             echo "::error::Potential secret detected (see matches above)"; exit 1
           fi
           echo "No secret shapes found."
+
+  gitleaks:
+    # Second secret layer: gitleaks' 150+ provider rules + entropy detection,
+    # complementing the shape-scan above. Installed as a PINNED binary verified
+    # by SHA256 (no third-party action to trust). .gitleaks.toml allowlists the
+    # files that legitimately carry secret-SHAPED regexes (not real secrets).
+    name: secret scan (gitleaks, pinned)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+
+      - name: Run gitleaks (pinned binary + checksum)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER=8.30.1
+          SHA=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          curl -fsSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz"
+          echo "${SHA}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks dir . --no-banner --redact --config .gitleaks.toml --exit-code 1

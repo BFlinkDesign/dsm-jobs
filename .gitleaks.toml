@@ -1,0 +1,15 @@
+# gitleaks config — use the full built-in default ruleset, plus a small
+# allowlist for files that legitimately contain secret-SHAPED REGEXES rather
+# than real secrets (so the scan stays green without weakening detection):
+#   - .github/workflows/ci.yml : the shape-based secret scanner's PATTERN string
+#   - .gitleaks.toml           : this file
+# Real secrets live only in .env / GitHub Actions secrets, never in the repo.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Files that carry secret-shaped regexes, not real secrets"
+paths = [
+  '''\.github/workflows/ci\.yml''',
+  '''\.gitleaks\.toml''',
+]
