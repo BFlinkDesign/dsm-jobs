@@ -18,17 +18,25 @@ import os
 import subprocess
 import sys
 
-# Deterministic checks that MUST be green — the hard veto. These are the literal
-# GitHub check/status names this repo produces on a PR (confirmed live). Edit
-# this list to match the required-checks set armed in branch protection; the two
-# must stay in sync. Candidates to add once they run on PRs: a camera-invariant
-# job and Semgrep.
+# Deterministic checks that MUST be green — the hard veto. This list MIRRORS the
+# live branch-protection ruleset exactly (repo ruleset 17514336, verified
+# 2026-06-21): backend-checks 3.11/3.12, secret-scan, and Semgrep
+# ("scan (keyless OSS)"). The two must stay in sync — if you change branch
+# protection, change this, and vice-versa. (Drift here is a silent fail-open: a
+# check the ruleset requires but this omits would stop blocking once
+# `consensus/final` becomes the single required check.)
+#
+# Socket and GitGuardian are deliberately NOT in this hard-veto set: they are
+# advisory third-party apps, are NOT in the ruleset, and post `neutral` for
+# "nothing to scan" — which the strict success-only rule below would read as a
+# block (paralysis). To make either a hard blocker, first add it to the ruleset
+# AND confirm it posts `success` (not `neutral`) on a clean PR. Camera-invariant
+# job: add here once it runs on PRs.
 DETERMINISTIC_REQUIRED = [
     "backend-checks (3.11)",
     "backend-checks (3.12)",
     "secret-scan",
-    "Socket Security: Pull Request Alerts",
-    "GitGuardian Security Checks",
+    "scan (keyless OSS)",
 ]
 
 # Reviewer quorum rule (standard repo). High-risk repos should raise these.
@@ -56,8 +64,19 @@ def gh_json(args: list[str]) -> object:
 def outcomes(repo: str, sha: str) -> dict[str, str]:
     """Map every check/status name on `sha` to a normalized outcome.
 
-    Outcome is one of: "success", "failure", "pending". Check-runs and commit
-    statuses are merged into one namespace keyed by their display name/context.
+    Outcome is one of: "success", "failure", "error", "pending". Check-runs and
+    commit statuses are merged into one namespace keyed by their display
+    name/context.
+
+    Two fail-closed rules live here (both were fail-OPEN before):
+    - A deterministic check-run counts as satisfied ONLY when its conclusion is
+      exactly "success". neutral / skipped / cancelled / timed_out / failure all
+      normalize to "failure" so a required check can never be silently waved
+      through — matching GitHub's strict "must be success" required-check rule.
+    - A reviewer commit-status of state "error" (the workflow posts this when a
+      reviewer produced NO verdict — malformed/missing structured output) is kept
+      DISTINCT from a genuine "failure" verdict, so it does not fill a quorum slot
+      in the completed-reviewer count.
     """
     result: dict[str, str] = {}
 
@@ -67,9 +86,10 @@ def outcomes(repo: str, sha: str) -> dict[str, str]:
         name = run.get("name", "")
         if run.get("status") != "completed":
             result[name] = "pending"
-        elif run.get("conclusion") in ("success", "neutral", "skipped"):
+        elif run.get("conclusion") == "success":
             result[name] = "success"
         else:
+            # neutral/skipped/cancelled/timed_out/failure → block (fail closed).
             result[name] = "failure"
 
     combined = gh_json([f"repos/{repo}/commits/{sha}/status"])
@@ -78,9 +98,16 @@ def outcomes(repo: str, sha: str) -> dict[str, str]:
         ctx = st.get("context", "")
         state = st.get("state", "")
         # The combined-status endpoint already returns the latest per context.
-        result[ctx] = "success" if state == "success" else (
-            "pending" if state == "pending" else "failure"
-        )
+        # "error" is preserved (not folded into "failure") so an errored reviewer
+        # is excluded from the quorum rather than counted as having voted.
+        if state == "success":
+            result[ctx] = "success"
+        elif state == "pending":
+            result[ctx] = "pending"
+        elif state == "error":
+            result[ctx] = "error"
+        else:  # "failure" — e.g. a genuine reviewer FAIL verdict
+            result[ctx] = "failure"
     return result
 
 
@@ -153,6 +180,30 @@ def decide(
     return ok, summary
 
 
+def tally_reviewers(by_name: dict[str, str]) -> tuple[int, int]:
+    """Count (completed_reviewers, pass_votes) from the normalized outcomes.
+
+    A reviewer counts as "completed" ONLY with a genuine verdict ("success" =
+    PASS/WARN, or "failure" = a real FAIL vote). An "error" outcome (the workflow
+    posts this when a reviewer produced no verdict) is excluded, so a dead or
+    malformed reviewer can never fill a quorum slot — the count fails closed.
+    CodeRabbit is included as one vendor-diverse vote.
+    """
+    reviewer_states = {
+        name: state
+        for name, state in by_name.items()
+        if name.startswith(REVIEW_STATUS_PREFIX)
+    }
+    completed = sum(1 for s in reviewer_states.values() if s in ("success", "failure"))
+    pass_votes = sum(1 for s in reviewer_states.values() if s == "success")
+    cr = by_name.get(CODERABBIT_NAME)
+    if cr in ("success", "failure"):
+        completed += 1
+        if cr == "success":
+            pass_votes += 1
+    return completed, pass_votes
+
+
 def main() -> int:
     repo = os.environ["REPO"]
     pr = os.environ["PR"]
@@ -164,17 +215,7 @@ def main() -> int:
     missing = [c for c in DETERMINISTIC_REQUIRED if by_name.get(c) != "success"]
 
     # 2) Reviewer quorum.
-    reviewer_states = {
-        name: state
-        for name, state in by_name.items()
-        if name.startswith(REVIEW_STATUS_PREFIX)
-    }
-    completed = sum(1 for s in reviewer_states.values() if s in ("success", "failure"))
-    pass_votes = sum(1 for s in reviewer_states.values() if s == "success")
-    if by_name.get(CODERABBIT_NAME) in ("success", "failure"):
-        completed += 1
-        if by_name.get(CODERABBIT_NAME) == "success":
-            pass_votes += 1
+    completed, pass_votes = tally_reviewers(by_name)
 
     has_critical = review_severity(repo, sha)
 
