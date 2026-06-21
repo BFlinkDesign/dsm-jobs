@@ -30,6 +30,7 @@ jobs:
           ref: gh-pages
           path: published
           fetch-depth: 1
+          persist-credentials: false   # read-only health probe; don't leave the token in git config
 
       - name: Health checks
         id: check

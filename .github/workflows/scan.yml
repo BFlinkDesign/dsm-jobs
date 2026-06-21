@@ -44,7 +44,12 @@ jobs:
       # Sentry DSN is PUBLIC/embeddable, so it's a repo Variable, not a Secret.
       SENTRY_DSN: ${{ vars.SENTRY_DSN }}
     steps:
+      # Read-only checkout: the gh-pages publish step below pushes with an
+      # explicit x-access-token URL in a fresh `git init` repo under web/, so it
+      # never uses these persisted credentials. Drop them (zizmor "artipacked").
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:

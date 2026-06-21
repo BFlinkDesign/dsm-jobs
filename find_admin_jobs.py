@@ -2552,10 +2552,24 @@ async function _docxToText(buf){
   return _docxXmlToText(new TextDecoder().decode(xmlBytes));
 }
 var _pdfjs = null;
+// pdf.js is the one CDN dependency loaded by dynamic import(), which (unlike a
+// <script integrity>) can't carry an SRI attribute. We pin it anyway: fetch the
+// bytes with the native integrity option (browser verifies SHA-384 and rejects
+// a tampered bundle), then import / run from a same-origin blob URL. Mirrors how
+// supabase-js and Sentry are SRI-pinned. Hashes are verified by verify/pdfjs_sri.py.
+var PDFJS_VER = "4.7.76";
+var PDFJS_SRI = "sha384-qgyx6GmMWoI003drRr62DU41/67b3n7M2G0EXu2WhaOsBqONtHyay9Vw4aIivyOX";
+var PDFJS_WORKER_SRI = "sha384-ATeT9bCTw1LFxZRSxFHBli/+35MHo/faKiXDlvCvxK2ENYquq3OIA9RkrOW44G/L";
+async function _verifiedBlobUrl(url, sri){
+  var resp = await fetch(url, { integrity: sri, mode: "cors", credentials: "omit" });
+  if(!resp.ok) throw new Error("Couldn't load the PDF reader.");
+  return URL.createObjectURL(await resp.blob());  // throws if the SHA-384 doesn't match
+}
 async function _loadPdfjs(){
   if(_pdfjs) return _pdfjs;
-  var lib = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs");
-  lib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs";
+  var base = "https://cdn.jsdelivr.net/npm/pdfjs-dist@" + PDFJS_VER + "/build/";
+  var lib = await import(await _verifiedBlobUrl(base + "pdf.min.mjs", PDFJS_SRI));
+  lib.GlobalWorkerOptions.workerSrc = await _verifiedBlobUrl(base + "pdf.worker.min.mjs", PDFJS_WORKER_SRI);
   _pdfjs = lib; return lib;
 }
 async function _pdfToText(buf){
