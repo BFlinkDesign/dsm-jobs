@@ -95,13 +95,16 @@ jobs:
   gitleaks:
     # Second secret layer: gitleaks' 150+ provider rules + entropy detection,
     # complementing the shape-scan above. Installed as a PINNED binary verified
-    # by SHA256 (no third-party action to trust). .gitleaks.toml allowlists the
-    # files that legitimately carry secret-SHAPED regexes (not real secrets).
+    # by SHA256 (no third-party action to trust). Runs the DEFAULT ruleset with
+    # NO allowlist — verified clean against the whole repo, so nothing is exempt
+    # (the ci.yml secret-SHAPED regexes use literal [..] and don't false-positive).
     name: secret scan (gitleaks, pinned)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false   # read-only job; don't leave the token in git config
 
       - name: Run gitleaks (pinned binary + checksum)
         shell: bash
@@ -113,4 +116,4 @@ jobs:
             "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz"
           echo "${SHA}  gitleaks.tar.gz" | sha256sum -c -
           tar -xzf gitleaks.tar.gz gitleaks
-          ./gitleaks dir . --no-banner --redact --config .gitleaks.toml --exit-code 1
+          ./gitleaks dir . --no-banner --redact --exit-code 1
