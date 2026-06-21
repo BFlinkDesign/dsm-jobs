@@ -28,8 +28,8 @@ BASE = f"https://cdn.jsdelivr.net/npm/pdfjs-dist@{VERSION}/build/"
 # The two assets the loader pins. Keep these in lock-step with the SRI
 # constants embedded in find_admin_jobs.py (PDFJS_SRI / PDFJS_WORKER_SRI).
 ASSETS = {
-    "pdf.min.mjs": "",         # filled from the first CI print run
-    "pdf.worker.min.mjs": "",  # filled from the first CI print run
+    "pdf.min.mjs": "sha384-qgyx6GmMWoI003drRr62DU41/67b3n7M2G0EXu2WhaOsBqONtHyay9Vw4aIivyOX",
+    "pdf.worker.min.mjs": "sha384-ATeT9bCTw1LFxZRSxFHBli/+35MHo/faKiXDlvCvxK2ENYquq3OIA9RkrOW44G/L",
 }
 
 
