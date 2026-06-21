@@ -19,7 +19,11 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 12
     steps:
+      # Read-only checkout: the publish step below pushes with an explicit
+      # x-access-token URL, so it never needs these persisted credentials.
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
@@ -62,10 +66,12 @@ jobs:
       # `git fetch` and read them (artifact download needs auth we don't have there).
       - name: Publish shots to camera-shots branch
         if: always()
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           git config user.name "camera-bot"
           git config user.email "camera-bot@users.noreply.github.com"
           git switch -c camera-shots
           git add -f verify/shots verify/report.json
           git commit -m "camera shots for ${GITHUB_SHA::8}"
-          git push -f origin camera-shots
+          git push -f "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" camera-shots
