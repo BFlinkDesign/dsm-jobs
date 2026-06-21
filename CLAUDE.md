@@ -24,8 +24,20 @@ python -m ruff check find_admin_jobs.py tests    # lint (CI runs this)
 
 python -m http.server 8137 --directory web --bind 127.0.0.1   # serve the PWA locally to test (file:// won't run the SW)
 
-pip install -r verify/requirements.txt && python verify/camera.py   # the CAMERA: render the PWA in real Chrome + inspect (8 checks)
+bash verify/setup-web.sh && python verify/camera.py   # the CAMERA: render the PWA in pinned Chromium + inspect (8 checks)
 ```
+
+**The camera is the deterministic visual-verification mechanism.** It renders the
+`--mock` build (canned data) in Playwright's **bundled Chromium, pinned** by
+`verify/requirements.txt` (== one fixed revision) — never system Chrome — with a
+fixed viewport/scale, reduced-motion, and frozen animations, so the pixels are
+reproducible across runs and machines. Three ways to drive that ONE mechanism:
+(a) **local CLI** — `bash verify/setup-web.sh && python verify/camera.py`;
+(b) **CI** — `.github/workflows/camera.yml` runs it on a pinned `ubuntu-24.04`
+runner on push to `claude/camera-pass` (or manual dispatch) and pushes the PNGs
+to the `camera-shots` branch, so a browserless sandbox can `git fetch` and view
+them; (c) **web env** — the same `setup-web.sh` as the environment setup script,
+which works once the environment's network policy permits the Chromium download.
 
 Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install -r requirements-dev.txt` (ruff, pytest, pytest-timeout, mypy). The **camera** self-verifier (`verify/`) needs `playwright` + system Chrome — verify-only, not a runtime dep.
 
