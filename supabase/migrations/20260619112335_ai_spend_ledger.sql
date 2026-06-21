@@ -90,6 +90,15 @@ begin
 end;
 $$;
 
+-- Revoke the implicit PUBLIC execute grant FIRST. Postgres grants EXECUTE to
+-- PUBLIC by default on every CREATE FUNCTION, and Supabase exposes public-schema
+-- functions over the PostgREST RPC endpoint (/rest/v1/rpc/record_ai_spend) to the
+-- unauthenticated `anon` role (whose key ships in the client bundle). Without this
+-- revoke, an anonymous caller could POST {"cost_usd": 9999} and trip the sticky
+-- $25 stop — a DoS that pauses all AI features for the month. A later GRANT only
+-- ADDS a grantee; it does not remove the PUBLIC one, so the revoke is required.
+revoke execute on function public.record_ai_spend(numeric) from public;
+
 -- Let signed-in users invoke it (the edge functions call it under the user JWT).
 -- EXECUTE is all they get — they still cannot touch the table directly.
 grant execute on function public.record_ai_spend(numeric) to authenticated;
