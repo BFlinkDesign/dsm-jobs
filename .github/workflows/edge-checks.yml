@@ -1,30 +1,27 @@
 # Deno/TypeScript checks for the Supabase Edge Functions.
 #
 # WHY THIS EXISTS: the repo's other CI (ci.yml) is Python-only — it never
-# type-checks or runs the Deno/TS edge-function code under supabase/functions/.
-# The AI spend-cap helper (_shared/spend_cap.ts) is security-load-bearing (it
-# FAILS CLOSED so a stuck loop can't run up the Anthropic bill), so it needs its
-# own proof loop. This job type-checks the functions and runs the Deno unit
-# suite (_shared/spend_cap_test.ts) on every PR that touches the functions.
+# type-checks, lints, or runs the Deno/TS edge-function code under
+# supabase/functions/. That code is the most safety-critical runtime in the
+# project: companion/index.ts talks to a vulnerable user (crisis-resource
+# routing, not-a-therapist boundary, anti-confabulation grounding) and holds the
+# paid Anthropic key behind a fail-closed rate cap. This job is its proof loop.
 #
-# Keyless: `denoland/setup-deno` just installs the Deno toolchain; the test
-# pulls jsr:@std/assert + npm:@supabase/supabase-js over HTTPS, no account/token.
+# It covers EVERY function (deno check + deno lint over all of supabase/functions),
+# runs every *_test.ts, and a coverage gate fails loudly if a function loses its
+# type-check or if the companion loses its safety test.
 
 name: Edge Checks
 
 on:
   pull_request:
-    # Only run when the edge-function code actually changes. NOTE: because this
-    # is path-filtered, GitHub reports "skipped" for unrelated PRs — do NOT make
-    # this a REQUIRED status check unless paired with a path-aware gate, since
-    # branch protection treats a skipped required check as unsatisfied.
     paths:
       - "supabase/functions/**"
       - ".github/workflows/edge-checks.yml"
   workflow_dispatch: {}
 
 permissions:
-  contents: read          # least privilege: only needs to read the code
+  contents: read
 
 concurrency:
   group: edge-checks-${{ github.event.pull_request.number || github.ref }}
@@ -32,13 +29,13 @@ concurrency:
 
 jobs:
   deno:
-    name: deno check + test
+    name: deno check + lint + test
     runs-on: ubuntu-latest
-    timeout-minutes: 10   # never let a hung job run forever (CI-hang policy)
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
         with:
-          # This job only reads code to type-check/test it; it never pushes.
+          # This job only reads code to verify it; it never pushes.
           # Don't persist the token in .git/config (zizmor: artipacked).
           persist-credentials: false
 
@@ -47,24 +44,48 @@ jobs:
         with:
           deno-version: v2.x
 
-      # Type-check the functions + the test. Explicit file list (not a shell
-      # glob) so a path typo fails loudly instead of silently checking nothing.
+      # Type-check every .ts under supabase/functions (entrypoints, shared, tests),
+      # enumerated from disk so a newly-added function is covered automatically.
       - name: Type check (deno check)
-        working-directory: supabase/functions
         run: |
-          deno check \
-            _shared/spend_cap.ts \
-            _shared/spend_cap_test.ts \
-            companion/index.ts
+          set -euo pipefail
+          mapfile -t files < <(find supabase/functions -name '*.ts' | sort)
+          printf 'deno check over %d files:\n' "${#files[@]}"
+          printf '  %s\n' "${files[@]}"
+          deno check "${files[@]}"
 
-      # Run the _shared unit suite. The spend-cap alert path reads exactly these
-      # three env vars (RESEND_API_KEY / ALERT_EMAIL_FROM / ALERT_EMAIL_TO) via
-      # Deno.env.get; the test sets them to dummies and stubs fetch, so no email
-      # leaves and no real network is touched. --allow-env is scoped to just
-      # those names; no other permission (net/read/write) is granted.
+      - name: Lint (deno lint)
+        run: deno lint supabase/functions/
+
+      # Run every *_test.ts. --allow-read lets the companion safety_test read its
+      # own source; --allow-env is scoped to the spend-cap alert env names (used by
+      # _shared tests once they land on main). No net/write is granted.
       - name: Unit tests (deno test)
-        working-directory: supabase/functions
         run: |
           deno test \
+            --allow-read=supabase/functions \
             --allow-env=RESEND_API_KEY,ALERT_EMAIL_FROM,ALERT_EMAIL_TO \
-            _shared/spend_cap_test.ts
+            supabase/functions/
+
+      # Coverage gate (enumerate-and-assert, ported from eagle-quote): every
+      # function entrypoint must be type-checked (it is, via the find above), and
+      # the safety-critical companion must never lose its test.
+      - name: Coverage gate
+        run: |
+          set -euo pipefail
+          fail=0
+          for d in supabase/functions/*/; do
+            f="${d}index.ts"
+            [ -f "$f" ] || continue
+            name="$(basename "$d")"
+            if ls "${d}"*_test.ts >/dev/null 2>&1; then
+              echo "OK  ${name}: type-checked + has runtime test(s)"
+            else
+              echo "WARN ${name}: type-checked, NO runtime test yet"
+            fi
+          done
+          if ! ls supabase/functions/companion/*_test.ts >/dev/null 2>&1; then
+            echo "::error::companion has no *_test.ts — its grounding/crisis-safety coverage was removed"
+            fail=1
+          fi
+          exit $fail
