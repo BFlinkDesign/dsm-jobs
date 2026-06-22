@@ -269,6 +269,43 @@ def test_payload_includes_enrichment_fields():
     assert p["category"] == "Office"
     assert p["commute"] == "~20 min drive"  # Des Moines, IA from Grimes
     assert "trustLabel" in p and "about" in p
+    assert "contactPhone" in p and "contactEmail" in p and "contactName" in p
+
+
+def test_extract_contact_hints_from_posting():
+    text = "Questions? Call (515) 555-0198 or email hiring@johnstondental.example. Contact Jane Smith."
+    hints = fa.extract_contact_hints(text)
+    assert hints["contactPhone"] == "(515) 555-0198"
+    assert hints["contactEmail"] == "hiring@johnstondental.example"
+    assert hints["contactName"] == "Jane Smith"
+
+
+def test_extract_contact_hints_ignores_noreply_email():
+    hints = fa.extract_contact_hints("Reach us at noreply@scam.example or call (900) 555-0100")
+    assert hints["contactEmail"] == ""
+    assert hints["contactPhone"] == "(900) 555-0100"
+
+
+def test_payload_embeds_employer_stated_contact():
+    row = fa.normalize(
+        {
+            "id": "c1",
+            "title": "Receptionist",
+            "company": {"display_name": "Dental Office"},
+            "location": {"display_name": "Johnston, IA"},
+            "salary_min": 39520,
+            "salary_max": 41600,
+            "salary_is_predicted": "0",
+            "created": "2026-06-01T00:00:00Z",
+            "redirect_url": "https://example.com/j",
+            "description": "Call (515) 555-1212 or email hr@dental.example",
+        },
+        "local",
+    )
+    row["scam"] = {"level": "safe", "reasons": []}
+    p = fa._jobs_payload([row])[0]
+    assert p["contactPhone"] == "(515) 555-1212"
+    assert p["contactEmail"] == "hr@dental.example"
 
 
 def test_app_keeps_server_sort_order():

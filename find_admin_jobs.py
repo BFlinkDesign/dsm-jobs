@@ -1000,6 +1000,58 @@ def will_train(description):
     return any(h in d for h in TRAIN_HINTS)
 
 
+# Employer-stated contact lines in a posting — extracted for one-tap follow-up.
+# Never guessed: only text that appears in the job description survives.
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+_PHONE_RE = re.compile(
+    r"(?:\+?1[-.\s]?)?(?:\((\d{3})\)|(\d{3}))[-.\s]?(\d{3})[-.\s]?(\d{4})\b"
+)
+_JUNK_EMAIL = re.compile(
+    r"(noreply|no-reply|donotreply|mailer-daemon|example\.com|sentry\.io|wixpress|"
+    r"facebook\.com|twitter\.com|linkedin\.com/feed)",
+    re.I,
+)
+_NAME_RE = re.compile(
+    r"(?:contact|call|ask for|speak with|hr contact|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+    re.I,
+)
+
+
+def extract_contact_hints(description: str) -> dict[str, str]:
+    """Pull phone/email/name from employer posting text when explicitly present."""
+    text = description or ""
+    phones: list[str] = []
+    seen_phones: set[str] = set()
+    for m in _PHONE_RE.finditer(text):
+        digits = re.sub(r"\D", "", m.group())
+        if len(digits) == 11 and digits.startswith("1"):
+            digits = digits[1:]
+        if len(digits) != 10 or digits in seen_phones:
+            continue
+        seen_phones.add(digits)
+        phones.append(f"({digits[:3]}) {digits[3:6]}-{digits[6:]}")
+
+    emails: list[str] = []
+    seen_emails: set[str] = set()
+    for m in _EMAIL_RE.finditer(text):
+        em = m.group().strip().lower()
+        if _JUNK_EMAIL.search(em) or em in seen_emails:
+            continue
+        seen_emails.add(em)
+        emails.append(m.group().strip())
+
+    name = ""
+    nm = _NAME_RE.search(text)
+    if nm:
+        name = nm.group(1).strip()
+
+    return {
+        "contactPhone": phones[0] if phones else "",
+        "contactEmail": emails[0] if emails else "",
+        "contactName": name,
+    }
+
+
 def _jobs_payload(safe_rows):
     """Build the JSON list the front-end app renders."""
     jobs = []
@@ -1014,6 +1066,7 @@ def _jobs_payload(safe_rows):
         # the content tuple as a last-resort distinct key.
         jid = r.get("id") or r.get("url") or "|".join(
             (r.get("title") or "", r.get("company") or "", r.get("location") or ""))
+        hints = extract_contact_hints(r.get("description") or "")
         jobs.append({
             "id": str(jid),
             "title": r["title"],
@@ -1034,6 +1087,9 @@ def _jobs_payload(safe_rows):
             "commuteMin": None if r["source"] == "remote" else commute_minutes(r["location"]),
             "about": snippet(r.get("description")),
             "trains": will_train(r.get("description")),
+            "contactPhone": hints["contactPhone"],
+            "contactEmail": hints["contactEmail"],
+            "contactName": hints["contactName"],
         })
     return jobs
 
@@ -1673,14 +1729,33 @@ header.bar{position:sticky;top:0;z-index:20;
 @keyframes burst{0%{opacity:1;transform:translate(0,0) scale(.6) rotate(0)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(1.3) rotate(120deg)}}
 /* Snooze (Not today) */
 .act.snz.on{background:var(--surface);color:var(--green-d);border-color:rgba(192,132,252,.4)}
-/* Follow-up contact + alerts */
-.followup{margin-top:10px;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
-.followup h4{margin:0 0 8px;font-size:14px;font-weight:700;color:var(--green-d)}
-.followfld{width:100%;margin:6px 0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+/* Follow-up contact + alerts — action-first: one-tap call/email, typing optional */
+.followup{margin-top:10px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.followup h4{margin:0 0 10px;font-size:15px;font-weight:700;color:var(--green-d);line-height:1.35}
+.followwho{margin:0 0 10px;font-size:14px;color:var(--ink2);line-height:1.4}
+.followhero{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px}
+.followcta{flex:1 1 calc(50% - 4px);display:inline-flex;align-items:center;justify-content:center;gap:8px;
+ min-height:52px;padding:12px 14px;border-radius:12px;font:inherit;font-size:16px;font-weight:800;
+ text-decoration:none;border:0;cursor:pointer;transition:.12s}
+.followcta.call{background:var(--green);color:#fff;box-shadow:var(--glow)}
+.followcta.mail{background:var(--card);color:var(--green-d);border:1.5px solid rgba(192,132,252,.45)}
+.followcta.paste{background:var(--card);color:var(--ink);border:1.5px dashed var(--line);flex:1 1 100%}
+.followcta:active{transform:scale(.97)}
+.followwhen{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px}
+.followwhenlbl{font-size:13px;font-weight:700;color:var(--ink2);margin-right:2px}
+.followchip{background:var(--card);border:1.5px solid var(--line);border-radius:999px;color:var(--ink2);
+ font:inherit;font-size:13px;font-weight:700;padding:8px 12px;min-height:40px;cursor:pointer}
+.followchip.on{background:var(--green-soft);border-color:var(--green);color:var(--green-d)}
+.followedit{margin-top:6px}
+.followedit summary{cursor:pointer;font-weight:700;font-size:14px;color:var(--green-d);list-style-position:inside}
+.followfld{width:100%;margin:8px 0 0;font:inherit;font-size:16px;padding:12px;border-radius:10px;
  border:1.5px solid var(--line);background:var(--card);color:var(--ink)}
 .followfld:focus{outline:none;border-color:var(--green)}
-.followrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.followrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
 .followrow .act{flex:1 1 auto;min-width:120px}
+.followduecard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:8px 0}
+.followduecard .title{font-size:16px;margin:0 0 2px}
+.followduecard .co{font-size:14px;color:var(--ink2);margin:0 0 8px}
 .followalert,.followbanner{background:rgba(192,132,252,.12);border:1px solid rgba(192,132,252,.35);
  color:var(--green-d);border-radius:12px;padding:12px 14px;margin:10px 0;font-size:15px;line-height:1.45}
 .followalert b,.followbanner b{color:#f3ecff}
@@ -2035,9 +2110,9 @@ header.bar{position:sticky;top:0;z-index:20;
       <p>When you mark a job Applied, it's saved with the date automatically. The
       <b>My apps</b> tab can print or copy your weekly list for your Iowa unemployment claim.</p></details>
     <details class="faq"><summary>How do follow-up reminders work?</summary>
-      <p>Each applied job gets a <b>Follow-up contact</b> section — save who to call, their phone
-      or email, and when to check back (it defaults to 5 days after you apply). <b>My apps</b>
-      shows a badge when a follow-up is due, and you can turn on phone reminders there.</p></details>
+      <p>When you apply, we pull any phone or email from the job posting automatically.
+      You get big <b>Call</b> and <b>Email</b> buttons — or tap <b>Paste</b> if they texted you
+      a number. <b>My apps</b> badges you when it&rsquo;s time to follow up.</p></details>
     <details class="faq"><summary>Is my information private?</summary>
       <p>Everything stays on your phone unless you choose to sign in. Signing in saves your
       jobs, notes and chats to a private account so a new phone doesn&rsquo;t lose them. It&rsquo;s
@@ -2115,9 +2190,37 @@ function daysUntil(d){
 }
 function safeTel(u){ return String(u||"").replace(/[^0-9+]/g,""); }
 function notifPerm(){ return typeof Notification!=="undefined" ? Notification.permission : "denied"; }
+function fmtPhone(d){
+  var t=safeTel(d).replace(/^\+?1/,"").slice(-10);
+  if(t.length!==10) return String(d||"").trim();
+  return "("+t.slice(0,3)+") "+t.slice(3,6)+"-"+t.slice(6);
+}
 function safeMail(u){
   const m=String(u||"").trim();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m) ? m : "";
+}
+function parseContactPaste(text){
+  var out={name:"",phone:"",email:""};
+  if(!text) return out;
+  var mail=text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  if(mail && !/noreply|no-reply|donotreply/i.test(mail[0])) out.email=mail[0];
+  var ph=text.match(/(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}/);
+  if(ph) out.phone=fmtPhone(ph[0]);
+  var nm=text.match(/(?:contact|call|ask for|speak with|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+  if(nm) out.name=nm[1];
+  return out;
+}
+function jobContactHints(j){
+  if(!j) return {name:"",phone:"",email:""};
+  return {name:j.contactName||"", phone:j.contactPhone||"", email:j.contactEmail||""};
+}
+function effectiveContact(id, j){
+  var fu=state.followUps[id]||{}, hints=jobContactHints(j);
+  return {
+    name:(fu.name||"").trim()||hints.name,
+    phone:(fu.phone||"").trim()||hints.phone,
+    email:(fu.email||"").trim()||hints.email,
+  };
 }
 function ensureFollowUp(id){
   if(!state.followUps[id]){
@@ -2126,32 +2229,77 @@ function ensureFollowUp(id){
   }
   return state.followUps[id];
 }
-function followUpsDue(){
-  return appliedEntries().filter(function(r){
-    const fu=state.followUps[r.id];
-    return fu && !fu.done && fu.on && fu.on<=today();
-  });
+function seedFollowUpFromJob(id, j){
+  var fu=ensureFollowUp(id), hints=jobContactHints(j);
+  if(!fu.phone && hints.phone) fu.phone=hints.phone;
+  if(!fu.email && hints.email) fu.email=hints.email;
+  if(!fu.name && hints.name) fu.name=hints.name;
+  return fu;
+}
+function followActionHTML(id, c, opts){
+  opts=opts||{};
+  var tel=safeTel(c.phone), mail=safeMail(c.email), parts=[];
+  if(tel){
+    parts.push('<a class="followcta call" href="tel:'+esc(tel)+'"'+
+      (opts.track?' data-act="fuopen" data-kind="call" data-id="'+esc(id)+'"':'')+'>'+
+      IC.phone+'Call '+esc(c.name||fmtPhone(c.phone))+'</a>');
+  }
+  if(mail){
+    var subj=opts.title?("Follow-up: "+opts.title):"Job application follow-up";
+    parts.push('<a class="followcta mail" href="mailto:'+esc(mail)+'?subject='+encodeURIComponent(subj)+'"'+
+      (opts.track?' data-act="fuopen" data-kind="mail" data-id="'+esc(id)+'"':'')+'>'+
+      IC.mail+'Email'+(c.name?(" "+esc(c.name)):"")+'</a>');
+  }
+  if(!parts.length){
+    parts.push('<button type="button" class="followcta paste" data-act="fupaste" data-id="'+esc(id)+'">'+
+      IC.paste+'Paste phone or email</button>');
+  }
+  return parts.join("");
+}
+function followWhenHTML(id){
+  var fu=ensureFollowUp(id), base=state.applied[id]||today();
+  var chips=[[3,"3 days"],[5,"5 days"],[7,"1 week"]];
+  return '<div class="followwhen"><span class="followwhenlbl">Remind me</span>'+
+    chips.map(function(ch){
+      var on=addDaysISO(base, ch[0]);
+      return '<button type="button" class="followchip'+(fu.on===on?" on":"")+'" data-act="fuwhen" data-id="'+
+        esc(id)+'" data-days="'+ch[0]+'">'+ch[1]+'</button>';
+    }).join("")+
+    '<input class="followfld" style="flex:1 1 140px;max-width:170px;margin:0" data-fu-on="'+esc(id)+'" type="date" aria-label="Follow-up date" value="'+esc(fu.on||"")+'">'+
+    '</div>';
 }
 function followUpBlockHTML(id, j){
   if(!(id in state.applied)) return "";
-  const fu=ensureFollowUp(id);
-  const tel=safeTel(fu.phone), mail=safeMail(fu.email);
+  seedFollowUpFromJob(id, j);
+  const fu=ensureFollowUp(id), c=effectiveContact(id, j);
   const due=fu.on && !fu.done && fu.on<=today();
   const soon=fu.on && !fu.done && fu.on>today() && daysUntil(fu.on)!=null && daysUntil(fu.on)<=3;
+  const who=c.name ? esc(c.name)+(j&&j.company?" at "+esc(j.company):"") :
+    (j&&j.company ? esc(j.company)+" HR" : "Who to contact");
   return '<div class="followup">'+
-    '<h4>'+(due?'&#9888; Follow up today':(soon?'Follow up '+esc(ago(fu.on)||fu.on):'Follow-up contact'))+'</h4>'+
-    '<input class="followfld" data-fu-name="'+esc(id)+'" placeholder="Who to contact (recruiter, HR…)" value="'+esc(fu.name)+'">'+
-    '<input class="followfld" data-fu-phone="'+esc(id)+'" type="tel" inputmode="tel" autocomplete="tel" placeholder="Phone number" value="'+esc(fu.phone)+'">'+
-    '<input class="followfld" data-fu-email="'+esc(id)+'" type="email" inputmode="email" autocomplete="email" placeholder="Email" value="'+esc(fu.email)+'">'+
-    '<input class="followfld" data-fu-on="'+esc(id)+'" type="date" aria-label="Follow-up date" value="'+esc(fu.on||"")+'">'+
+    '<h4>'+(due?'&#9888; Follow up today':(soon?'Follow up '+esc(ago(fu.on)||fu.on):'Follow-up'))+'</h4>'+
+    (c.phone||c.email?'<p class="followwho">'+who+'</p>':'')+
+    '<div class="followhero">'+followActionHTML(id, c, {track:true, title:j&&j.title})+'</div>'+
+    followWhenHTML(id)+
+    '<details class="followedit"'+(openFollowEdit.has(id)?' open':'')+'>'+
+      '<summary>Add or change contact</summary>'+
+      '<input class="followfld" data-fu-name="'+esc(id)+'" placeholder="Name (recruiter, HR…)" value="'+esc(fu.name)+'">'+
+      '<input class="followfld" data-fu-phone="'+esc(id)+'" type="tel" inputmode="tel" autocomplete="tel" placeholder="Phone" value="'+esc(fu.phone)+'">'+
+      '<input class="followfld" data-fu-email="'+esc(id)+'" type="email" inputmode="email" autocomplete="email" placeholder="Email" value="'+esc(fu.email)+'">'+
+      '<button type="button" class="followcta paste" data-act="fupaste" data-id="'+esc(id)+'">'+IC.paste+'Paste from clipboard</button>'+
+    '</details>'+
     '<div class="followrow">'+
-      (tel?'<a class="act" style="text-decoration:none" href="tel:'+esc(tel)+'">'+IC.pen+'Call</a>':'')+
-      (mail?'<a class="act" style="text-decoration:none" href="mailto:'+esc(mail)+'">'+IC.pen+'Email</a>':'')+
       (j?callScriptHTML(j, state.applied[id]||fu.on):'')+
       (fu.done
         ?'<button class="act" data-act="fuedit" data-id="'+esc(id)+'">'+IC.pen+'Edit follow-up</button>'
         :'<button class="act applied on" data-act="fudone" data-id="'+esc(id)+'">'+IC.check+'I followed up</button>')+
     '</div></div>';
+}
+function followUpsDue(){
+  return appliedEntries().filter(function(r){
+    const fu=state.followUps[r.id];
+    return fu && !fu.done && fu.on && fu.on<=today();
+  });
 }
 function renderFollowAlerts(){
   const due=followUpsDue();
@@ -2161,13 +2309,16 @@ function renderFollowAlerts(){
   const notifyBtn=document.getElementById("notifybtn");
   if(alertEl){
     if(n){
-      const names=due.slice(0,2).map(function(r){
-        const fu=state.followUps[r.id]||{};
-        return esc(r.title)+(fu.name?" — "+esc(fu.name):"");
-      }).join("<br>");
       alertEl.hidden=false;
-      alertEl.innerHTML='<b>'+n+(n===1?" follow-up is":" follow-ups are")+' due</b> — a quick call or email shows you&rsquo;re serious.'+
-        (names?"<br>"+names:"");
+      alertEl.innerHTML='<b>'+n+(n===1?" follow-up is":" follow-ups are")+' due</b> — tap to call or email.'+
+        due.slice(0,3).map(function(r){
+          var j=jobById.get(r.id), c=effectiveContact(r.id, j);
+          return '<div class="followduecard">'+
+            '<div class="title">'+esc(r.title)+'</div>'+
+            '<div class="co">'+esc(r.company)+'</div>'+
+            '<div class="followhero">'+followActionHTML(r.id, c, {title:r.title})+'</div>'+
+            '</div>';
+        }).join("");
     } else { alertEl.hidden=true; alertEl.innerHTML=""; }
   }
   if(banner){
@@ -2245,6 +2396,7 @@ const newCount = Object.keys(isNew).length;
 persist();
 
 const openNotes = new Set();
+const openFollowEdit = new Set();
 let portalSync = null;   // set by the portal IIFE when sign-in is configured; null otherwise
 let filters = { q:"", cat:"", pay:false, inperson:false, remote:false, known:false,
                 saved:false, applied:false, showHidden:false, trains:false,
@@ -2276,6 +2428,9 @@ const IC = {
   share:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v8h14v-8"/></svg>',
   lock:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>',
   spark:'<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2l1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6z"/></svg>',
+  phone:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6.5 4h3l1.5 4-2 1.5a11 11 0 005 5L17 12.5l4 1.5v3A2 2 0 0119 19a15 15 0 01-6-2 15 15 0 01-4-4 15 15 0 01-2-6 2 2 0 012-3z"/></svg>',
+  mail:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
+  paste:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="8" y="2" width="12" height="16" rx="2"/><path d="M4 6a2 2 0 012-2h8v16H6a2 2 0 01-2-2z"/></svg>',
 };
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"'`]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c];});}
@@ -2494,7 +2649,7 @@ function markApplied(id, el){
     (jobById.get(id) ? {t:jobById.get(id).title, c:jobById.get(id).company,
                         d:today(), u:jobById.get(id).url} : {t:"(job)", c:"", d:today(), u:""});
   state.appliedLog[id].d = state.applied[id];
-  ensureFollowUp(id);
+  seedFollowUpFromJob(id, jobById.get(id));
   // Full date+time stamp captured the moment she logs it — for unemployment/court
   // documentation. (It records when the activity was logged in the app.)
   state.appliedLog[id].ts = new Date().toISOString();
@@ -2814,9 +2969,23 @@ document.querySelector(".app").addEventListener("click",(e)=>{
     render(); return;
   }
   if(act==="fuedit"){
-    ensureFollowUp(id).done=false; persist();
+    ensureFollowUp(id).done=false; openFollowEdit.add(id); persist();
     if(portalSync) portalSync.followUps();
     render(); return;
+  }
+  if(act==="fupaste"){
+    pasteFollowContact(id); return;
+  }
+  if(act==="fuwhen"){
+    var days=+(t.getAttribute("data-days")||5);
+    var fu=ensureFollowUp(id);
+    fu.on=addDaysISO(state.applied[id]||today(), days);
+    persist();
+    if(portalSync) portalSync.followUps();
+    render(); return;
+  }
+  if(act==="fuopen"){
+    openFollowEdit.add(id); persist(); return;
   }
   if(act==="share"){
     const j=jobById.get(id);
@@ -2853,6 +3022,30 @@ document.querySelector(".app").addEventListener("click",(e)=>{
   }
   persist(); render();
 });
+
+function pasteFollowContact(id){
+  function apply(text){
+    var parsed=parseContactPaste(text||"");
+    var fu=ensureFollowUp(id), got=false;
+    if(parsed.phone){ fu.phone=parsed.phone; got=true; }
+    if(parsed.email){ fu.email=parsed.email; got=true; }
+    if(parsed.name){ fu.name=parsed.name; got=true; }
+    if(!got){ showToast("Couldn't find a phone or email — try typing it in."); openFollowEdit.add(id); render(); return; }
+    openFollowEdit.add(id); persist();
+    if(portalSync) portalSync.followUps();
+    showToast("Got it — tap Call or Email above ✦");
+    render();
+  }
+  if(navigator.clipboard && navigator.clipboard.readText){
+    navigator.clipboard.readText().then(apply).catch(function(){
+      showToast("Paste didn't work — tap Add or change contact and type it in.");
+      openFollowEdit.add(id); render();
+    });
+  } else {
+    var typed=window.prompt("Paste the phone number or email they gave you:", "");
+    if(typed) apply(typed);
+  }
+}
 
 // Auto-save notes as they type (no re-render, so the keyboard stays up).
 const followTimers = {};
@@ -3912,7 +4105,7 @@ def mock_results():
         {"id": "2", "title": "Receptionist", "company": {"display_name": "Dental Office"},
          "location": {"display_name": "Johnston, IA"}, "salary_min": 37440, "salary_max": 39520,
          "salary_is_predicted": "1", "created": "2026-06-01T00:00:00Z",
-         "redirect_url": "https://www.adzuna.com/job/2", "description": "Greet patients, answer phones."},
+         "redirect_url": "https://www.adzuna.com/job/2", "description": "Greet patients, answer phones. Questions? Call (515) 555-0198 or email hiring@johnstondental.example."},
         {"id": "3", "title": "Office Clerk", "company": {"display_name": "Logistics Co"},
          "location": {"display_name": "Grimes, IA"}, "salary_min": None, "salary_max": None,
          "salary_is_predicted": "0", "created": "2026-06-04T00:00:00Z",

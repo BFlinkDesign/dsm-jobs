@@ -263,7 +263,9 @@ def test_template_features_present(tmp_path):
         "followup",
         "followalert",
         "notifybtn",
-        "Follow-up contact",
+        "followcta",
+        "fupaste",
+        "Paste phone or email",
         "follow-up reminders work",
     ):
         assert marker in html, marker
