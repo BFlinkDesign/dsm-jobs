@@ -260,6 +260,11 @@ def test_template_features_present(tmp_path):
         "Grimes",
         "tabbar",
         "[hidden]{display:none !important}",
+        "followup",
+        "followalert",
+        "notifybtn",
+        "Follow-up contact",
+        "follow-up reminders work",
     ):
         assert marker in html, marker
 

@@ -1673,6 +1673,21 @@ header.bar{position:sticky;top:0;z-index:20;
 @keyframes burst{0%{opacity:1;transform:translate(0,0) scale(.6) rotate(0)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(1.3) rotate(120deg)}}
 /* Snooze (Not today) */
 .act.snz.on{background:var(--surface);color:var(--green-d);border-color:rgba(192,132,252,.4)}
+/* Follow-up contact + alerts */
+.followup{margin-top:10px;padding:10px 12px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.followup h4{margin:0 0 8px;font-size:14px;font-weight:700;color:var(--green-d)}
+.followfld{width:100%;margin:6px 0;font:inherit;font-size:15px;padding:10px 12px;border-radius:10px;
+ border:1.5px solid var(--line);background:var(--card);color:var(--ink)}
+.followfld:focus{outline:none;border-color:var(--green)}
+.followrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.followrow .act{flex:1 1 auto;min-width:120px}
+.followalert,.followbanner{background:rgba(192,132,252,.12);border:1px solid rgba(192,132,252,.35);
+ color:var(--green-d);border-radius:12px;padding:12px 14px;margin:10px 0;font-size:15px;line-height:1.45}
+.followalert b,.followbanner b{color:#f3ecff}
+.followbanner{cursor:pointer}
+.tab{position:relative}
+.tab .badge{position:absolute;top:4px;left:58%;min-width:17px;height:17px;padding:0 5px;border-radius:999px;
+ background:var(--green);color:#fff;font-size:10px;font-weight:800;line-height:17px;text-align:center}
 /* Call script */
 .script{margin-top:9px}
 .script summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
@@ -1724,6 +1739,8 @@ header.bar{position:sticky;top:0;z-index:20;
   </header>
 
   <div class="stale" id="stale" hidden></div>
+  <div class="followbanner" id="followbanner" hidden role="button" tabindex="0"
+    aria-label="Open follow-up reminders"></div>
 
   <!-- Full-screen auth modal (all modern sign-in methods) -->
   <div class="authov" id="authmodal" hidden>
@@ -1810,6 +1827,8 @@ header.bar{position:sticky;top:0;z-index:20;
       <h2>My applications</h2>
       <p class="weekline" id="weekline"></p>
     </div>
+    <div class="followalert" id="followalert" hidden></div>
+    <button class="act" id="notifybtn" type="button" hidden>Turn on phone reminders for follow-ups</button>
     <div class="logbtns">
       <button class="act" id="printlog">Print my work-search log</button>
       <button class="act" id="copylog">Copy as text</button>
@@ -2015,6 +2034,10 @@ header.bar{position:sticky;top:0;z-index:20;
     <details class="faq"><summary>How does the work-search log work?</summary>
       <p>When you mark a job Applied, it's saved with the date automatically. The
       <b>My apps</b> tab can print or copy your weekly list for your Iowa unemployment claim.</p></details>
+    <details class="faq"><summary>How do follow-up reminders work?</summary>
+      <p>Each applied job gets a <b>Follow-up contact</b> section — save who to call, their phone
+      or email, and when to check back (it defaults to 5 days after you apply). <b>My apps</b>
+      shows a badge when a follow-up is due, and you can turn on phone reminders there.</p></details>
     <details class="faq"><summary>Is my information private?</summary>
       <p>Everything stays on your phone unless you choose to sign in. Signing in saves your
       jobs, notes and chats to a private account so a new phone doesn&rsquo;t lose them. It&rsquo;s
@@ -2080,6 +2103,111 @@ function daysSince(d){ const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
 function ago(d){ const n=daysSince(d); if(n==null) return "";
   if(n===0) return "today"; if(n===1) return "yesterday";
   if(n<14) return n+" days ago"; return Math.round(n/7)+" weeks ago"; }
+function addDaysISO(d, n){
+  const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
+  if(isNaN(t)) return today();
+  return new Date(t+n*864e5).toISOString().slice(0,10);
+}
+function daysUntil(d){
+  const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
+  if(isNaN(t)) return null;
+  return Math.ceil((t-Date.now())/864e5);
+}
+function safeTel(u){ return String(u||"").replace(/[^0-9+]/g,""); }
+function notifPerm(){ return typeof Notification!=="undefined" ? Notification.permission : "denied"; }
+function safeMail(u){
+  const m=String(u||"").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m) ? m : "";
+}
+function ensureFollowUp(id){
+  if(!state.followUps[id]){
+    const appliedOn=state.applied[id]||today();
+    state.followUps[id]={name:"",phone:"",email:"",on:addDaysISO(appliedOn,5),done:false};
+  }
+  return state.followUps[id];
+}
+function followUpsDue(){
+  return appliedEntries().filter(function(r){
+    const fu=state.followUps[r.id];
+    return fu && !fu.done && fu.on && fu.on<=today();
+  });
+}
+function followUpBlockHTML(id, j){
+  if(!(id in state.applied)) return "";
+  const fu=ensureFollowUp(id);
+  const tel=safeTel(fu.phone), mail=safeMail(fu.email);
+  const due=fu.on && !fu.done && fu.on<=today();
+  const soon=fu.on && !fu.done && fu.on>today() && daysUntil(fu.on)!=null && daysUntil(fu.on)<=3;
+  return '<div class="followup">'+
+    '<h4>'+(due?'&#9888; Follow up today':(soon?'Follow up '+esc(ago(fu.on)||fu.on):'Follow-up contact'))+'</h4>'+
+    '<input class="followfld" data-fu-name="'+esc(id)+'" placeholder="Who to contact (recruiter, HR…)" value="'+esc(fu.name)+'">'+
+    '<input class="followfld" data-fu-phone="'+esc(id)+'" type="tel" inputmode="tel" autocomplete="tel" placeholder="Phone number" value="'+esc(fu.phone)+'">'+
+    '<input class="followfld" data-fu-email="'+esc(id)+'" type="email" inputmode="email" autocomplete="email" placeholder="Email" value="'+esc(fu.email)+'">'+
+    '<input class="followfld" data-fu-on="'+esc(id)+'" type="date" aria-label="Follow-up date" value="'+esc(fu.on||"")+'">'+
+    '<div class="followrow">'+
+      (tel?'<a class="act" style="text-decoration:none" href="tel:'+esc(tel)+'">'+IC.pen+'Call</a>':'')+
+      (mail?'<a class="act" style="text-decoration:none" href="mailto:'+esc(mail)+'">'+IC.pen+'Email</a>':'')+
+      (j?callScriptHTML(j, state.applied[id]||fu.on):'')+
+      (fu.done
+        ?'<button class="act" data-act="fuedit" data-id="'+esc(id)+'">'+IC.pen+'Edit follow-up</button>'
+        :'<button class="act applied on" data-act="fudone" data-id="'+esc(id)+'">'+IC.check+'I followed up</button>')+
+    '</div></div>';
+}
+function renderFollowAlerts(){
+  const due=followUpsDue();
+  const n=due.length;
+  const alertEl=document.getElementById("followalert");
+  const banner=document.getElementById("followbanner");
+  const notifyBtn=document.getElementById("notifybtn");
+  if(alertEl){
+    if(n){
+      const names=due.slice(0,2).map(function(r){
+        const fu=state.followUps[r.id]||{};
+        return esc(r.title)+(fu.name?" — "+esc(fu.name):"");
+      }).join("<br>");
+      alertEl.hidden=false;
+      alertEl.innerHTML='<b>'+n+(n===1?" follow-up is":" follow-ups are")+' due</b> — a quick call or email shows you&rsquo;re serious.'+
+        (names?"<br>"+names:"");
+    } else { alertEl.hidden=true; alertEl.innerHTML=""; }
+  }
+  if(banner){
+    if(n){
+      banner.hidden=false;
+      banner.innerHTML='<b>'+n+(n===1?" follow-up":" follow-ups")+' ready</b> — tap to see who to contact.';
+    } else { banner.hidden=true; banner.innerHTML=""; }
+  }
+  if(notifyBtn){
+    const canNotify=(typeof Notification!=="undefined");
+    notifyBtn.hidden=!canNotify || notifPerm()==="granted" || !Object.keys(state.applied).length;
+    if(!notifyBtn.hidden) notifyBtn.textContent=
+      notifPerm()==="denied" ? "Reminders blocked — enable in phone settings"
+      : "Turn on phone reminders for follow-ups";
+    notifyBtn.disabled=canNotify && notifPerm()==="denied";
+  }
+  const tab=document.getElementById("nav-apps");
+  if(tab){
+    let badge=tab.querySelector(".badge");
+    if(n){
+      if(!badge){ badge=document.createElement("span"); badge.className="badge"; tab.appendChild(badge); }
+      badge.textContent=n>9?"9+":String(n); badge.hidden=false;
+    } else if(badge) badge.hidden=true;
+  }
+}
+function maybeNotifyFollowUps(){
+  if(typeof Notification==="undefined" || notifPerm()!=="granted") return;
+  const due=followUpsDue();
+  if(!due.length || state.followAlertDay===today()) return;
+  state.followAlertDay=today(); persist();
+  due.slice(0,3).forEach(function(r, i){
+    const fu=state.followUps[r.id]||{};
+    setTimeout(function(){
+      try{
+        new Notification("Time to follow up",{body:r.title+(fu.name?" — "+fu.name:""),
+          tag:"followup-"+r.id, icon:"./icon-192.png"});
+      }catch(e){}
+    }, i*400);
+  });
+}
 
 let state = load();
 // applied used to be an array of ids; it's now a map id -> date applied.
@@ -2094,12 +2222,15 @@ state.savedAt = state.savedAt || {};         // id -> date saved (for gentle "st
 state.resume  = state.resume  || "";         // her base résumé text (this device only; fed to the tailor)
 state.appliedLog = state.appliedLog || {};   // id -> {t,c,d,u} captured at apply time, so the
                                              // work-search log survives jobs leaving the feed
+state.followUps = state.followUps || {};     // id -> {name,phone,email,on,done} follow-up tracker
+state.followAlertDay = state.followAlertDay || "";  // last day we fired daily follow-up alerts
 state.profile = state.profile || {};         // quiz answers -> "For you" feed boost
 state.maxCommute = state.maxCommute || "";   // "" = any distance; else a minutes cap ("20"/"30"/"45")
 const prevSeen = new Set(state.seen||[]);
 function persist(){ save({applied:state.applied, saved:[...state.saved], hidden:[...state.hidden],
   notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff,
-  snooze:state.snooze, savedAt:state.savedAt, appliedLog:state.appliedLog, profile:state.profile,
+  snooze:state.snooze, savedAt:state.savedAt, appliedLog:state.appliedLog, followUps:state.followUps,
+  followAlertDay:state.followAlertDay, profile:state.profile,
   resume:state.resume, maxCommute:state.maxCommute}); }
 // Ledger backfill: any applied job still in today's feed gets its details kept.
 JOBS.forEach(j=>{ if(state.applied[j.id] && !state.appliedLog[j.id])
@@ -2224,6 +2355,8 @@ function render(){
   list.forEach(function(j,i){ wrap.appendChild(cardEl(j,i)); });
   updateFilterCount();
   renderPicks(); renderApps(); renderCorner();
+  renderFollowAlerts();
+  maybeNotifyFollowUps();
 }
 
 // Collapsible filter panel: collapsed by default so jobs are visible immediately;
@@ -2304,8 +2437,9 @@ function cardEl(j, i){
       (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Share</button>':'')+
     '</div>'+
     '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
-      '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — who you talked to, when to follow up">'+esc(note)+'</textarea>'+
+      '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — interview times, what they said">'+esc(note)+'</textarea>'+
     '</div>'+
+    (applied ? followUpBlockHTML(j.id, j) : '')+
     // Signed-out: the actions above are hidden by CSS and THIS is the only
     // button — one tap opens the free sign-up. No freebies without an account.
     '<button class="lockcta" data-act="signup">'+IC.lock+'Create a free account to apply &amp; save</button>';
@@ -2360,6 +2494,7 @@ function markApplied(id, el){
     (jobById.get(id) ? {t:jobById.get(id).title, c:jobById.get(id).company,
                         d:today(), u:jobById.get(id).url} : {t:"(job)", c:"", d:today(), u:""});
   state.appliedLog[id].d = state.applied[id];
+  ensureFollowUp(id);
   // Full date+time stamp captured the moment she logs it — for unemployment/court
   // documentation. (It records when the activity was logged in the app.)
   state.appliedLog[id].ts = new Date().toISOString();
@@ -2651,7 +2786,7 @@ document.querySelector(".app").addEventListener("click",(e)=>{
   }
   e.preventDefault();
   if(act==="applied"){
-    if(state.applied[id]){ delete state.applied[id]; }
+    if(state.applied[id]){ delete state.applied[id]; delete state.followUps[id]; }
     else { state.applied[id]=today(); markApplied(id, t); }
   }
   if(act==="saved"){ if(state.saved.has(id)){ state.saved.delete(id); delete state.savedAt[id]; }
@@ -2672,6 +2807,16 @@ document.querySelector(".app").addEventListener("click",(e)=>{
     open ? openNotes.add(id) : openNotes.delete(id);
     if(open) box.querySelector("textarea").focus();
     return;                       // no re-render; keep the textarea focused
+  }
+  if(act==="fudone"){
+    ensureFollowUp(id).done=true; persist();
+    if(portalSync) portalSync.followUps();
+    render(); return;
+  }
+  if(act==="fuedit"){
+    ensureFollowUp(id).done=false; persist();
+    if(portalSync) portalSync.followUps();
+    render(); return;
   }
   if(act==="share"){
     const j=jobById.get(id);
@@ -2710,9 +2855,26 @@ document.querySelector(".app").addEventListener("click",(e)=>{
 });
 
 // Auto-save notes as they type (no re-render, so the keyboard stays up).
+const followTimers = {};
 document.querySelector(".app").addEventListener("input",(e)=>{
-  const t=e.target.closest("[data-note]"); if(!t) return;
-  const id=t.getAttribute("data-note");
+  const t=e.target;
+  const fuId=t.getAttribute("data-fu-name")||t.getAttribute("data-fu-phone")||
+             t.getAttribute("data-fu-email")||t.getAttribute("data-fu-on");
+  if(fuId){
+    const fu=ensureFollowUp(fuId);
+    if(t.hasAttribute("data-fu-name")) fu.name=t.value;
+    if(t.hasAttribute("data-fu-phone")) fu.phone=t.value;
+    if(t.hasAttribute("data-fu-email")) fu.email=t.value;
+    if(t.hasAttribute("data-fu-on")) fu.on=t.value;
+    persist();
+    clearTimeout(followTimers[fuId]);
+    followTimers[fuId]=setTimeout(function(){
+      if(portalSync) portalSync.followUps();
+      renderFollowAlerts();
+    }, 700);
+    return;
+  }
+  const id=t.getAttribute("data-note"); if(!id) return;
   const v=t.value;
   if(v.trim()) state.notes[id]=v; else delete state.notes[id];
   persist();
@@ -2731,6 +2893,31 @@ document.getElementById("search").addEventListener("input",(e)=>{
   if(META.phone){ b.href="tel:"+META.phone.replace(/[^0-9+]/g,""); b.textContent="Something feels wrong? Call "+who; }
   else { b.removeAttribute("href"); b.style.cursor="default"; b.textContent="Something feels wrong? Ask "+who+" before you reply"; }
 })();
+
+(function followBanner(){
+  const b=document.getElementById("followbanner"); if(!b) return;
+  function go(){ setView("apps"); }
+  b.addEventListener("click", go);
+  b.addEventListener("keydown", function(e){
+    if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); }
+  });
+})();
+
+(function followNotifyBtn(){
+  const btn=document.getElementById("notifybtn"); if(!btn) return;
+  btn.addEventListener("click", function(){
+    if(typeof Notification==="undefined") return;
+    Notification.requestPermission().then(function(p){
+      if(p==="granted") showToast("Reminders on — we'll nudge you when it's time to follow up ✦");
+      else if(p==="denied") showToast("Blocked in phone settings — you can still see alerts in My apps.");
+      renderFollowAlerts(); maybeNotifyFollowUps();
+    });
+  });
+})();
+
+document.addEventListener("visibilitychange", function(){
+  if(document.visibilityState==="visible"){ renderFollowAlerts(); maybeNotifyFollowUps(); }
+});
 
 // Warn when the list itself is old (offline, or the daily scan stopped).
 (function staleBanner(){
@@ -3002,13 +3189,18 @@ function renderApps(){
   rows.forEach(function(r){
     const j=jobById.get(r.id);
     const days=daysSince(r.date);
+    const fu=state.followUps[r.id]||{};
     const el=document.createElement("div");
     el.className="card";
     el.innerHTML =
       '<div class="title">'+esc(r.title)+'</div>'+
       '<div class="co">'+esc(r.company)+'</div>'+
-      '<div class="meta"><span>'+IC.check+'applied '+esc(ago(r.date)||r.date)+'</span></div>'+
-      (days!=null&&days>=5&&j?'<div class="nudge">It\'s been a bit — a quick call shows you\'re serious.'+callScriptHTML(j,r.date)+'</div>':'')+
+      '<div class="meta"><span>'+IC.check+'applied '+esc(ago(r.date)||r.date)+'</span>'+
+        (fu.name?'<span>'+IC.pen+esc(fu.name)+'</span>':'')+
+        (fu.on&&!fu.done?'<span>'+IC.pen+(fu.on<=today()?'follow up today':'follow up '+esc(ago(fu.on)||fu.on))+'</span>':'')+
+      '</div>'+
+      followUpBlockHTML(r.id, j)+
+      (days!=null&&days>=5&&j&&!fu.done?'<div class="nudge">It\'s been a bit — a quick call shows you\'re serious.'+callScriptHTML(j,r.date)+'</div>':'')+
       (r.url?'<div class="actions"><a class="act" style="text-decoration:none" href="'+esc(safeUrl(r.url))+'" target="_blank" rel="noopener">'+IC.arrow+'View job</a>'+
       '<button class="act" data-act="applied" data-id="'+esc(r.id)+'">'+IC.eye+'Un-mark</button></div>':'');
     wrap.appendChild(el);
@@ -3457,7 +3649,20 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
         // wins. Fill only keys we don't already have, then push the merged result.
         var sp = (res[2] && res[2].data && res[2].data.profile) || {};
         Object.keys(sp).forEach(function(k){
+          if(k==="followUps") return;
           if(state.profile[k] === undefined || state.profile[k] === "") state.profile[k] = sp[k];
+        });
+        var sfu = sp.followUps || {};
+        Object.keys(sfu).forEach(function(id){
+          if(!state.followUps[id]) state.followUps[id] = sfu[id];
+          else {
+            var l=state.followUps[id], r=sfu[id]||{};
+            l.name = l.name || r.name || "";
+            l.phone = l.phone || r.phone || "";
+            l.email = l.email || r.email || "";
+            if(!l.on) l.on = r.on || "";
+            l.done = !!(l.done || r.done);
+          }
         });
         persist(); render(); renderCorner();
         var toPush = Object.keys(localIds).filter(function(id){
@@ -3509,11 +3714,12 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
     }
     function pushProfile(){
       if(!user) return;
+      state.profile.followUps = state.followUps;
       sb.from("user_profile").upsert({ profile: state.profile }, { onConflict: "user_id" })
         .then(function(r){ if(r.error) console.log("[portal] profile push:", r.error.message); });
     }
-    // Let the (non-portal) main script trigger a profile sync after name/quiz edits.
-    portalSync = { profile: pushProfile };
+    // Let the (non-portal) main script trigger a profile sync after name/quiz/follow-up edits.
+    portalSync = { profile: pushProfile, followUps: pushProfile };
 
     // Live mutations: these delegated listeners run AFTER the main handlers
     // above (same container, registered later), so state is already updated.
