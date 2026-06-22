@@ -17,6 +17,8 @@ name: Daily Job Scan (CD)
 on:
   schedule:
     - cron: "0 12 * * *"   # 12:00 UTC daily (~6-7am Central)
+  push:
+    branches: [main]   # deploy on every merge to main (no manual dispatch needed)
   workflow_dispatch:
 
 permissions:

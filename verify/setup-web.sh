@@ -14,13 +14,18 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PYTHON="$(command -v python3 || command -v python || true)"
+if [ -z "$PYTHON" ]; then
+  echo "ERROR: python3 or python not found on PATH" >&2
+  exit 1
+fi
 
 echo "==> Installing pinned Playwright"
-python -m pip install --quiet --upgrade pip
-python -m pip install --quiet -r "$ROOT/verify/requirements.txt"
+"$PYTHON" -m pip install --quiet --upgrade pip
+"$PYTHON" -m pip install --quiet -r "$ROOT/verify/requirements.txt"
 
 echo "==> Installing the pinned Chromium revision (+ system deps)"
-python -m playwright install --with-deps chromium
+"$PYTHON" -m playwright install --with-deps chromium
 
 echo "==> Done. The camera will use Playwright's pinned bundled Chromium."
-echo "    Run:  python verify/camera.py"
+echo "    Run:  $PYTHON verify/camera.py"
