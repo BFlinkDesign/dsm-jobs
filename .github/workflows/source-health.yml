@@ -11,7 +11,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
@@ -27,13 +27,27 @@ jobs:
           python-version: "3.12"
       - name: Probe job sources
         id: probe
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
           python scripts/source_health.py | tee /tmp/report.txt
-          echo "report<<EOF" >> "$GITHUB_OUTPUT"; cat /tmp/report.txt >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
+          code=$?
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "report<<EOF" >> "$GITHUB_OUTPUT"
+          cat /tmp/report.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          exit $code
+      - name: Persist empty-feed counters
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add scripts/source_health_state.json
+          git diff --staged --quiet || (git commit -m "chore: update source health empty-feed state" && git push)
       - name: Open/refresh an issue if a source is dead
-        if: failure()
+        if: steps.probe.outputs.code == '1'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
@@ -53,3 +67,26 @@ jobs:
             }
         env:
           REPORT: ${{ steps.probe.outputs.report }}
+      - name: Open/refresh an issue if feeds should be pruned
+        if: steps.probe.outputs.code == '2'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const body = "Weekly source-health: feeds empty for 4+ consecutive checks.\n\n```\n" +
+              (process.env.REPORT || "see workflow logs") + "\n```\n\n" +
+              "Consider removing these slugs from `providers.py` to reduce scan noise.";
+            const title = "🧹 Job feeds to prune (long-empty)";
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "source-prune" });
+            if (open.data.length) {
+              await github.rest.issues.createComment({ owner: context.repo.owner,
+                repo: context.repo.repo, issue_number: open.data[0].number, body });
+            } else {
+              await github.rest.issues.create({ owner: context.repo.owner,
+                repo: context.repo.repo, title, body, labels: ["source-prune", "automated"] });
+            }
+        env:
+          REPORT: ${{ steps.probe.outputs.report }}
+      - name: Fail job if probe failed
+        if: steps.probe.outputs.code != '0'
+        run: exit ${{ steps.probe.outputs.code }}

@@ -38,8 +38,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import domain_screen
 import providers
 
 # Windows-safe console output (avoid cp1252 crashes); keep print() text ASCII.
@@ -422,10 +423,15 @@ BLOCKLIST = []
 
 
 def load_blocklist(path="scam_blocklist.txt"):
+    """Manual blocklist plus autogen file (WHOIS-young domains from live scans)."""
     items = []
-    if os.path.exists(path):
+    base, _ = os.path.splitext(path)
+    autogen = base + "_autogen.txt"
+    for bl_path in (path, autogen):
+        if not os.path.exists(bl_path):
+            continue
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(bl_path, encoding="utf-8") as fh:
                 for line in fh:
                     line = line.strip()
                     if line and not line.startswith("#"):
@@ -744,7 +750,7 @@ def _apply_url_is_suspicious(url):
     return any(h in blob for h in _SCAM_APPLY_HOST_HINTS)
 
 
-def scam_assessment(row, spam_index):
+def scam_assessment(row, spam_index, *, domain_cache=None):
     """
     Return {"level": "safe"|"suspect"|"scam", "reasons": [...]}.
     Designed to be CONSERVATIVE for a user who would fall for a scam: when in
@@ -799,6 +805,21 @@ def scam_assessment(row, spam_index):
     # Personal-inbox / shortener apply links (remote spoof shape).
     if remote and _apply_url_is_suspicious(row.get("url")):
         reasons.append("apply link goes to a personal inbox or link-shortener")
+
+    # WHOIS domain age — direct employer apply URLs only (ATS hosts skipped).
+    if remote and not trusted:
+        host = row.get("_apply_host") or domain_screen.apply_host(row.get("url") or "")
+        if host and not domain_screen.is_trusted_apply_host(host) and not domain_screen.is_skipped_apply_host(host):
+            cache = domain_cache if domain_cache is not None else {}
+            age = row.get("_domain_age_days")
+            if age is None:
+                age = domain_screen.domain_age_days(host, cache)
+                row["_domain_age_days"] = age
+            if age is not None and age < domain_screen.MIN_DOMAIN_AGE_DAYS:
+                reasons.append(
+                    f"apply domain {host} registered {age} days ago "
+                    f"(under {domain_screen.MIN_DOMAIN_AGE_DAYS}d)"
+                )
 
     if reasons:
         # A trusted employer can't rescue a hard description tell. Absent those, a
@@ -937,15 +958,21 @@ def collect(verbose=True):
 
 
 def dedupe_rows(rows):
-    """Adzuna re-publishes the same posting from multiple boards under different
-    IDs. Collapse rows with the same employer + title + location, keeping the
-    newest. Returns (deduped_rows, number_collapsed)."""
-    best = {}
+    """Collapse duplicate postings: same real apply URL, or same employer+title+location.
+
+    Adzuna re-publishes under different IDs; ATS rows often share one apply URL.
+    Returns (deduped_rows, number_collapsed)."""
+    best: dict[tuple, dict] = {}
     for r in rows:
-        key = (_norm_company(r["company"]), (r["title"] or "").lower().strip(),
-               (r["location"] or "").lower().strip())
+        url_key = domain_screen.normalize_apply_url(r.get("url") or "")
+        host = domain_screen.apply_host(r.get("url") or "")
+        if url_key and not domain_screen.is_skipped_apply_host(host):
+            key = ("url", url_key)
+        else:
+            key = ("cty", (_norm_company(r["company"]), (r["title"] or "").lower().strip(),
+                           (r["location"] or "").lower().strip()))
         cur = best.get(key)
-        if cur is None or (r["created"] or "") > (cur["created"] or ""):
+        if cur is None or (r.get("created") or "") > (cur.get("created") or ""):
             best[key] = r
     return list(best.values()), len(rows) - len(best)
 
@@ -1000,12 +1027,15 @@ def write_csv(rows, path):
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["safety", "verdict", "title", "company", "location",
-                    "salary_hourly", "posted", "source", "scam_reasons", "url"])
+                    "salary_hourly", "posted", "source", "apply_host", "domain_age_days",
+                    "scam_reasons", "url"])
         for r in rows:
             sc = r.get("scam", {"level": "safe", "reasons": []})
             w.writerow([sc["level"], VERDICT_LABEL.get(r["verdict"], ("?", ""))[0],
                         r["title"], r["company"], r["location"], salary_text(r),
-                        r["created"], r["source"], "; ".join(sc["reasons"]), r["url"]])
+                        r["created"], r["source"],
+                        r.get("_apply_host") or "", r.get("_domain_age_days") or "",
+                        "; ".join(sc["reasons"]), r["url"]])
 
 
 # "Will train" — employer-stated phrases that mean a candidate without
@@ -4241,11 +4271,24 @@ def main():
     global BLOCKLIST
     BLOCKLIST = load_blocklist(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                             "scam_blocklist.txt"))
+    domain_cache: dict[str, object] = {}
+    if not args.mock:
+        domain_screen.reset_lookup_budget()
+        for r in rows:
+            domain_screen.annotate_row(r, domain_cache)
     spam_index = build_spam_index(rows)
     for r in rows:
-        r["scam"] = scam_assessment(r, spam_index)
+        r["scam"] = scam_assessment(r, spam_index, domain_cache=domain_cache)
     safe = sort_rows([r for r in rows if r["scam"]["level"] == "safe"])
     hidden = [r for r in rows if r["scam"]["level"] != "safe"]
+
+    if not args.mock and hidden:
+        autogen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scam_blocklist_autogen.txt")
+        added = domain_screen.enrich_blocklist_autogen(hidden, autogen)
+        if added:
+            BLOCKLIST = load_blocklist(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                    "scam_blocklist.txt"))
+            print(f"  blocklist: auto-added {len(added)} young-domain host(s): {', '.join(added)}")
 
     stamp = datetime.now(timezone.utc).astimezone()
     datestr = stamp.strftime("%Y-%m-%d")
@@ -4273,6 +4316,9 @@ def main():
             if portal_push.supabase_enabled():
                 try:
                     portal_push.push_jobs(_portal_rows(safe, stamp.isoformat()), log=print)
+                    # Drop portal rows the scanner hasn't seen in 14 days (stale noise).
+                    cutoff = (stamp - timedelta(days=14)).isoformat()
+                    portal_push.purge_stale_jobs(cutoff, log=print)
                 except RuntimeError as err:
                     # Loud but non-fatal: the public site must publish even
                     # when the portal is down. CI surfaces this in the log.

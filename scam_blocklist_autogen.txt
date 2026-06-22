@@ -1,0 +1,2 @@
+# Auto-grown by live scans: WHOIS-young apply domains on scam-hidden jobs.
+# The scanner appends here; manual blocklist stays in scam_blocklist.txt.

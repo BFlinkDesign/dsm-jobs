@@ -95,12 +95,9 @@ _ALLOWED_PREFIXES = (
 
 
 def _request_json(url: str, *, headers: "dict[str, str] | None" = None, body: object = None,
-                  attempts: int = 3, allowed_prefixes: "tuple[str, ...] | None" = None) -> object:
-    """GET (or POST when body is not None) returning parsed JSON.
-    Bounded retry on 5xx/network errors, fail-fast on 4xx — same policy as
-    the Adzuna fetcher. allowed_prefixes overrides the provider allowlist for
-    callers with their own pinned base URL (portal.push validates the Supabase
-    project URL shape before passing it here)."""
+                  attempts: int = 3, allowed_prefixes: "tuple[str, ...] | None" = None,
+                  method: str | None = None) -> object:
+    """GET/POST/DELETE returning parsed JSON (empty body -> [])."""
     if not url.startswith(allowed_prefixes or _ALLOWED_PREFIXES):  # defense-in-depth, CWE-939
         raise RuntimeError("refusing non-allowlisted provider URL")
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -108,12 +105,16 @@ def _request_json(url: str, *, headers: "dict[str, str] | None" = None, body: ob
     if body is not None:
         hdrs["Content-Type"] = "application/json"
     hdrs.update(headers or {})
-    req = urllib.request.Request(url, data=data, headers=hdrs)
+    http_method = method or ("POST" if body is not None else "GET")
+    req = urllib.request.Request(url, data=data, headers=hdrs, method=http_method)
     for attempt in range(1, attempts + 1):
         try:
             # nosemgrep - url allowlist-pinned above; HTTPS hosts only.
             with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-                return json.loads(resp.read().decode("utf-8"))
+                raw = resp.read().decode("utf-8")
+                if not raw.strip():
+                    return []
+                return json.loads(raw)
         except urllib.error.HTTPError as err:
             detail = err.read().decode("utf-8", "replace")[:200]
             if err.code < 500 or attempt == attempts:
@@ -900,7 +901,7 @@ PROVIDERS = [
     ("jooble", jooble_enabled, fetch_jooble),
     ("jsearch", jsearch_enabled, fetch_jsearch),
     ("ats", ats_enabled, fetch_ats),
-    ("careerjet", careerjet_enabled, fetch_careerjet),
+    # careerjet dropped — rotating CI IPs break its server allowlist (see CLAUDE.md)
     ("neogov", neogov_enabled, fetch_neogov),  # keyless gov feeds — always on
     ("workday", workday_enabled, fetch_workday),  # keyless enterprise ATS — always on
     ("smartrecruiters", smartrecruiters_enabled, fetch_smartrecruiters),  # keyless — always on
