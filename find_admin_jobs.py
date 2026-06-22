@@ -1323,6 +1323,33 @@ def _sentry_head(sentry_cfg):
     return SENTRY_CDN_TAG + "\n" + _SENTRY_INIT_TMPL.replace("__DSN__", dsn_js)
 
 
+def write_jobs_bundle(safe_rows, hidden_count, total_checked, web_dir, generated,
+                      contact="me", contact_phone="", portal_cfg=None):
+    """Emit static JSON the Astro front-end consumes (jobs + meta + public portal config)."""
+    os.makedirs(web_dir, exist_ok=True)
+    jobs_path = os.path.join(web_dir, "jobs.json")
+    meta_path = os.path.join(web_dir, "meta.json")
+    portal_path = os.path.join(web_dir, "portal.json")
+    jobs = _jobs_payload(safe_rows)
+    meta = {
+        "contact": contact,
+        "phone": contact_phone,
+        "generated": generated,
+        "hidden": hidden_count,
+        "total": total_checked,
+        "safe": len(safe_rows),
+    }
+    with open(jobs_path, "w", encoding="utf-8") as fh:
+        json.dump(jobs, fh, ensure_ascii=False)
+        fh.write("\n")
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False)
+        fh.write("\n")
+    with open(portal_path, "w", encoding="utf-8") as fh:
+        json.dump(portal_cfg or {}, fh, ensure_ascii=False)
+        fh.write("\n")
+
+
 def write_html(safe_rows, hidden_count, total_checked, path, generated,
                contact="me", contact_phone="", portal_cfg=None, sentry_cfg=None):
     jobs = _jobs_payload(safe_rows)
@@ -4296,9 +4323,11 @@ def main():
 
     base = os.path.dirname(os.path.abspath(__file__))
     web_dir = os.path.join(base, "web")
+    bundle_dir = os.path.join(base, "app", "public")
     os.makedirs(web_dir, exist_ok=True)
+    os.makedirs(bundle_dir, exist_ok=True)
     csv_path = os.path.join(base, f"admin-jobs-{datestr}.csv")
-    html_path = os.path.join(web_dir, "index.html")     # the mobile PWA
+    html_path = os.path.join(web_dir, "index.html")     # legacy fallback until Astro-only
     write_csv(sort_rows(rows), csv_path)                 # full audit incl. hidden
     # Portal config never reaches a --mock page: canned data must not gain a
     # sign-in surface, and a mock page must never be deployed anyway.
@@ -4307,6 +4336,9 @@ def main():
     write_html(safe, len(hidden), len(rows), html_path, human,
                contact=args.contact, contact_phone=args.contact_phone,
                portal_cfg=portal_cfg, sentry_cfg=sentry_cfg)
+    write_jobs_bundle(safe, len(hidden), len(rows), bundle_dir, human,
+                      contact=args.contact, contact_phone=args.contact_phone,
+                      portal_cfg=portal_cfg)
 
     if args.push_supabase:
         if args.mock:

@@ -7,6 +7,15 @@ __pycache__/
 .add_secret_status.json
 push_secrets_to_github.py
 web/index.html
+web/_astro/
+web/jobs.json
+web/meta.json
+web/portal.json
+web/favicon.ico
+web/favicon.svg
+app/public/jobs.json
+app/public/meta.json
+app/public/portal.json
 
 # Supabase CLI local state (keep config.toml + functions/ tracked)
 supabase/.temp/

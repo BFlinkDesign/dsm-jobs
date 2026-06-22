@@ -1,0 +1,97 @@
+/* ── Sparkle Goth design system — glitter purple + black ───────────────────
+   One token layer; every surface derives from here. No one-off hex in components. */
+
+:root {
+  /* Ink & void */
+  --void: #030205;
+  --paper: #07050c;
+  --card: #110d18;
+  --surface: #1a1424;
+  --elevated: #221a30;
+
+  /* Glitter purple ramp (sparkle highlights sit on the light end) */
+  --purple-deep: #4c1d95;
+  --purple: #7c3aed;
+  --purple-bright: #a855f7;
+  --purple-spark: #d8b4fe;
+  --purple-glitter: #e9d5ff;
+  --purple-glow: color-mix(in oklab, var(--purple-bright) 35%, transparent);
+
+  /* Ink on dark */
+  --ink: #f5f0ff;
+  --ink-soft: #c4b5d8;
+  --ink-muted: #8b7fa3;
+  --line: #2d2440;
+
+  /* Semantic */
+  --safe: #86efac;
+  --safe-soft: color-mix(in oklab, var(--safe) 18%, transparent);
+  --danger: #f87171;
+  --gold: var(--purple-glitter);
+
+  /* Sparkle gradients — used on accents, rings, hero type */
+  --glitter-gradient: linear-gradient(
+    125deg,
+    #6d28d9 0%,
+    #a855f7 22%,
+    #f0abfc 45%,
+    #c084fc 58%,
+    #7c3aed 78%,
+    #4c1d95 100%
+  );
+  --glitter-shine: linear-gradient(
+    105deg,
+    transparent 35%,
+    rgba(255, 255, 255, 0.45) 48%,
+    transparent 62%
+  );
+
+  /* Elevation — layered, no neon */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 8px 28px -8px rgba(0, 0, 0, 0.65);
+  --shadow-lg: 0 20px 50px -12px rgba(88, 28, 135, 0.35);
+  --ring: 0 0 0 3px var(--purple-glow);
+
+  /* Type */
+  --font-display: "Cinzel", Georgia, serif;
+  --font-body: "Atkinson Hyperlegible", system-ui, sans-serif;
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 1.0625rem;
+  --text-lg: 1.25rem;
+  --text-xl: 1.5rem;
+
+  /* Space (4px grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Radius */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 20px;
+  --radius-full: 999px;
+
+  /* Motion */
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur-med: 240ms;
+
+  /* Layout */
+  --nav-h: 64px;
+  --header-h: 56px;
+  --content-max: 720px;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-med: 0ms;
+  }
+}

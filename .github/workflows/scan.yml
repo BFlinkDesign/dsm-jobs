@@ -89,6 +89,19 @@ jobs:
         if: steps.gate.outputs.run == 'true'
         run: python find_admin_jobs.py --contact "Brady" --push-supabase
 
+      - name: Set up Node
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Build Astro PWA
+        if: steps.gate.outputs.run == 'true'
+        working-directory: app
+        run: npm ci --no-audit --no-fund && npm run build
+
       # Pre-publish safety gate: never serve Lilly a broken or gutted build.
       # The build can exit 0 yet produce a bad page (e.g. a regression that
       # drops every job, or malformed HTML). Validate the actual artifact here;
@@ -101,27 +114,29 @@ jobs:
         run: |
           python - <<'PY'
           import json, pathlib, re, sys
-          p = pathlib.Path("web/index.html")
-          if not p.exists():
+          web = pathlib.Path("web")
+          jp = web / "jobs.json"
+          hp = web / "index.html"
+          if not jp.exists():
+              print("GATE FAIL: web/jobs.json was not produced"); sys.exit(1)
+          if not hp.exists():
               print("GATE FAIL: web/index.html was not produced"); sys.exit(1)
-          html = p.read_text(encoding="utf-8")
+          jobs = json.loads(jp.read_text(encoding="utf-8"))
+          html = hp.read_text(encoding="utf-8")
           errs = []
-          if len(html) < 100_000:
+          if len(jobs) < 5:
+              errs.append(f"only {len(jobs)} jobs - a healthy scan yields dozens; likely a regression")
+          if len(html) < 3000:
               errs.append(f"page too small ({len(html)} bytes) - likely truncated")
-          if "Job Board" not in html:
-              errs.append("missing 'Job Board' shell")
-          m = re.search(r"const JOBS = (\[.*?\]);", html, re.DOTALL)
-          if not m:
-              errs.append("no embedded JOBS array")
-          else:
-              jobs = json.loads(m.group(1).replace("<\\/", "</"))
-              if len(jobs) < 5:
-                  errs.append(f"only {len(jobs)} jobs - a healthy scan yields dozens; likely a regression")
-          if not re.search(r'"generated": "\d{4}-\d{2}-\d{2}', html):
-              errs.append("no generated date")
+          if "Jobs for you" not in html:
+              errs.append("missing 'Jobs for you' shell")
+          if "view-host" not in html:
+              errs.append("missing Astro app shell (#view-host)")
+          if not re.search(r'"generated":\s*"\d{4}-\d{2}-\d{2}', (web / "meta.json").read_text(encoding="utf-8")):
+              errs.append("no generated date in meta.json")
           if errs:
               print("::error::pre-publish gate FAILED: " + "; ".join(errs)); sys.exit(1)
-          print(f"pre-publish gate OK: {len(html)} bytes, build looks sane")
+          print(f"pre-publish gate OK: {len(jobs)} jobs, {len(html)} bytes")
           PY
 
       # Artifact = the site bundle only. The audit CSV (operator-only scam
