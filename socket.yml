@@ -1,0 +1,43 @@
+# Socket supply-chain gate — tuned for dsm-jobs (stdlib runtime; deps are dev-only).
+# Org app is installed (see PR checks). This file cuts noise: scan only when
+# lockfiles change, surface malware/Critical CVE/typosquat — not telemetry/CVE spam.
+version: 2
+
+# Project SBOM still runs; these paths are the only dependency surfaces we ship.
+triggerPaths:
+  - "requirements-dev.txt"
+  - "verify/requirements.txt"
+  - "verify/css/package.json"
+  - "verify/css/package-lock.json"
+
+issueRules:
+  # Real hacks / supply-chain attacks only
+  knownMalware: true
+  criticalCVE: true
+  possibleTyposquat: true
+  protestware: true
+  obfuscatedFile: true
+  gitDependency: true
+  installScripts: true
+  aiDetectedMalware: true
+  # Noise off — Dependabot already bumps CVEs; we don't need email on medium telemetry
+  highCVE: false
+  mediumCVE: false
+  lowCVE: false
+  telemetry: false
+  deprecated: false
+  unpopularPackage: false
+  unmaintained: false
+  missingAuthor: false
+  shrinkwrap: false
+  unpublishedPackage: false
+  unstableOwnership: false
+
+githubApp:
+  enabled: true
+  dependencyOverviewEnabled: false
+  pullRequestAlertsEnabled: true
+  ignoreUsers:
+    - "dependabot[bot]"
+    - "github-actions[bot]"
+    - "cursor[bot]"

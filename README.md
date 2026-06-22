@@ -95,9 +95,11 @@ invariants (no guessed wage shown as a number, labeled filters, social buttons h
 unless enabled, no render-garbage). pytest proves the logic; the camera proves the
 rendered reality.
 
-- **CI** (`.github/workflows/ci.yml`): runs ruff + compile + 100+ unit/smoke tests + the
-  mock pipeline on every push/PR (Python 3.11 & 3.12), plus a secret-shape scan. Semgrep,
-  CodeRabbit, GitGuardian + Socket also gate every PR.
+- **CI** (`.github/workflows/ci.yml`): ruff + compile + 100+ unit/smoke tests + the
+  mock pipeline on every push/PR (Python 3.11 & 3.12), plus gitleaks + a secret-shape
+  scan + zizmor. **Semgrep** SAST runs on every PR. **Socket** + **GitGuardian** are
+  org-level GitHub Apps on every PR (tuned via root `socket.yml`; runtime is stdlib-only).
+- **CodeRabbit** is advisory only (`.coderabbit.yaml` — security/invariant focus, no merge block).
 - **CD** (`.github/workflows/scan.yml`): scheduled daily live scan. Add repo secrets
   `ADZUNA_APP_ID` + `ADZUNA_APP_KEY` (Settings → Secrets → Actions) to enable it; results
   are published as downloadable workflow artifacts. Until the secrets exist it skips

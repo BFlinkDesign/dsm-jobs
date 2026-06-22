@@ -63,7 +63,7 @@ jobs:
                 repo: context.repo.repo, issue_number: open.data[0].number, body });
             } else {
               await github.rest.issues.create({ owner: context.repo.owner,
-                repo: context.repo.repo, title, body, labels: ["source-health", "automated"] });
+                repo: context.repo.repo, title, body, labels: ["source-health", "outage", "automated"] });
             }
         env:
           REPORT: ${{ steps.probe.outputs.report }}
@@ -83,7 +83,7 @@ jobs:
                 repo: context.repo.repo, issue_number: open.data[0].number, body });
             } else {
               await github.rest.issues.create({ owner: context.repo.owner,
-                repo: context.repo.repo, title, body, labels: ["source-prune", "automated"] });
+                repo: context.repo.repo, title, body, labels: ["source-prune", "maintenance", "automated"] });
             }
         env:
           REPORT: ${{ steps.probe.outputs.report }}
