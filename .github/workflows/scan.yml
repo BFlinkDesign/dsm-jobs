@@ -185,6 +185,8 @@ jobs:
               await github.rest.issues.createComment({ owner: context.repo.owner,
                 repo: context.repo.repo, issue_number: open.data[0].number, body });
             } else {
-              await github.rest.issues.create({ owner: context.repo.owner,
-                repo: context.repo.repo, title, body, labels: ["scan", "automated"] });
+              const created = await github.rest.issues.create({ owner: context.repo.owner,
+                repo: context.repo.repo, title, body, labels: ["scan", "outage", "automated"] });
+              await github.rest.issues.addLabels({ owner: context.repo.owner,
+                repo: context.repo.repo, issue_number: created.data.number, labels: ["auto-fix"] });
             }

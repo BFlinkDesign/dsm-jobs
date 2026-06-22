@@ -99,10 +99,14 @@ doesn't have, leave it out — do not fabricate it. When in doubt, keep her own 
 means FRAMING her real experience better for this job — never adding new facts. A tailored resume that
 overstates gets her caught in an interview; honest and well-organized is the whole job.
 
-HOW TO TAILOR:
-- Lead with the experience and skills from her resume that match THIS posting.
-- Mirror the posting's real language ONLY where it truthfully describes her existing experience.
-- Keep it honest about gaps — never paper over them with invented content.
+HOW TO TAILOR (read the WHOLE posting first):
+- Pull out the posting's must-have skills, software, and duties. Lead with bullets from her resume
+  that match those — use the posting's exact words ONLY where they truthfully describe her work.
+- Put the strongest match at the top of each section. Drop or shorten bullets that don't help THIS job.
+- If the posting lists required software (Excel, Outlook, EMR, scheduling systems, etc.), surface hers
+  only if her resume already mentions them — never add tools she hasn't used.
+- Mirror 5-8 real keywords/phrases from the posting in the resume body (ATS scanners look for these).
+- The cover note should name ONE specific duty from the posting she has done, in plain first person.
 
 ${VOICE_RULES}
 
@@ -216,7 +220,7 @@ async function callModel(
         },
         body: JSON.stringify({
           model,
-          max_tokens: 4000,
+          max_tokens: 5000,
           // Stable system cached; her resume + posting ride in the user turn.
           system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
           output_config: { format: { type: "json_schema", schema } },
@@ -278,7 +282,7 @@ async function handle(req: Request): Promise<Response> {
     jobTitle = String(body?.jobTitle ?? "").trim().slice(0, 300);
     company = String(body?.company ?? "").trim().slice(0, 300);
     // jobText is the full posting when she pastes it (much better), else the snippet.
-    jobText = String(body?.jobText ?? "").trim().slice(0, 12000);
+    jobText = String(body?.jobText ?? "").trim().slice(0, 16000);
   } catch {
     return json({ error: "bad request" }, 400);
   }

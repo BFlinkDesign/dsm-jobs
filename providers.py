@@ -95,12 +95,9 @@ _ALLOWED_PREFIXES = (
 
 
 def _request_json(url: str, *, headers: "dict[str, str] | None" = None, body: object = None,
-                  attempts: int = 3, allowed_prefixes: "tuple[str, ...] | None" = None) -> object:
-    """GET (or POST when body is not None) returning parsed JSON.
-    Bounded retry on 5xx/network errors, fail-fast on 4xx — same policy as
-    the Adzuna fetcher. allowed_prefixes overrides the provider allowlist for
-    callers with their own pinned base URL (portal.push validates the Supabase
-    project URL shape before passing it here)."""
+                  attempts: int = 3, allowed_prefixes: "tuple[str, ...] | None" = None,
+                  method: str | None = None) -> object:
+    """GET/POST/DELETE returning parsed JSON (empty body -> [])."""
     if not url.startswith(allowed_prefixes or _ALLOWED_PREFIXES):  # defense-in-depth, CWE-939
         raise RuntimeError("refusing non-allowlisted provider URL")
     data = json.dumps(body).encode("utf-8") if body is not None else None
@@ -108,12 +105,16 @@ def _request_json(url: str, *, headers: "dict[str, str] | None" = None, body: ob
     if body is not None:
         hdrs["Content-Type"] = "application/json"
     hdrs.update(headers or {})
-    req = urllib.request.Request(url, data=data, headers=hdrs)
+    http_method = method or ("POST" if body is not None else "GET")
+    req = urllib.request.Request(url, data=data, headers=hdrs, method=http_method)
     for attempt in range(1, attempts + 1):
         try:
             # nosemgrep - url allowlist-pinned above; HTTPS hosts only.
             with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-                return json.loads(resp.read().decode("utf-8"))
+                raw = resp.read().decode("utf-8")
+                if not raw.strip():
+                    return []
+                return json.loads(raw)
         except urllib.error.HTTPError as err:
             detail = err.read().decode("utf-8", "replace")[:200]
             if err.code < 500 or attempt == attempts:
@@ -266,6 +267,11 @@ def _strip_tags(text):
     return "".join(out).strip()
 
 
+def _strip_html(text):
+    """Plain text from HTML-ish provider fields (Greenhouse content, etc.)."""
+    return _strip_tags(text or "").replace("&nbsp;", " ").replace("&amp;", "&")
+
+
 def fetch_jooble(titles, location, verdict_fn, log):
     key = os.environ["JOOBLE_API_KEY"]
     rows = []
@@ -293,6 +299,8 @@ JSEARCH_LOCAL_QUERIES = [
     "receptionist jobs in des moines iowa",
     "office assistant jobs in des moines iowa",
     "data entry clerk jobs in des moines iowa",
+    "clerical jobs in des moines iowa",
+    "customer service jobs in des moines iowa",
 ]
 JSEARCH_REMOTE_QUERY = "remote administrative assistant no degree"
 
@@ -411,7 +419,7 @@ def _greenhouse_rows(payload, verdict_fn):
             "created": (j.get("updated_at") or "")[:10],
             "url": j.get("absolute_url") or "",
             "source": _ats_source(loc),
-            "description": "",
+            "description": _strip_html(j.get("content") or "")[:8000].strip(),
         })
     return rows
 
@@ -451,7 +459,7 @@ def _lever_rows(payload, verdict_fn):
             "created": "",                     # createdAt is epoch ms; left blank (freshness optional)
             "url": j.get("applyUrl") or j.get("hostedUrl") or "",
             "source": _ats_source(loc),
-            "description": (j.get("descriptionPlain") or "")[:2000].strip(),
+            "description": _strip_html(j.get("descriptionPlain") or "")[:8000].strip(),
         })
     return rows
 
@@ -461,7 +469,7 @@ def fetch_ats(titles, location, verdict_fn, log):
     rows = []
     for token in ATS_BOARDS.get("greenhouse", []):
         try:
-            payload = _request_json(f"{GREENHOUSE_HOST}{token}/jobs?pay_transparency=true")
+            payload = _request_json(f"{GREENHOUSE_HOST}{token}/jobs?content=true")
             rows.extend(_greenhouse_rows(payload, verdict_fn))
         except Exception as err:  # noqa: BLE001 - per-board isolation
             print(f"  WARNING: greenhouse board '{token}' failed: {err}", file=sys.stderr)
@@ -577,10 +585,11 @@ NEOGOV_AGENCIES = [
     #     clean admin/clerk/receptionist post when one is listed (same rationale as
     #     the tiny urbandale/waukee feeds above).
     # Probed + dropped: dmww (location field is the facility name "Water Works Park",
-    #   never a parseable Polk/Dallas city -> can't pass in_polk_or_dallas); Warren-Co
-    #   (norwalkiowa) + Story-Co (cityofames) are outside the Polk/Dallas metro filter.
+    #   never a parseable Polk/Dallas city -> can't pass commute gate); Story-Co
+    #   (cityofames) is outside the 45-min commute map.
     ("dallascountyia", "Dallas County"),    # 2 (Receptionist, Adel — Dallas County)
     ("bondurant", "City of Bondurant"),     # 1 (Building Official Coordinator; Polk 50035)
+    ("norwalkiowa", "City of Norwalk"),     # Warren Co — ~28 min from Grimes (commute map)
     # Added 2026-06-18 — more Polk/Dallas-metro gov employers (CANDIDATES, pending
     # the nightly scan's live confirmation). Gov office/clerk work is an ideal fit:
     # daytime, benefits, no degree. These are cheap + high-trust; the metro location
@@ -660,6 +669,9 @@ def _neogov_rows(xml_text, company, verdict_fn):
                                 g(it, "salaryInterval"), g(it, "salaryCurrency"))
         stated = lo is not None or hi is not None
         loc = g(it, "location").replace(" - ", ", ")  # -> commas for in_polk_or_dallas()
+        qual = g(it, "qualifications")
+        desc = g(it, "description")
+        body = "\n\n".join(p for p in (qual, desc) if p)
         rows.append({
             "id": "gov-" + (g(it, "jobId") or url)[-40:],
             "title": title,
@@ -672,7 +684,7 @@ def _neogov_rows(xml_text, company, verdict_fn):
             "created": _neogov_date(g(it, "pubDate")),
             "url": url,
             "source": "local",  # government metro postings are in-person
-            "description": _strip_tags(g(it, "qualifications") or g(it, "description"))[:2000].strip(),
+            "description": _strip_tags(body)[:6000].strip(),
         })
     return rows
 
@@ -709,16 +721,38 @@ WORKDAY_BOARDS = [
     # name locations like "MMCIA - MercyOne West Grand Clinic" that fail the metro
     # filter). Re-add only with a location facet that isolates the DSM metro.
 ]
-# CxS searchText matches title+description; a few admin terms keep volume low
+# CxS searchText matches title+description; admin/office terms keep volume low
 # and precision high vs. pulling every posting from these large employers.
-_WORKDAY_QUERIES = ["administrative", "office", "receptionist"]
+_WORKDAY_QUERIES = [
+    "administrative", "office", "receptionist", "clerical",
+    "data entry", "office coordinator", "customer service",
+]
+# Detail fetches are bounded — one extra call per surviving list row, capped so
+# a national tenant can't burn the scan on out-of-area roles.
+_WORKDAY_DETAIL_CAP = 12
 
 
 def workday_enabled():
     return bool(WORKDAY_BOARDS)  # keyless; always on unless the list is emptied
 
 
-def _workday_rows(payload, base, company, verdict_fn):
+def _workday_detail(host, tenant, site, path):
+    """Full posting text from the CxS job detail endpoint (employer-stated)."""
+    if not path:
+        return ""
+    try:
+        detail = _request_json(
+            f"{host}/wday/cxs/{tenant}/{site}{path}",
+            headers={"Accept": "application/json"},
+            allowed_prefixes=(host + "/",),
+        )
+        ji = (detail or {}).get("jobPostingInfo") or {}
+        return _strip_html(ji.get("jobDescription") or "")[:8000].strip()
+    except Exception:  # noqa: BLE001 - per-job isolation; list row still ships
+        return ""
+
+
+def _workday_rows(payload, base, company, verdict_fn, *, tenant, dc, site):
     rows = []
     for j in (payload or {}).get("jobPostings") or []:
         title = j.get("title") or ""
@@ -741,6 +775,7 @@ def _workday_rows(payload, base, company, verdict_fn):
             "url": base + path,
             "source": _ats_source(loc),
             "description": "",
+            "_cxs": (tenant, dc, site, path),
         })
     return rows
 
@@ -748,6 +783,7 @@ def _workday_rows(payload, base, company, verdict_fn):
 def fetch_workday(titles, location, verdict_fn, log):
     del titles, location
     rows, seen = [], set()
+    detail_budget = _WORKDAY_DETAIL_CAP * len(WORKDAY_BOARDS)
     for tenant, dc, site, company in WORKDAY_BOARDS:
         host = f"https://{tenant}.{dc}.myworkdayjobs.com"
         api = f"{host}/wday/cxs/{tenant}/{site}/jobs"
@@ -758,13 +794,31 @@ def fetch_workday(titles, location, verdict_fn, log):
                     api, headers={"Accept": "application/json"},
                     body={"appliedFacets": {}, "limit": 20, "offset": 0, "searchText": q},
                     allowed_prefixes=(host + "/",))
-                for r in _workday_rows(payload, base, company, verdict_fn):
+                for r in _workday_rows(payload, base, company, verdict_fn,
+                                       tenant=tenant, dc=dc, site=site):
                     if r["id"] not in seen:
                         seen.add(r["id"])
                         rows.append(r)
             except Exception as err:  # noqa: BLE001 - per-board/query isolation
                 print(f"  WARNING: workday '{tenant}/{q}' failed: {err}", file=sys.stderr)
-    log(f"  workday: {len(rows)} postings")
+    fetched = 0
+    for r in rows:
+        if fetched >= detail_budget:
+            break
+        if r.get("description"):
+            r.pop("_cxs", None)
+            continue
+        meta = r.pop("_cxs", None)
+        if not meta:
+            continue
+        tnt, dc, site, path = meta
+        host = f"https://{tnt}.{dc}.myworkdayjobs.com"
+        r["description"] = _workday_detail(host, tnt, site, path)
+        fetched += 1
+        time.sleep(0.15)
+    for r in rows:
+        r.pop("_cxs", None)
+    log(f"  workday: {len(rows)} postings ({fetched} with full descriptions)")
     return rows
 
 
@@ -777,6 +831,19 @@ SMARTRECRUITERS_COMPANIES = [
 
 def smartrecruiters_enabled():
     return bool(SMARTRECRUITERS_COMPANIES)
+
+
+def _smartrecruiters_detail(ident, jid):
+    try:
+        det = _request_json(f"{SMARTRECRUITERS_HOST}{ident}/postings/{jid}")
+        ad = (det or {}).get("jobAd") or {}
+        parts = []
+        for sec in (ad.get("sections") or {}).values():
+            if isinstance(sec, dict) and sec.get("text"):
+                parts.append(_strip_html(sec["text"]))
+        return "\n\n".join(parts)[:8000].strip()
+    except Exception:  # noqa: BLE001 - per-posting isolation
+        return ""
 
 
 def _smartrecruiters_rows(payload, company, verdict_fn):
@@ -814,7 +881,13 @@ def fetch_smartrecruiters(titles, location, verdict_fn, log):
     for ident, company in SMARTRECRUITERS_COMPANIES:
         try:
             payload = _request_json(f"{SMARTRECRUITERS_HOST}{ident}/postings?limit=100")
-            rows.extend(_smartrecruiters_rows(payload, company, verdict_fn))
+            board = _smartrecruiters_rows(payload, company, verdict_fn)
+            for i, r in enumerate(board):
+                if i < 30 and not r.get("description"):
+                    jid = r["id"].replace("sr-", "", 1)
+                    r["description"] = _smartrecruiters_detail(ident, jid)
+                    time.sleep(0.12)
+            rows.extend(board)
         except Exception as err:  # noqa: BLE001 - per-company isolation
             print(f"  WARNING: smartrecruiters '{ident}' failed: {err}", file=sys.stderr)
     log(f"  smartrec: {len(rows)} postings")
@@ -828,7 +901,7 @@ PROVIDERS = [
     ("jooble", jooble_enabled, fetch_jooble),
     ("jsearch", jsearch_enabled, fetch_jsearch),
     ("ats", ats_enabled, fetch_ats),
-    ("careerjet", careerjet_enabled, fetch_careerjet),
+    # careerjet dropped — rotating CI IPs break its server allowlist (see CLAUDE.md)
     ("neogov", neogov_enabled, fetch_neogov),  # keyless gov feeds — always on
     ("workday", workday_enabled, fetch_workday),  # keyless enterprise ATS — always on
     ("smartrecruiters", smartrecruiters_enabled, fetch_smartrecruiters),  # keyless — always on

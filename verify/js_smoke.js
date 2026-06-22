@@ -66,6 +66,7 @@ const sb = {
   location: { origin: "http://x", pathname: "/", href: "http://x/" },
   fetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
   scrollTo: () => {}, print: () => {}, prompt: () => null, alert: () => {}, PublicKeyCredential: undefined,
+  Notification: { permission: "default", requestPermission: () => Promise.resolve("default") },
 };
 sb.document = {
   getElementById: () => elStub(), querySelector: () => elStub(), querySelectorAll: () => [],

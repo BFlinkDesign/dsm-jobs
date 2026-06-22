@@ -269,6 +269,48 @@ def test_payload_includes_enrichment_fields():
     assert p["category"] == "Office"
     assert p["commute"] == "~20 min drive"  # Des Moines, IA from Grimes
     assert "trustLabel" in p and "about" in p
+    assert "contactPhone" in p and "contactEmail" in p and "contactName" in p
+
+
+def test_extract_contact_hints_from_posting():
+    text = "Questions? Call (515) 244-0198 or email hiring@johnstondental.example. Contact Jane Smith."
+    hints = fa.extract_contact_hints(text)
+    assert hints["contactPhone"] == "(515) 244-0198"
+    assert hints["contactEmail"] == "hiring@johnstondental.example"
+    assert hints["contactName"] == "Jane Smith"
+
+
+def test_extract_contact_hints_ignores_noreply_email():
+    hints = fa.extract_contact_hints("Reach us at noreply@scam.example or call (900) 555-0100")
+    assert hints["contactEmail"] == ""
+    assert hints["contactPhone"] == ""  # premium/fiction ranges never surface
+
+
+def test_extract_contact_hints_empty_when_no_posting_text():
+    assert fa.extract_contact_hints("") == {"contactPhone": "", "contactEmail": "", "contactName": ""}
+    assert fa.extract_contact_hints(None)["contactPhone"] == ""
+
+
+def test_payload_embeds_employer_stated_contact():
+    row = fa.normalize(
+        {
+            "id": "c1",
+            "title": "Receptionist",
+            "company": {"display_name": "Dental Office"},
+            "location": {"display_name": "Johnston, IA"},
+            "salary_min": 39520,
+            "salary_max": 41600,
+            "salary_is_predicted": "0",
+            "created": "2026-06-01T00:00:00Z",
+            "redirect_url": "https://example.com/j",
+            "description": "Call (515) 555-1212 or email hr@dental.example",
+        },
+        "local",
+    )
+    row["scam"] = {"level": "safe", "reasons": []}
+    p = fa._jobs_payload([row])[0]
+    assert p["contactPhone"] == "(515) 555-1212"
+    assert p["contactEmail"] == "hr@dental.example"
 
 
 def test_app_keeps_server_sort_order():
@@ -302,6 +344,18 @@ def test_scam_remote_unknown_employer_is_hidden():
     r = _row(title="Administrative Assistant", company="Unknownish Co", source="remote", desc="")
     out = fa.scam_assessment(r, {})
     assert out["level"] in ("scam", "suspect")  # never 'safe'
+
+
+def test_scam_remote_gmail_apply_link_is_hidden():
+    r = _row(
+        title="Administrative Assistant",
+        company="Unknownish Co",
+        source="remote",
+        desc="",
+    )
+    r["url"] = "https://gmail.com/inbox/apply-here"
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+    assert "apply link" in fa.scam_assessment(r, {})["reasons"][0]
 
 
 def test_scam_remote_too_good_pay_is_scam():
@@ -626,15 +680,48 @@ def test_template_has_no_legacy_theme_leftovers():
         assert warm not in t, f"legacy warm color {warm} still in template"
 
 
-def test_resume_tailor_paste_description_field_present():
-    """The tailor flow lets her paste the FULL job description (optional) so the
-    engine gets more than the Adzuna snippet, and fires the engine separately."""
+def test_native_platform_affordances_preserved():
+    """End-user actions use OS-native handlers — AI owns vetting, not the dialer."""
     t = fa.APP_TEMPLATE
-    assert 'id="tailorjd"' in t                      # the paste-description textarea
-    assert 'data-act="runtailor"' in t               # the separate "go" button
-    assert "function runTailor(" in t                # reads the paste, prefers it
-    # the pasted text must actually be preferred over the snippet when long enough
-    assert "pasted.length>=40 ? pasted : snippet" in t
+    assert "tel:" in t and "mailto:" in t
+    assert "navigator.share" in t
+    assert "Notification" in t
+    assert "beforeinstallprompt" in t
+
+
+def test_ai_automation_first_documented():
+    """Load-bearing: AI replaces human-in-the-loop for operator judgment."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    claude = open(os.path.join(root, "CLAUDE.md"), encoding="utf-8").read().lower()
+    assert "ai replaces human-in-the-loop" in claude
+    assert "auto-fix" in claude or "autonomously" in claude
+    rabbit = open(os.path.join(root, ".coderabbit.yaml"), encoding="utf-8").read().lower()
+    assert "human-in-the-loop" in rabbit
+
+
+def test_resume_tailor_paste_description_field_present():
+    """The tailor flow uses scanner-pulled full text when available; paste is only
+    needed when the listing gave a short preview."""
+    t = fa.APP_TEMPLATE
+    assert 'id="tailorjd"' in t                      # paste fallback when descFull is short
+    assert 'data-act="runtailor"' in t               # manual go when paste is required
+    assert "function runTailor(" in t
+    assert "function tailorJobText(" in t
+    assert "descFull" in t                           # full posting rides in the job payload
+    assert "full.length>=200" in t                   # one-tap tailor when we have enough text
+    assert "pasted.length>=40" in t                  # her paste still wins when she adds more
+    assert "isPlausiblePhone" in t                   # follow-up never dials fiction/premium lines
+
+
+def test_resume_tailor_edge_function_never_invents():
+    """The server-side tailor is load-bearing: critic must flag fabrications."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "supabase/functions/resume-tailor/index.ts"),
+               encoding="utf-8").read()
+    assert "never invent" in src.lower()
+    assert "fabrications" in src
+    assert "CRITIC_SYSTEM" in src
+    assert "MAX_REVISIONS" in src
 
 
 def test_resume_tailor_copy_both_and_download_present():

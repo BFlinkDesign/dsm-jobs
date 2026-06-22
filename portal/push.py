@@ -20,6 +20,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import urllib.parse
 from typing import Any, Callable
 
 import providers
@@ -42,6 +43,35 @@ def _config() -> tuple[str, str]:
 def supabase_enabled() -> bool:
     url, key = _config()
     return bool(_URL_RE.match(url)) and bool(key)
+
+
+def purge_stale_jobs(not_seen_before_iso: str, log: Log = print) -> int:
+    """Delete portal jobs whose last_seen is older than the cutoff. Returns count."""
+    url, key = _config()
+    if not _URL_RE.match(url) or not key:
+        return 0
+    endpoint = (
+        f"{url}/rest/v1/jobs?last_seen=lt.{urllib.parse.quote(not_seen_before_iso, safe='')}"
+        "&select=id"
+    )
+    headers = {
+        "apikey": key,
+        "Authorization": f"Bearer {key}",
+        "Prefer": "return=representation",
+    }
+    try:
+        echo = providers._request_json(
+            endpoint,
+            headers=headers,
+            method="DELETE",
+            allowed_prefixes=(url,),
+        )
+    except Exception as err:  # noqa: BLE001 - caller treats as non-fatal
+        raise RuntimeError(f"portal stale purge failed: {err}") from err
+    n = len(echo) if isinstance(echo, list) else 0
+    if n:
+        log(f"  portal : purged {n} stale job(s) not seen since {not_seen_before_iso[:10]}")
+    return n
 
 
 def push_jobs(rows: list[Row], log: Log = print) -> int:
