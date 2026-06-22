@@ -681,7 +681,7 @@ def test_template_has_no_legacy_theme_leftovers():
 
 
 def test_native_platform_affordances_preserved():
-    """Automations must not replace native phone affordances — tel/mail/share/notifications."""
+    """End-user actions use OS-native handlers — AI owns vetting, not the dialer."""
     t = fa.APP_TEMPLATE
     assert "tel:" in t and "mailto:" in t
     assert "navigator.share" in t
@@ -689,14 +689,14 @@ def test_native_platform_affordances_preserved():
     assert "beforeinstallprompt" in t
 
 
-def test_automation_boundary_documented():
-    """Load-bearing: bots assist; they do not replace judgment or native UX."""
+def test_ai_automation_first_documented():
+    """Load-bearing: AI replaces human-in-the-loop for operator judgment."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     claude = open(os.path.join(root, "CLAUDE.md"), encoding="utf-8").read().lower()
-    assert "judgment" in claude and "product sense" in claude
-    assert "native platform" in claude
+    assert "ai replaces human-in-the-loop" in claude
+    assert "auto-fix" in claude or "autonomously" in claude
     rabbit = open(os.path.join(root, ".coderabbit.yaml"), encoding="utf-8").read().lower()
-    assert "advisory" in rabbit and "replace" in rabbit
+    assert "human-in-the-loop" in rabbit
 
 
 def test_resume_tailor_paste_description_field_present():

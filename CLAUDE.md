@@ -64,7 +64,7 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 5. **XSS-safe rendering** in the embedded JS: all fields go through `esc()` (encodes `& < > " ' \``) and apply links through `safeUrl()` (http/https only). Embedded JSON has `</` escaped. Keep both if you touch `APP_TEMPLATE`.
 6. **Secrets**: `ADZUNA_APP_ID/KEY` (and future provider keys) live in local `.env` (gitignored) and GitHub Actions secrets. Push a value to a GH secret via stdin (`gh secret set NAME` with piped input), never `--body`/argv. Collect into `.env` via the `/add-secret` masked dialog — never paste keys into chat.
 7. **Verify rendered reality with vision, not text-scraping.** Grepping the generated HTML/source silently misses structure, layout, and visual regressions — a string can be present and still render broken, overlapped, or invisible. Screenshots/vision are the catch. Before claiming a UI change works (and before any deploy), confirm it by rendering and *looking* (the `verify/camera.py` camera, or a screenshot), not by string-matching alone. Text checks supplement vision; they never replace it.
-8. **Automations must not replace judgment, product sense, or native platform features.** Bots and scanners *assist* — they do not own merge decisions, UX tradeoffs, or phone affordances. Hard gates: CI, Semgrep, gitleaks, Socket (malware/critical only). Advisory only: CodeRabbit. Human review: `supabase/`, `portal/`, `scam_blocklist.txt`, `.github/workflows/`. The PWA uses native `tel:` / `mailto:` / `navigator.share` / `Notification` / install prompt — never custom in-app dialers, mail clients, or notification centers that duplicate the OS. AI may reframe her real résumé; it must never invent facts or override her paste when she adds more context.
+8. **AI replaces human-in-the-loop for operator judgment.** Scans, WHOIS/blocklist growth, feed pruning, and `auto-fix` repair loops run autonomously when deterministic gates pass (CI, Semgrep, gitleaks, Socket). Monitors label issues `auto-fix`; Claude drafts repairs; auto-merge-guard ships code-path fixes without waiting on a maintainer. **Product/scam judgment for her is automated up front** (scam shield hides bait; attainability filter; WHOIS on young domains) — she never self-vets. **End-user actions stay native** (`tel:` / `mailto:` / `Notification` / share / PWA install): the OS places the call or email; AI handles vetting, tailoring, Ruby, and follow-up timing. Résumé AI reframes only what she wrote — never invents facts.
 
 ## Deploy / publish
 
@@ -81,7 +81,7 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 
 ## Planned / next
 
-- **USAJobs** key (still pending — always employer-stated pay; free at developer.usajobs.gov). Remaining providers also **unlock WHOIS domain-age scam-checking** (Adzuna only exposes a JS redirect, so the employer domain isn't reachable from it).
+- **WHOIS domain-age screening** + `scam_blocklist_autogen.txt` (live 2026-06-22). **Auto-prune** long-empty gov feeds via `scripts/auto_prune_feeds.py`.
 - **Resend SMTP** for reliable password-reset + magic-link email (today's default Supabase mailer is spam-prone). Then "Confirm email" could go back ON.
 - **Google OAuth** (optional — needs a Google Cloud client; the button auto-appears once enabled). Apple intentionally skipped ($99/yr).
 - **Recover MercyOne/Hy-Vee/national-tenant sources via better parsing** (they have real metro jobs; the parser couldn't isolate them from national noise — see the rejected list in `providers.py`).

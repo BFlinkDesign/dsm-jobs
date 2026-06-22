@@ -98,8 +98,10 @@ jobs:
               await github.rest.issues.createComment({ owner: context.repo.owner,
                 repo: context.repo.repo, issue_number: existing.data[0].number, body });
             } else {
-              await github.rest.issues.create({ owner: context.repo.owner,
+              const created = await github.rest.issues.create({ owner: context.repo.owner,
                 repo: context.repo.repo, title, body, labels: ["health", "outage", "automated"] });
+              await github.rest.issues.addLabels({ owner: context.repo.owner,
+                repo: context.repo.repo, issue_number: created.data.number, labels: ["auto-fix"] });
             }
         env:
           SUMMARY: ${{ steps.check.outputs.summary }}

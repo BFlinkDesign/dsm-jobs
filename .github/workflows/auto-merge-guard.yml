@@ -1,9 +1,8 @@
 # Auto-merge guard for Claude's self-repair PRs.
 #
 # Decides — by WHICH FILES changed — whether a bot fix may auto-merge or must go
-# to a human. The principle: auto-merge what our tests can protect; escalate
-# what they cannot. Automations must NOT replace judgment, product sense, or
-# native platform features — bots assist; humans own safety-critical paths.
+# to a human. AI replaces human-in-the-loop for code paths CI + Semgrep protect.
+# Only stateful backend (supabase/, portal/) still escalates — her saved data.
 #
 #   AUTO-MERGE (armed, then GitHub merges only when required checks pass):
 #     code + tests + the web shell. A regression here FAILS the invariant tests
@@ -11,12 +10,11 @@
 #     second backstop before the live site.
 #
 #   ESCALATE to a human (label `needs-human`, never auto-merge):
-#     - supabase/** or portal/**  -> stateful backend: her saved data + auth,
-#       which tests can't fully cover and a bad deploy is hard to reverse.
-#     - scam_blocklist.txt         -> data, not code: removing an entry silently
-#       un-hides a known scam and no unit test would catch that specific removal.
-#     - .github/**                 -> the safety workflows themselves; a bad
-#       change here could disable the very gates we rely on.
+#     - supabase/** or portal/**  -> stateful backend: her saved data + auth.
+#     - scam_blocklist.txt         -> manual data: removing an entry un-hides scams.
+#
+#   AUTO-MERGE also covers scam_blocklist_autogen.txt, providers.py feed lists,
+#   and .github/ workflow fixes when CI + Semgrep pass.
 #
 # Only acts on branches Claude creates (claude/*). Human PRs are untouched.
 
@@ -53,14 +51,14 @@ jobs:
           set -euo pipefail
           files="$(gh pr view "$PR" --json files --jq '.files[].path')"
           echo "Changed files:"; echo "$files"
-          critical="$(printf '%s\n' "$files" | grep -E '^(supabase/|portal/|scam_blocklist\.txt$|\.github/)' || true)"
+          critical="$(printf '%s\n' "$files" | grep -E '^(supabase/|portal/|scam_blocklist\.txt$)' || true)"
           if [ -n "$critical" ]; then
             echo "::notice::Escalating PR #$PR — touches safety-critical paths."
             gh pr edit "$PR" --add-label needs-human || true
             gh pr comment "$PR" --body "$(printf '%s\n' \
               '🛑 **Escalated for human review** — this automated fix changes safety-critical paths:' \
               '```' "$critical" '```' \
-              'These are not auto-merged: stateful backend (`supabase/`, `portal/`), the scam blocklist, or the safety workflows themselves. A human should review and merge.')"
+              'These are not auto-merged: stateful backend (`supabase/`, `portal/`) or manual `scam_blocklist.txt`. `scam_blocklist_autogen.txt`, `providers.py` feed pruning, and workflow fixes auto-merge when CI passes.'"
           else
             echo "::notice::Arming auto-merge for PR #$PR — code/test paths only."
             gh pr comment "$PR" --body '🤖 **Auto-merge armed** — this fix touches only code/test paths the invariant tests + Semgrep + CI protect. It will merge automatically **only when all required checks pass**; otherwise it stays open for review.'

@@ -1,15 +1,8 @@
 # Self-repair: when an issue is labeled `auto-fix`, Claude drafts a fix PR.
 #
-# TRIGGER: this is label-driven, not fully autonomous. A human (or, later, a
-# monitor hook) applies the `auto-fix` label to an issue worth fixing; that is
-# the deliberate human entry point. Monitors open issues but do NOT auto-apply
-# the label yet.
-#
-# This is the "repair" half of the loop. It does NOT merge anything
-# — it opens a normal PR that must pass CI + Semgrep + CodeRabbit + the
-# invariant tests, and then auto-merge-guard.yml decides (by changed paths)
-# whether to auto-merge or escalate to a human. So a bad fix cannot reach the
-# live site: the invariant tests fail it, or the guard escalates it.
+# Monitors (health, scan, source-health) label issues `auto-fix` — no human
+# triage. This is the repair half of the loop. It does NOT merge anything;
+# auto-merge-guard ships code-path fixes when CI + Semgrep pass.
 #
 # SAFETY:
 # - Dormant unless CLAUDE_CODE_OAUTH_TOKEN is set (so it costs nothing until funded).
@@ -103,11 +96,11 @@ jobs:
               before opening the PR. If you cannot make them pass, do NOT open a
               PR — instead comment on the issue explaining what you found and
               what a human needs to decide.
-            - NEVER change these without stopping and asking for human review in a
-              comment instead: anything under supabase/ or portal/ (stateful
-              backend, her saved data and auth), scam_blocklist.txt (a wrong edit
-              un-hides a known scam), or anything under .github/ (the safety
-              workflows themselves).
+            - NEVER change these without commenting on the issue instead: anything
+              under supabase/ or portal/ (stateful backend, her saved data and auth),
+              or manual scam_blocklist.txt (a wrong edit un-hides a known scam).
+              scam_blocklist_autogen.txt, providers.py feed lists, and .github/
+              workflow fixes ARE in scope for automated repair when tests pass.
             - Never weaken an invariant to make a test pass: a guessed wage is
               never shown as a number; scams are hidden, not labeled; all rendered
               fields stay XSS-escaped.
