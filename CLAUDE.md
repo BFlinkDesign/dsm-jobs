@@ -79,9 +79,17 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 - **Scam-shield hardening** — gig/"paid panel" bait titles flagged (distinctive phrases only, so legit Market Research Coordinator roles aren't false-hidden).
 - **The camera self-verifier** (`verify/camera.py`) — renders the PWA in real Chrome + inspects 8 invariant checks; ran 8/8 green + a visual pass on all 4 views.
 
-## Planned / next
+## Shipped 2026-06-22
 
-- **WHOIS domain-age screening** + `scam_blocklist_autogen.txt` (live 2026-06-22). **Auto-prune** long-empty gov feeds via `scripts/auto_prune_feeds.py`.
+- **Follow-up reminders** + contact Call/Email on applied jobs (3/5/7-day chips, `Notification`, Supabase sync).
+- **Résumé tailor** reads full job text (`descFull`); stronger ATS edge function (write→critique→revise).
+- **WHOIS domain-age screening** + `scam_blocklist_autogen.txt` growth from young-domain scam rows.
+- **Auto-prune** long-empty feeds via `scripts/auto_prune_feeds.py` + weekly `source-health.yml`.
+- **AI-first operator loop** — monitors label `auto-fix`; Claude repair + auto-merge for safe code paths.
+- **More source enrichment** — Greenhouse `?content=true`, Workday/SmartRecruiters/NEOGOV detail, City of Norwalk.
+- **CD on merge** — `scan.yml` also runs on every push to `main` (not only the daily cron).
+
+## Planned / next
 - **Resend SMTP** for reliable password-reset + magic-link email (today's default Supabase mailer is spam-prone). Then "Confirm email" could go back ON.
 - **Google OAuth** (optional — needs a Google Cloud client; the button auto-appears once enabled). Apple intentionally skipped ($99/yr).
 - **Recover MercyOne/Hy-Vee/national-tenant sources via better parsing** (they have real metro jobs; the parser couldn't isolate them from national noise — see the rejected list in `providers.py`).

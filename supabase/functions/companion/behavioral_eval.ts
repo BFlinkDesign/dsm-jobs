@@ -29,6 +29,11 @@ if (!KEY) {
   Deno.exit(0);
 }
 
+function isCreditExhausted(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /credit balance is too low/i.test(msg);
+}
+
 const src = await Deno.readTextFile(new URL("./index.ts", import.meta.url));
 const match = src.match(/const SYSTEM_PROMPT = `([\s\S]*?)`;/);
 if (!match) {
@@ -151,6 +156,10 @@ for (const c of cases) {
     console.log(`      ${r.detail}`);
     if (!r.pass) failed++;
   } catch (err) {
+    if (isCreditExhausted(err)) {
+      console.log("ANTHROPIC credits exhausted — skipping behavioral eval (clean no-op).");
+      Deno.exit(0);
+    }
     console.log(`ERROR ${c.name}: ${err instanceof Error ? err.message : String(err)}`);
     failed++;
   }
