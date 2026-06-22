@@ -2,7 +2,8 @@
 #
 # Decides — by WHICH FILES changed — whether a bot fix may auto-merge or must go
 # to a human. The principle: auto-merge what our tests can protect; escalate
-# what they cannot.
+# what they cannot. Automations must NOT replace judgment, product sense, or
+# native platform features — bots assist; humans own safety-critical paths.
 #
 #   AUTO-MERGE (armed, then GitHub merges only when required checks pass):
 #     code + tests + the web shell. A regression here FAILS the invariant tests

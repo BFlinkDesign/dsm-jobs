@@ -5,6 +5,10 @@
 # review priorities are: don't leak her data, don't show her a scam, and don't
 # ever quote a made-up wage. Tuned for a solo maintainer: low-noise profile, no
 # merge-blocking (CI + Semgrep are the hard gates; CodeRabbit is advisory).
+#
+# LOAD-BEARING: automations must NOT replace judgment, product sense, or native
+# platform features. This bot advises on security/invariant breaks only — it does
+# not block merges, redesign UX, or suggest ripping out tel:/share/Notification.
 language: "en-US"
 early_access: false
 
@@ -38,6 +42,9 @@ reviews:
     Skip style, nitpicks, naming, refactors, and "could be cleaner" unless it is
     an exploitable bug. Severity: Critical (exploit/data leak) > Warning (real bug)
     > ignore everything else.
+    NEVER suggest replacing human merge judgment, product/UX decisions, or native
+    platform features (tel:, mailto:, Notification, navigator.share, PWA install)
+    with custom bot-built substitutes.
 
   # Skip generated / binary / vendor noise. web/index.html is generated and
   # gitignored (never in a PR); listed for safety. Icons/images aren't code.

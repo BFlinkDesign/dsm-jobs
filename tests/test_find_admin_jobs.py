@@ -680,6 +680,25 @@ def test_template_has_no_legacy_theme_leftovers():
         assert warm not in t, f"legacy warm color {warm} still in template"
 
 
+def test_native_platform_affordances_preserved():
+    """Automations must not replace native phone affordances — tel/mail/share/notifications."""
+    t = fa.APP_TEMPLATE
+    assert "tel:" in t and "mailto:" in t
+    assert "navigator.share" in t
+    assert "Notification" in t
+    assert "beforeinstallprompt" in t
+
+
+def test_automation_boundary_documented():
+    """Load-bearing: bots assist; they do not replace judgment or native UX."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    claude = open(os.path.join(root, "CLAUDE.md"), encoding="utf-8").read().lower()
+    assert "judgment" in claude and "product sense" in claude
+    assert "native platform" in claude
+    rabbit = open(os.path.join(root, ".coderabbit.yaml"), encoding="utf-8").read().lower()
+    assert "advisory" in rabbit and "replace" in rabbit
+
+
 def test_resume_tailor_paste_description_field_present():
     """The tailor flow uses scanner-pulled full text when available; paste is only
     needed when the listing gave a short preview."""
