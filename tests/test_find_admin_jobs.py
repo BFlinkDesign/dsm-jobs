@@ -664,14 +664,16 @@ def test_template_has_no_legacy_theme_leftovers():
 
 
 def test_resume_tailor_paste_description_field_present():
-    """The tailor flow lets her paste the FULL job description (optional) so the
-    engine gets more than the Adzuna snippet, and fires the engine separately."""
+    """The tailor flow uses scanner-pulled full text when available; paste is only
+    needed when the listing gave a short preview."""
     t = fa.APP_TEMPLATE
-    assert 'id="tailorjd"' in t                      # the paste-description textarea
-    assert 'data-act="runtailor"' in t               # the separate "go" button
-    assert "function runTailor(" in t                # reads the paste, prefers it
-    # the pasted text must actually be preferred over the snippet when long enough
-    assert "pasted.length>=40 ? pasted : snippet" in t
+    assert 'id="tailorjd"' in t                      # paste fallback when descFull is short
+    assert 'data-act="runtailor"' in t               # manual go when paste is required
+    assert "function runTailor(" in t
+    assert "function tailorJobText(" in t
+    assert "descFull" in t                           # full posting rides in the job payload
+    assert "full.length>=200" in t                   # one-tap tailor when we have enough text
+    assert "pasted.length>=40" in t                  # her paste still wins when she adds more
 
 
 def test_resume_tailor_copy_both_and_download_present():

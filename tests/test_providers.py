@@ -480,7 +480,10 @@ _WORKDAY_PAYLOAD = {
 
 def test_workday_rows_url_and_no_salary():
     base = "https://athene.wd5.myworkdayjobs.com/athene_careers"
-    rows = providers._workday_rows(_WORKDAY_PAYLOAD, base, "Athene", fa.salary_verdict)
+    rows = providers._workday_rows(
+        _WORKDAY_PAYLOAD, base, "Athene", fa.salary_verdict,
+        tenant="athene", dc="wd5", site="athene_careers",
+    )
     assert len(rows) == 2
     a = rows[0]
     assert a["id"] == "wd-R253169"
@@ -489,12 +492,16 @@ def test_workday_rows_url_and_no_salary():
     assert a["url"] == base + "/job/West-Des-Moines-Iowa/Sr-Exec-Asst_R1"
     assert a["hourly_min"] is None and a["predicted"] is True   # no salary on CxS list
     assert a["verdict"] == "unlisted"
-    assert a["location"] == "West Des Moines, Iowa"             # passes in_polk_or_dallas downstream
+    assert a["location"] == "West Des Moines, Iowa"             # passes commute gate downstream
+    assert a["_cxs"] == ("athene", "wd5", "athene_careers", "/job/West-Des-Moines-Iowa/Sr-Exec-Asst_R1")
 
 
 def test_workday_rows_skip_missing_path():
     payload = {"jobPostings": [{"title": "No Path Job", "bulletFields": ["X"]}]}
-    assert providers._workday_rows(payload, "https://x.wd5.myworkdayjobs.com/s", "X", fa.salary_verdict) == []
+    assert providers._workday_rows(
+        payload, "https://x.wd5.myworkdayjobs.com/s", "X", fa.salary_verdict,
+        tenant="x", dc="wd5", site="s",
+    ) == []
 
 
 _SR_PAYLOAD = {

@@ -1067,6 +1067,7 @@ def _jobs_payload(safe_rows):
         jid = r.get("id") or r.get("url") or "|".join(
             (r.get("title") or "", r.get("company") or "", r.get("location") or ""))
         hints = extract_contact_hints(r.get("description") or "")
+        full_desc = (r.get("description") or "").strip()
         jobs.append({
             "id": str(jid),
             "title": r["title"],
@@ -1085,8 +1086,9 @@ def _jobs_payload(safe_rows):
             "category": job_category(r["title"]),
             "commute": "" if r["source"] == "remote" else commute_text(r["location"]),
             "commuteMin": None if r["source"] == "remote" else commute_minutes(r["location"]),
-            "about": snippet(r.get("description")),
-            "trains": will_train(r.get("description")),
+            "about": snippet(full_desc),
+            "descFull": full_desc[:6000],
+            "trains": will_train(full_desc),
             "contactPhone": hints["contactPhone"],
             "contactEmail": hints["contactEmail"],
             "contactName": hints["contactName"],
@@ -2760,9 +2762,15 @@ function stopSpook(){
   var fill=document.getElementById("spookfill"); if(fill) fill.style.width="100%";  // snap to done
 }
 
-/* Step 1: open the modal on an intro panel that lets her (optionally) paste the
-   FULL job description. We only have a snippet from the listing; the full posting
-   makes the tailoring much sharper. It's optional — she can tap straight through. */
+/* Résumé tailoring — uses the fullest posting text we have (scanner-pulled
+   descFull beats snippet; her paste beats both when she adds more). */
+function tailorJobText(j, pasted){
+  var full=String((j&&j.descFull)||"").trim();
+  var snip=(((j&&j.about)||"")+" "+((j&&j.title)||"")).trim();
+  if(pasted && pasted.length>=40) return pasted;
+  if(full.length>=200) return full;
+  return snip;
+}
 function tailorJob(id){
   var j=jobById.get(id); if(!j) return;
   var resume=(state.resume||"").trim();
@@ -2778,31 +2786,36 @@ function tailorJob(id){
     return;
   }
   window.__tailorJobId = id;
+  var full=(j.descFull||"").trim();
+  if(full.length>=200){
+    openTailorModal();
+    setTailorBody('<p class="sub">Using the full posting for <b>'+esc(j.title)+'</b> at '+esc(j.company)+'&hellip;</p>');
+    runTailor("");
+    return;
+  }
   openTailorModal();
   setTailorBody(
     '<p class="sub">For <b>'+esc(j.title)+'</b> at '+esc(j.company)+'.</p>'+
     '<div class="tailorsec">'+
       '<h3>Paste the full job description</h3>'+
-      '<p class="tailorhint">Optional, but it makes the match much better. Open the posting, '+
-        'copy the whole description, and paste it here. Leave it blank and I&rsquo;ll use what we already have.</p>'+
-      '<textarea class="authfield tailorpaste" id="tailorjd" aria-label="Full job description (optional)" '+
-        'placeholder="Paste the job description here (optional)&hellip;"></textarea>'+
+      '<p class="tailorhint">This listing only gave us a short preview. Open the apply page, '+
+        'copy the whole description, and paste it here for a much sharper match.</p>'+
+      '<textarea class="authfield tailorpaste" id="tailorjd" aria-label="Full job description" '+
+        'placeholder="Paste the full job description here&hellip;"></textarea>'+
     '</div>'+
     '<button class="authprimary" data-act="runtailor">Tailor my résumé <span class="sparkle">&#10022;</span></button>'+
     '<p class="authnote">Built only from what you wrote — never adds anything you didn&rsquo;t.</p>'
   );
   var ta=document.getElementById("tailorjd"); if(ta) ta.focus();
 }
-/* Step 2: fire the engine. Prefer the pasted full description; fall back to the
-   listing snippet. stopSpook in .finally so the loader timer can never leak. */
-function runTailor(){
+function runTailor(pastedOverride){
   var id=window.__tailorJobId;
   var j=jobById.get(id); if(!j) return;
   var resume=(state.resume||"").trim();
   var ta=document.getElementById("tailorjd");
-  var pasted=ta ? (ta.value||"").trim() : "";
-  var snippet=((j.about||"")+" "+(j.title||"")).trim();
-  var jobText = pasted.length>=40 ? pasted : snippet;  // her full paste wins
+  var pasted=(typeof pastedOverride==="string") ? pastedOverride
+    : (ta ? (ta.value||"").trim() : "");
+  var jobText=tailorJobText(j, pasted);
   startSpook(j.title);
   Promise.resolve().then(function(){
     return window.__tailorInvoke({ resume:resume, jobTitle:j.title, company:j.company, jobText:jobText });
