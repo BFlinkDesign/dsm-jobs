@@ -721,6 +721,29 @@ def build_spam_index(rows):
     return index
 
 
+# Apply links that point at personal inboxes or off-platform messengers are
+# scam-shaped — especially on remote listings where a spoofed brand is common.
+_SCAM_APPLY_HOST_HINTS = (
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "proton.me",
+    "icloud.com", "aol.com",
+    "bit.ly", "t.co", "tinyurl.com", "goo.gl", "cutt.ly",
+    "telegram.", "whatsapp.", "t.me",
+)
+
+
+def _apply_url_is_suspicious(url):
+    """True when an apply URL routes to a personal inbox or link shortener."""
+    u = (url or "").lower()
+    if not u:
+        return False
+    try:
+        host = urllib.parse.urlparse(u).netloc.lower()
+    except ValueError:
+        return False
+    blob = host + u
+    return any(h in blob for h in _SCAM_APPLY_HOST_HINTS)
+
+
 def scam_assessment(row, spam_index):
     """
     Return {"level": "safe"|"suspect"|"scam", "reasons": [...]}.
@@ -772,6 +795,10 @@ def scam_assessment(row, spam_index):
     # "company not listed" / blank employer.
     if not company.strip() or "not listed" in company.lower():
         reasons.append("no employer name")
+
+    # Personal-inbox / shortener apply links (remote spoof shape).
+    if remote and _apply_url_is_suspicious(row.get("url")):
+        reasons.append("apply link goes to a personal inbox or link-shortener")
 
     if reasons:
         # A trusted employer can't rescue a hard description tell. Absent those, a
@@ -1017,6 +1044,21 @@ _NAME_RE = re.compile(
 )
 
 
+def _plausible_contact_phone(digits: str) -> bool:
+    """Reject premium/fiction NANP ranges — only employer-stated real lines."""
+    if len(digits) != 10 or not digits.isdigit():
+        return False
+    area, prefix = digits[:3], digits[3:6]
+    if area in ("900", "976"):
+        return False
+    if area in ("211", "311", "411", "511", "611", "711", "811", "911"):
+        return False
+    # 555-01xx is reserved for fiction/examples in North America.
+    if prefix == "555" and digits[6:8] == "01":
+        return False
+    return True
+
+
 def extract_contact_hints(description: str) -> dict[str, str]:
     """Pull phone/email/name from employer posting text when explicitly present."""
     text = description or ""
@@ -1026,7 +1068,7 @@ def extract_contact_hints(description: str) -> dict[str, str]:
         digits = re.sub(r"\D", "", m.group())
         if len(digits) == 11 and digits.startswith("1"):
             digits = digits[1:]
-        if len(digits) != 10 or digits in seen_phones:
+        if len(digits) != 10 or digits in seen_phones or not _plausible_contact_phone(digits):
             continue
         seen_phones.add(digits)
         phones.append(f"({digits[:3]}) {digits[3:6]}-{digits[6:]}")
@@ -2197,6 +2239,14 @@ function fmtPhone(d){
   if(t.length!==10) return String(d||"").trim();
   return "("+t.slice(0,3)+") "+t.slice(3,6)+"-"+t.slice(6);
 }
+function isPlausiblePhone(d){
+  var t=safeTel(d).replace(/^\+?1/,"").slice(-10);
+  if(t.length!==10) return false;
+  var area=t.slice(0,3), prefix=t.slice(3,6);
+  if(area==="900"||area==="976") return false;
+  if(prefix==="555"&&t.slice(6,8)==="01") return false;
+  return true;
+}
 function safeMail(u){
   const m=String(u||"").trim();
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m) ? m : "";
@@ -2207,7 +2257,7 @@ function parseContactPaste(text){
   var mail=text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
   if(mail && !/noreply|no-reply|donotreply/i.test(mail[0])) out.email=mail[0];
   var ph=text.match(/(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}/);
-  if(ph) out.phone=fmtPhone(ph[0]);
+  if(ph && isPlausiblePhone(ph[0])) out.phone=fmtPhone(ph[0]);
   var nm=text.match(/(?:contact|call|ask for|speak with|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
   if(nm) out.name=nm[1];
   return out;
@@ -2240,7 +2290,7 @@ function seedFollowUpFromJob(id, j){
 }
 function followActionHTML(id, c, opts){
   opts=opts||{};
-  var tel=safeTel(c.phone), mail=safeMail(c.email), parts=[];
+  var tel=isPlausiblePhone(c.phone)?safeTel(c.phone):"", mail=safeMail(c.email), parts=[];
   if(tel){
     parts.push('<a class="followcta call" href="tel:'+esc(tel)+'"'+
       (opts.track?' data-act="fuopen" data-kind="call" data-id="'+esc(id)+'"':'')+'>'+
@@ -4118,7 +4168,7 @@ def mock_results():
         {"id": "2", "title": "Receptionist", "company": {"display_name": "Dental Office"},
          "location": {"display_name": "Johnston, IA"}, "salary_min": 37440, "salary_max": 39520,
          "salary_is_predicted": "1", "created": "2026-06-01T00:00:00Z",
-         "redirect_url": "https://www.adzuna.com/job/2", "description": "Greet patients, answer phones. Questions? Call (515) 555-0198 or email hiring@johnstondental.example."},
+         "redirect_url": "https://www.adzuna.com/job/2", "description": "Greet patients, answer phones. Questions? Call (515) 244-0198 or email hiring@johnstondental.example."},
         {"id": "3", "title": "Office Clerk", "company": {"display_name": "Logistics Co"},
          "location": {"display_name": "Grimes, IA"}, "salary_min": None, "salary_max": None,
          "salary_is_predicted": "0", "created": "2026-06-04T00:00:00Z",

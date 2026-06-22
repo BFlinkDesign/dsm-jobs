@@ -273,9 +273,9 @@ def test_payload_includes_enrichment_fields():
 
 
 def test_extract_contact_hints_from_posting():
-    text = "Questions? Call (515) 555-0198 or email hiring@johnstondental.example. Contact Jane Smith."
+    text = "Questions? Call (515) 244-0198 or email hiring@johnstondental.example. Contact Jane Smith."
     hints = fa.extract_contact_hints(text)
-    assert hints["contactPhone"] == "(515) 555-0198"
+    assert hints["contactPhone"] == "(515) 244-0198"
     assert hints["contactEmail"] == "hiring@johnstondental.example"
     assert hints["contactName"] == "Jane Smith"
 
@@ -283,7 +283,12 @@ def test_extract_contact_hints_from_posting():
 def test_extract_contact_hints_ignores_noreply_email():
     hints = fa.extract_contact_hints("Reach us at noreply@scam.example or call (900) 555-0100")
     assert hints["contactEmail"] == ""
-    assert hints["contactPhone"] == "(900) 555-0100"
+    assert hints["contactPhone"] == ""  # premium/fiction ranges never surface
+
+
+def test_extract_contact_hints_empty_when_no_posting_text():
+    assert fa.extract_contact_hints("") == {"contactPhone": "", "contactEmail": "", "contactName": ""}
+    assert fa.extract_contact_hints(None)["contactPhone"] == ""
 
 
 def test_payload_embeds_employer_stated_contact():
@@ -339,6 +344,18 @@ def test_scam_remote_unknown_employer_is_hidden():
     r = _row(title="Administrative Assistant", company="Unknownish Co", source="remote", desc="")
     out = fa.scam_assessment(r, {})
     assert out["level"] in ("scam", "suspect")  # never 'safe'
+
+
+def test_scam_remote_gmail_apply_link_is_hidden():
+    r = _row(
+        title="Administrative Assistant",
+        company="Unknownish Co",
+        source="remote",
+        desc="",
+    )
+    r["url"] = "https://gmail.com/inbox/apply-here"
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+    assert "apply link" in fa.scam_assessment(r, {})["reasons"][0]
 
 
 def test_scam_remote_too_good_pay_is_scam():
@@ -674,6 +691,18 @@ def test_resume_tailor_paste_description_field_present():
     assert "descFull" in t                           # full posting rides in the job payload
     assert "full.length>=200" in t                   # one-tap tailor when we have enough text
     assert "pasted.length>=40" in t                  # her paste still wins when she adds more
+    assert "isPlausiblePhone" in t                   # follow-up never dials fiction/premium lines
+
+
+def test_resume_tailor_edge_function_never_invents():
+    """The server-side tailor is load-bearing: critic must flag fabrications."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "supabase/functions/resume-tailor/index.ts"),
+               encoding="utf-8").read()
+    assert "never invent" in src.lower()
+    assert "fabrications" in src
+    assert "CRITIC_SYSTEM" in src
+    assert "MAX_REVISIONS" in src
 
 
 def test_resume_tailor_copy_both_and_download_present():
