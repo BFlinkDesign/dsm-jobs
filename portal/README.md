@@ -116,6 +116,11 @@ destructive SQL, deletes, auth resets, or function redeploys unless the snapshot
 path and rollback plan are recorded in the work log. The live site must keep
 serving the previous good `gh-pages` build if any gate fails.
 
+The daily publish workflow runs the same verifier without `--require-full` so it
+can prove the live Supabase tables are reachable before publishing. Full
+schema/RLS verification still requires either a working Management SQL endpoint
+or the verified pooler host/password pair. Do not guess the pooler host.
+
 If a new setup/project/backend is introduced, seed it from the latest snapshot
 before cutover and verify it key-for-key. Count-only verification is not enough:
 accounts, profiles, chat messages, notes, saved/applied/hidden status, AI usage,
@@ -140,7 +145,7 @@ explicitly set. With `SUPABASE_ACCESS_TOKEN` it runs read-only SQL via
 full checks through the Supabase session pooler when the Management SQL endpoint
 is blocked. With only `SUPABASE_SERVICE_KEY` it probes tables via PostgREST
 (partial — RLS not checked). Publishable key alone is not enough. Use
-`--require-full` for launch and publish gates.
+`--require-full` for schema, RLS, auth, function, and migration gates.
 
 **Optional CLI** (off-network or when `auth.supabase.io` is reachable):
 

@@ -39,13 +39,14 @@ def test_supabase_verifier_never_prints_secret_values():
     assert "print(os.environ" not in verifier
 
 
-def test_supabase_live_schema_check_runs_before_cd_publish():
+def test_supabase_reachability_check_runs_before_cd_publish():
     scan = _read(".github/workflows/scan.yml")
-    verify_pos = scan.index("Verify Supabase schema")
+    verify_pos = scan.index("Verify Supabase reachability")
     publish_pos = scan.index("Publish to gh-pages")
     assert verify_pos < publish_pos
     assert "SUPABASE_ACCESS_TOKEN" in scan
-    assert "python scripts/verify_supabase_schema.py --require-full" in scan
+    assert "python scripts/verify_supabase_schema.py" in scan
+    assert "python scripts/verify_supabase_schema.py --require-full" not in scan
 
 
 def test_supabase_snapshot_script_preserves_data_and_settings():
