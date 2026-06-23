@@ -42,6 +42,9 @@ jobs:
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
       SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
       SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_POOLER_HOST: ${{ secrets.SUPABASE_POOLER_HOST }}
       # Sentry error monitoring (optional; page self-disables when unset). A
       # Sentry DSN is PUBLIC/embeddable, so it's a repo Variable, not a Secret.
       SENTRY_DSN: ${{ vars.SENTRY_DSN }}
@@ -145,6 +148,10 @@ jobs:
               print("::error::pre-publish gate FAILED: " + "; ".join(errs)); sys.exit(1)
           print(f"pre-publish gate OK: {len(jobs)} jobs, {len(html)} bytes")
           PY
+
+      - name: Verify Supabase schema (pre-publish gate)
+        if: steps.gate.outputs.run == 'true'
+        run: python scripts/verify_supabase_schema.py --require-full
 
       # Artifact = the site bundle only. The audit CSV (operator-only scam
       # reasons) is NOT uploaded: on a public repo, artifacts are downloadable

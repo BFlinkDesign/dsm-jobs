@@ -97,7 +97,30 @@ which the firewall blocks. **Skip CLI login** — the project was configured wit
 - `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_PUBLISHABLE_KEY` (scanner +
   PWA build)
 - `SUPABASE_ACCESS_TOKEN` (Management API — full schema verify without CLI)
-- optional: `SUPABASE_DB_PASSWORD` (direct Postgres if you need it)
+- optional direct Postgres verifier fallback: `SUPABASE_DB_PASSWORD` plus the
+  verified `SUPABASE_POOLER_HOST` from Project Settings -> Database. Do not
+  guess the pooler region/hostname.
+
+### Mandatory preservation gate
+
+Before any Supabase setting, schema, RLS, auth, function, or data change:
+
+```powershell
+python scripts/snapshot_supabase.py
+python scripts/verify_supabase_schema.py --require-full
+```
+
+The snapshot exports auth users, public auth settings, and all portal tables to
+the temp snapshot directory with row counts and SHA-256 hashes. Do not run
+destructive SQL, deletes, auth resets, or function redeploys unless the snapshot
+path and rollback plan are recorded in the work log. The live site must keep
+serving the previous good `gh-pages` build if any gate fails.
+
+If a new setup/project/backend is introduced, seed it from the latest snapshot
+before cutover and verify it key-for-key. Count-only verification is not enough:
+accounts, profiles, chat messages, notes, saved/applied/hidden status, AI usage,
+and jobs all need matching primary keys and preserved payloads unless a
+documented transform intentionally changes a field.
 
 Schema changes: paste `portal/schema.sql` in the **dashboard SQL editor** from
 a device that can reach the dashboard, or use the Management API with your
@@ -110,11 +133,14 @@ access token. `api.supabase.com` and `<ref>.supabase.co` work from Eagle; only
 .\scripts\verify_supabase_schema.ps1
 ```
 
-Loads `.env` from the repo root (then
-`C:\Users\Brady.EAGLE\Desktop\admin-job-finder\.env` as fallback). With
-`SUPABASE_ACCESS_TOKEN` it runs read-only SQL via `api.supabase.com` (tables,
-RLS flags, policy counts). With only `SUPABASE_SERVICE_KEY` it probes tables
-via PostgREST (partial — RLS not checked). Publishable key alone is not enough.
+Loads `.env` from the repo root, plus `DSM_JOBS_SUPABASE_ENV_FILE` when
+explicitly set. With `SUPABASE_ACCESS_TOKEN` it runs read-only SQL via
+`api.supabase.com` (tables, RLS flags, policy counts). With only
+`SUPABASE_DB_PASSWORD` plus verified `SUPABASE_POOLER_HOST`, it can run the same
+full checks through the Supabase session pooler when the Management SQL endpoint
+is blocked. With only `SUPABASE_SERVICE_KEY` it probes tables via PostgREST
+(partial — RLS not checked). Publishable key alone is not enough. Use
+`--require-full` for launch and publish gates.
 
 **Optional CLI** (off-network or when `auth.supabase.io` is reachable):
 
