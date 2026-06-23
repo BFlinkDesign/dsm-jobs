@@ -3,3 +3,4 @@ ruff==0.15.18
 pytest==9.0.3
 pytest-timeout==2.4.0
 mypy==1.19.1
+pg8000==1.31.5

@@ -46,6 +46,34 @@ Key touchpoints: `app/src/scripts/app.ts`, `store.ts`, `autosave.ts`, `auth.ts`,
 
 Product invariants still apply: **never show guessed wages as numbers**; **scams hidden, not labeled**; XSS-safe rendering (`esc`, `safeUrl`).
 
+## Supabase operating rules — mandatory
+
+Brady has authorized agents to handle Supabase work directly from this machine,
+using API/script paths because `auth.supabase.io` is blocked on the Eagle
+network. This authority does **not** loosen the preservation rules:
+
+- **Never lose client/user work.** Preserve accounts, profile preferences,
+  saved/applied/hidden state, notes, chats, AI usage, job rows, auth settings,
+  redirect/provider config, and Edge Function behavior.
+- Before any Supabase setting, schema, function, RLS, auth, or data operation,
+  run a fresh read-only snapshot: `python scripts/snapshot_supabase.py`.
+- Any replacement backend, new Supabase project, restored database, or rewritten
+  auth setup must be **seeded from the latest production snapshot before
+  cutover**. Verify seeded data key-for-key: accounts, `user_profile`,
+  `chat_messages`, `job_notes`, `user_job_status`, `ai_usage`, and `jobs`.
+  A count-only check is not enough.
+- Do not perform destructive SQL, table rewrites, auth resets, deletes, or
+  function redeploys without a snapshot path and rollback evidence in the work
+  log.
+- Do not depend on Chrome dashboard login from this network. Prefer
+  `api.supabase.com`, PostgREST, and tracked scripts. `auth.supabase.io` timing
+  out is expected here and is not an app outage.
+- Never print, commit, or paste Supabase secret/service/access-token values.
+  Logging key presence, key type, row counts, hashes, and HTTP status is allowed.
+- The live site must keep running during backend work. If a Supabase or build
+  gate fails, stop before publishing so the last good `gh-pages` build remains
+  live.
+
 ## Product direction
 
 Optimize for **unfair advantage for Lilly** — leverage UX (sync, reminders, Rudy, tailor, polish), not a minimal MVP. Every change should respect the three hard constraints in `CLAUDE.md`: mobile-only, scam-safe, attainable entry-level.

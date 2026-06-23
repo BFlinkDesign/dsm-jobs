@@ -15,9 +15,6 @@ name: Edge Checks
 
 on:
   pull_request:
-    paths:
-      - "supabase/functions/**"
-      - ".github/workflows/edge-checks.yml"
   workflow_dispatch: {}
 
 permissions:
