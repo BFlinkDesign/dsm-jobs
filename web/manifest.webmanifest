@@ -4,9 +4,9 @@
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#0e0a16",
-  "theme_color": "#0e0a16",
+  "orientation": "any",
+  "background_color": "#050308",
+  "theme_color": "#1a0a2e",
   "description": "Safe, checked entry-level jobs near Grimes & Des Moines — scam-screened, no degree needed.",
   "icons": [
     { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },

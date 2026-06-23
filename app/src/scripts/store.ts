@@ -161,8 +161,9 @@ export function migrateLocalV1(): void {
       }
     }
 
-    // Merge: current v2 wins for any key already present; old fills the gaps
+    // Merge: current v2 wins when it has a real value; old fills empty defaults.
     const cur = state;
+    const oldProfile = patch.profile ?? defaultState().profile;
     setState({
       applied: { ...patch.applied, ...cur.applied },
       saved: { ...patch.saved, ...cur.saved },
@@ -173,17 +174,19 @@ export function migrateLocalV1(): void {
       followUps: { ...patch.followUps, ...cur.followUps },
       followAlertDay: cur.followAlertDay || "",
       profile: {
-        ...patch.profile,
         ...cur.profile,
-        resume: cur.profile.resume || patch.profile!.resume || "",
+        preferredName: cur.profile.preferredName || oldProfile.preferredName || "",
+        legalName: cur.profile.legalName || oldProfile.legalName || "",
+        resume: cur.profile.resume || oldProfile.resume || "",
+        quiz: { ...oldProfile.quiz, ...cur.profile.quiz },
       },
       commuteRadius: cur.commuteRadius ?? patch.commuteRadius,
       coachOff: cur.coachOff || (patch.coachOff ?? false),
     });
+    localStorage.setItem(V1_MIGRATED, "1");
   } catch {
     /* ignore migration errors — never block the app */
   }
-  localStorage.setItem(V1_MIGRATED, "1");
 }
 
 export function jobMap(jobs: { id: string }[]): Map<string, { id: string }> {

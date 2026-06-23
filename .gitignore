@@ -13,9 +13,17 @@ web/meta.json
 web/portal.json
 web/favicon.ico
 web/favicon.svg
+web/rudy.jpg
 app/public/jobs.json
 app/public/meta.json
 app/public/portal.json
+
+# Local agent/editor runtime state. Keep product source, CI config, and checked-in
+# Claude settings separate from per-machine automation scratch files.
+.agent/
+.codex/
+.cursor/
+.omc/
 
 # Supabase CLI local state (keep config.toml + functions/ tracked)
 supabase/.temp/

@@ -1,5 +1,6 @@
 import type { Job, Meta, ViewName } from "./types";
 import {
+  appendChatToLocal,
   autosave,
   clearAutosave,
   debouncePushNote,
@@ -10,7 +11,6 @@ import {
   pullNotes,
   pullProfile,
   pushChatMessage,
-  saveChatToLocal,
 } from "./autosave";
 import { currentUser, fetchGoogleAuthEnabled, friendlyAuthError, getClient, initAuth, registerPasskey, resetPasswordForEmail, signIn, signInWithGoogle, signInWithMagicLink, signInWithPasskey, signOut, signUp, supportsPasskey, updatePassword } from "./auth";
 import {
@@ -47,10 +47,9 @@ const scrollByView: Partial<Record<ViewName, number>> = {};
 let jobsShellReady = false;
 let pullStartY = 0;
 let feedLoadFailed = false;
-let tailorJob: Job | null = null;
-let tailorData: { resume: string; cover_note?: string } | null = null;
 let rudyHistoryLoaded = false;
-let spookTimer: ReturnType<typeof setInterval> | null = null;
+let tailorTimer: ReturnType<typeof setInterval> | null = null;
+let filtersExpanded = false;
 type BeforeInstallPromptEvent = Event & {
   prompt(): Promise<void>;
   userChoice: Promise<{ outcome: string }>;
@@ -88,98 +87,28 @@ let speechSynthOK = false;
 let speakOn = false;
 let speechVoice: SpeechSynthesisVoice | null = null;
 
-// ── Affirmations pool (Daddy-toned, per-day rotation via dayHash) ──────────
+// ── Affirmations pool (per-day rotation via dayHash) ──────────────────────
 const ENC_LINES = [
-  "Job ads are wish lists. If you can do half of it, apply — you're more qualified than you let yourself believe. — Daddy",
-  "You showed up today. That's the whole battle, and you won it. — Daddy",
-  "One application beats five you never send. Small is enough. I'm proud of you. — Daddy",
-  "\u201cPay not listed\u201d isn\u2019t a no \u2014 it\u2019s just a question you get to ask. \u2014 Daddy",
-  "Rough day? The jobs will keep. Be as kind to yourself as I am to you. — Daddy",
-  "You are not behind. You're exactly where the next right step starts. — Daddy",
-  "Your worth was never up for hire. A job is something you do, not who you are. — Daddy",
-  "Send one. Just one. Then go rest knowing you moved the needle. — Daddy",
-  "A 'no' from one office is just a door pointing you to the right one. — Daddy",
-  "The bravest thing you'll do today is try. You've already got that in you. — Daddy",
-  "Nervous hands still fill out applications. Do it scared — that counts double. — Daddy",
-  "You don't have to feel ready. You just have to begin. I'm right here. — Daddy",
-  "Every screen you fill out is proof you didn't give up. That's everything. — Daddy",
-  "Slow progress is still progress. We're not racing anyone. — Daddy",
-  "I'd hire you in a heartbeat. The right employer will see what I see. — Daddy",
-  "Take the morning gently. The afternoon can hold one small step. — Daddy",
-  "You survived 100% of your hardest days. Today's no match for you. — Daddy",
-  "Rejection isn't a verdict on you. It's just traffic on the way there. — Daddy",
-  "Tidy beats perfect. Send the good-enough application and breathe. — Daddy",
-  "You are allowed to be proud of small wins. I sure am. — Daddy",
-  "The fact that you're still trying tells me everything about your heart. — Daddy",
-  "Rest is part of the work, not a break from it. Lie down guilt-free. — Daddy",
-  "One steady step a day adds up faster than you'd ever guess. — Daddy",
-  "You don't need to have it figured out. You just need to keep showing up. — Daddy",
-  "Whatever today holds, you won't face it alone. — Daddy",
-  "Courage isn't loud. Sometimes it's just opening the app again. — Daddy",
-  "Your past doesn't disqualify you. It made you someone who keeps going. — Daddy",
-  "Apply like someone who's already been believed in — because you have. — Daddy",
-  "The hard part is starting. You're stronger than the blank form. — Daddy",
-  "Good things are coming, and you're doing the work to meet them. — Daddy",
-  "You are not too much, and you are not too late. — Daddy",
-  "Every employer here was checked, so you're safe to just be yourself. — Daddy",
-  "Drink some water, take a breath, and tap one job. That's a full day's brave. — Daddy",
-  "I'm not proud of you because you applied. I'm proud of you, period. — Daddy",
-  "The version of you a year from now is cheering for this exact moment. — Daddy",
-  "You can do hard things gently. There's no prize for white-knuckling it. — Daddy",
-  "If today all you did was open this, that's a start — and starts matter. — Daddy",
-  "Confidence comes after you act, not before. So act, and let it catch up. — Daddy",
-  "You've got a steady, capable mind. Let an employer be lucky to find it. — Daddy",
-  "No experience? You have a lifetime of figuring things out. That's experience. — Daddy",
-  "The right job is looking for someone exactly like you. Help it find you. — Daddy",
-  "Be patient with yourself. Healing and job-hunting run on the same clock. — Daddy",
-  "You don't have to earn rest. But you've earned it anyway today. — Daddy",
-  "Tap one job before the doubt talks you out of it. Quick — I'll wait. — Daddy",
-  "Whatever the inner critic says, I outrank it. And I say you've got this. — Daddy",
-  "Some days 'enough' is just getting out of bed. That's a yes from me. — Daddy",
-  "You are building a life, one small honest step at a time. Keep building. — Daddy",
-  "Showing up imperfectly beats waiting to be perfect every single time. — Daddy",
-  "The work you put in today is a gift to the you of next month. — Daddy",
-  "You're not starting over. You're starting from experience. — Daddy",
-  "I believe in you on the days you can't, so lean on that and keep moving. — Daddy",
-  "A quiet day of trying is still a day you didn't quit. I see it. — Daddy",
-  "Worthy of the job, worthy of rest, worthy of good things. All of it. — Daddy",
-  "One foot, then the other. That's the whole secret. — Daddy",
-  "You handle more than you give yourself credit for. Give yourself credit. — Daddy",
-  "Send it before you're sure. Sure is overrated; brave is everything. — Daddy",
-  "The list felt long, so just take the top one. Done is better than perfect. — Daddy",
-  "Your name on an application is a small act of hope. I love seeing it. — Daddy",
-  "If it was easy you wouldn't need to be brave — and look, you are. — Daddy",
-  "Take up space. You belong in that interview chair. — Daddy",
-  "Progress you can't feel is still progress you're making. Trust it. — Daddy",
-  "You are doing better than the voice in your head is telling you. — Daddy",
-  "Today doesn't have to be a big day. It just has to be a kind one. — Daddy",
-  "Whatever happens with the search, you're still my greatest pride. — Daddy",
-  "The effort is yours to give; the outcome isn't yours to carry alone. — Daddy",
-  "One application is a complete success. Don't let 'more' steal that. — Daddy",
-  "Breathe in: I can try. Breathe out: that's enough. Now tap one. — Daddy",
-  "You've come further than you can see from where you're standing. — Daddy",
-  "Steady wins this. And steady is exactly what you are. — Daddy",
-  "There's no wrong pace for healing or hunting. Yours is the right one. — Daddy",
-  "I'd rather you send one with a calm heart than ten in a panic. — Daddy",
-  "The door you're looking for opens for the people who keep knocking. — Daddy",
-  "You are not a burden for needing time. You're a person, and you're mine. — Daddy",
-  "Small and consistent beats big and burned-out. Go small today. — Daddy",
-  "Each 'apply' is you betting on yourself. Smart bet. I'd take it. — Daddy",
-  "You don't have to be fearless. You just have to be willing. You are. — Daddy",
-  "The right people will be glad you walked in. Go let them. — Daddy",
-  "Give yourself the grace you'd give anyone you love. You deserve it too. — Daddy",
-  "However today goes, you can come back tomorrow. The door stays open. — Daddy",
-  "You're allowed to want a good life. Reaching for it is not too much. — Daddy",
-  "Quiet courage is still courage. You've got more than you know. — Daddy",
-  "One honest try today. That's the assignment, and you're acing it. — Daddy",
-  "Your effort counts even when no one writes back. I'm counting it. — Daddy",
-  "Be brave for ten minutes. That's usually all a step takes. — Daddy",
-  "You are not behind your old self, your friends, or anyone. You're on time. — Daddy",
-  "The hardest worker I know is also allowed to rest. Both are true. — Daddy",
-  "Keep going gently. Gentle and forward is still forward. — Daddy",
-  "If you can read this and try one thing, today was a win. — Daddy",
-  "You're worth the wait, and you're worth the work. Now go, sweetheart. — Daddy",
-  "Whatever you get done today, come back and let me tell you I'm proud. ✦ — Daddy",
+  "Job ads are wish lists. If you match the core work, it is worth applying.",
+  "One focused application is progress. Small steps still count.",
+  "Pay not listed is a question to ask, not a reason to count yourself out.",
+  "Start with the clearest match. Momentum is easier after the first step.",
+  "A saved job is not a commitment. It is just a useful option to revisit.",
+  "If a posting feels confusing, slow down and use the checklist.",
+  "You can take this one task at a time. The app will keep track.",
+  "The goal is not a perfect search. The goal is a steady one.",
+  "A no from one employer is information, not a verdict.",
+  "Apply before doubt turns a good match into extra work.",
+  "A short, honest note is better than waiting for perfect wording.",
+  "Trust the scam checks, then make the next practical move.",
+  "Your experience does not need to match every bullet to matter.",
+  "Send the application that is ready enough. Improve the next one.",
+  "If today is busy, choose one job and save the rest.",
+  "A calm pace is still a real pace.",
+  "Every reviewed posting narrows the search.",
+  "The best next step is usually the smallest clear one.",
+  "You are allowed to ask about pay, hours, and training.",
+  "Keep the search simple: review, save, apply, follow up.",
 ];
 
 /** Deterministic per-day hash (same algorithm as original find_admin_jobs.py). */
@@ -362,6 +291,22 @@ function syncFilterChips(): void {
   if (catSel) catSel.value = f.filterCategory;
 }
 
+function activeFilterCount(): number {
+  const f = getState().filters;
+  return [
+    f.filterTrain,
+    f.filterPay,
+    f.filterTrusted,
+    f.filterSaved,
+    f.filterApplied,
+    f.showHidden,
+    f.filterRemote !== "all",
+    !!f.filterCategory,
+    !!f.searchQ,
+    commuteMax != null,
+  ].filter(Boolean).length;
+}
+
 function updateJobsListOnly(): void {
   const listEl = document.getElementById("jobs-list");
   const countEl = document.getElementById("jobs-count");
@@ -451,7 +396,7 @@ function filteredJobs(): Job[] {
     if (!f.showHidden) {
       if (s.hidden[j.id]) return false;
       if (snoozedNow(j.id)) return false;
-    } else if (!s.hidden[j.id]) {
+    } else if (!s.hidden[j.id] && !snoozedNow(j.id)) {
       return false;
     }
     if (f.filterRemote === "local" && j.remote) return false;
@@ -517,7 +462,7 @@ function jobCard(j: Job): string {
     typeof navigator !== "undefined" && typeof navigator.share === "function"
       ? `<button type="button" class="btn btn-ghost btn-sm" data-share="${esc(j.id)}">Share</button>`
       : "";
-  return `<article class="card card-glitter job-card${isHidden ? " card-hidden" : ""}" data-id="${esc(j.id)}">
+  return `<article class="card card-glitter job-card${isHidden ? " card-hidden" : ""}" data-id="${esc(j.id)}" data-verified="${j.trusted ? "1" : "0"}" data-pay="${j.good ? "1" : "0"}">
     <h3>${esc(j.title)}${isNewJobs[j.id] ? '<span class="newtag">New</span>' : ""}${j.trains ? '<span class="traintag">✦ Will train</span>' : ""}</h3>
     <div class="job-meta">${esc(j.company)} · ${loc}${commute}</div>
     <div><span class="${payCls}">${esc(j.pay)}</span> ${trust}</div>
@@ -547,36 +492,43 @@ function renderJobsMain(): void {
   const f = getState().filters;
   const list = orderForYou(filteredJobs());
   const cats = jobCategories();
+  const activeFilters = activeFilterCount();
   jobsShellReady = true;
   host.innerHTML = `
     <div class="search-row">
       <input class="search" type="search" placeholder="Search jobs…" value="${esc(f.searchQ)}" id="job-search" autocomplete="off" enterkeyhint="search" />
     </div>
-    <p class="filter-label">Filter</p>
-    <div class="chip-row" id="filter-extra">
-      <button type="button" class="chip${f.filterTrain ? " on" : ""}" id="filter-train">Will train ✦</button>
-      <button type="button" class="chip${f.filterPay ? " on" : ""}" id="filter-pay">$19+/hr</button>
-      <button type="button" class="chip${f.filterTrusted ? " on" : ""}" id="filter-trusted">Verified employer</button>
-      <button type="button" class="chip${f.filterSaved ? " on" : ""}" id="filter-saved">Saved</button>
-      <button type="button" class="chip${f.filterApplied ? " on" : ""}" id="filter-applied">Applied</button>
-      <button type="button" class="chip${f.showHidden ? " on" : ""}" id="filter-show-hidden">Hidden</button>
-    </div>
-    ${cats.length ? `<p class="filter-label">Category</p>
-    <select class="field" id="filter-category" style="margin-bottom:8px">
-      <option value="">All categories</option>
-      ${cats.map((c) => `<option value="${esc(c)}"${f.filterCategory === c ? " selected" : ""}>${esc(c)}</option>`).join("")}
-    </select>` : ""}
-    <p class="filter-label">Job type</p>
-    <div class="chip-row" id="filter-remote">
-      <button type="button" class="chip${f.filterRemote === "all" ? " on" : ""}" data-remote="all">All</button>
-      <button type="button" class="chip${f.filterRemote === "local" ? " on" : ""}" data-remote="local">In person</button>
-      <button type="button" class="chip${f.filterRemote === "remote" ? " on" : ""}" data-remote="remote">Remote</button>
-    </div>
-    <p class="filter-label">How far she'll drive from Grimes</p>
-    <div class="chip-row" id="filter-commute">
-      ${COMMUTE_BANDS.map(([m, label]) =>
+    <button type="button" class="filter-toggle" id="filter-toggle" aria-expanded="${filtersExpanded ? "true" : "false"}" aria-controls="filter-panel">
+      <span>Filters${activeFilters ? ` (${activeFilters})` : ""}</span>
+      <span aria-hidden="true">${filtersExpanded ? "Hide" : "Show"}</span>
+    </button>
+    <div id="filter-panel" class="filter-panel${filtersExpanded ? "" : " is-collapsed"}">
+      <p class="filter-label">Filter</p>
+      <div class="chip-row" id="filter-extra">
+        <button type="button" class="chip${f.filterTrain ? " on" : ""}" id="filter-train">Will train ✦</button>
+        <button type="button" class="chip${f.filterPay ? " on" : ""}" id="filter-pay">$19+/hr</button>
+        <button type="button" class="chip${f.filterTrusted ? " on" : ""}" id="filter-trusted">Verified employer</button>
+        <button type="button" class="chip${f.filterSaved ? " on" : ""}" id="filter-saved">Saved</button>
+        <button type="button" class="chip${f.filterApplied ? " on" : ""}" id="filter-applied">Applied</button>
+        <button type="button" class="chip${f.showHidden ? " on" : ""}" id="filter-show-hidden">Hidden</button>
+      </div>
+      ${cats.length ? `<p class="filter-label">Category</p>
+      <select class="field" id="filter-category" style="margin-bottom:8px">
+        <option value="">All categories</option>
+        ${cats.map((c) => `<option value="${esc(c)}"${f.filterCategory === c ? " selected" : ""}>${esc(c)}</option>`).join("")}
+      </select>` : ""}
+      <p class="filter-label">Job type</p>
+      <div class="chip-row" id="filter-remote">
+        <button type="button" class="chip${f.filterRemote === "all" ? " on" : ""}" data-remote="all">All</button>
+        <button type="button" class="chip${f.filterRemote === "local" ? " on" : ""}" data-remote="local">In person</button>
+        <button type="button" class="chip${f.filterRemote === "remote" ? " on" : ""}" data-remote="remote">Remote</button>
+      </div>
+      <p class="filter-label">How far she'll drive from Grimes</p>
+      <div class="chip-row" id="filter-commute">
+        ${COMMUTE_BANDS.map(([m, label]) =>
     `<button type="button" class="chip${commuteMax === m ? " on" : ""}" data-commute="${m ?? "any"}">${esc(label)}</button>`,
   ).join("")}
+      </div>
     </div>
     <p class="job-meta" id="jobs-count" style="margin-top:1rem">${list.length} safe job${list.length === 1 ? "" : "s"} · updated ${esc(meta.generated)}</p>
     <div class="jobs-grid" id="jobs-list">${list.map(jobCard).join("") || "<p class='job-meta'>No jobs match — try widening filters.</p>"}</div>
@@ -810,7 +762,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-save], [data-remind], [data-remote], [data-commute], #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-tailor], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-save], [data-remind], [data-remote], [data-commute], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-tailor], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -841,6 +793,12 @@ function handleViewClick(e: Event): void {
   }
   if (t.id === "feed-retry") {
     void loadFeed().then((ok) => { if (ok) render(); });
+    return;
+  }
+  if (t.id === "filter-toggle") {
+    filtersExpanded = !filtersExpanded;
+    try { localStorage.setItem("dsm-jobs-filters-expanded", filtersExpanded ? "1" : "0"); } catch { /* quota */ }
+    renderJobsMain();
     return;
   }
   if (t.id === "filter-pay" || t.id === "filter-train" || t.id === "filter-trusted" || t.id === "filter-saved" || t.id === "filter-applied" || t.id === "filter-show-hidden") {
@@ -1135,8 +1093,8 @@ function setPasswordFieldVisible(input: HTMLInputElement, toggle: HTMLButtonElem
   input.type = visible ? "text" : "password";
   toggle.setAttribute("aria-label", visible ? "Hide password" : "Show password");
   toggle.setAttribute("aria-pressed", visible ? "true" : "false");
-  toggle.querySelector<SVGElement>(".field-password-icon--show")?.toggleAttribute("hidden", visible);
-  toggle.querySelector<SVGElement>(".field-password-icon--hide")?.toggleAttribute("hidden", !visible);
+  toggle.querySelector<SVGElement>(".field-password-icon--show")?.classList.toggle("is-hidden", visible);
+  toggle.querySelector<SVGElement>(".field-password-icon--hide")?.classList.toggle("is-hidden", !visible);
 }
 
 function resetAllPasswordVisibility(): void {
@@ -1318,62 +1276,56 @@ async function sendRudy(): Promise<void> {
   const msg = inp.value.trim();
   inp.value = "";
   log.insertAdjacentHTML("beforeend", `<div class="bubble me">${esc(msg)}</div>`);
-  // Temporary "thinking" bubble with a rotating naughty saying, replaced by the real reply.
-  log.insertAdjacentHTML("beforeend", `<div class="bubble ai think" id="rudy-think">${esc(pickSaying(THINKING_LINES))}</div>`);
+  const thinkingBubble = document.createElement("div");
+  thinkingBubble.className = "bubble ai think";
+  thinkingBubble.textContent = pickSaying(THINKING_LINES);
+  log.appendChild(thinkingBubble);
   log.scrollTop = log.scrollHeight;
 
   // Persist user message to Supabase + localStorage
   void pushChatMessage("user", msg);
-  const lsBefore = (() => {
-    try { return JSON.parse(localStorage.getItem("dsm-jobs-chat") || "[]") as Array<{ role: string; body: string }>; } catch { return []; }
-  })();
-  saveChatToLocal([...lsBefore, { role: "user", body: msg }]);
+  appendChatToLocal("user", msg);
 
   const sb = getClient();
   if (!sb) {
-    const el = $("#rudy-think");
-    if (el) { el.classList.remove("think"); el.textContent = "No connection right now — I'll be right here when you're back online. 💜"; }
+    thinkingBubble.classList.remove("think");
+    thinkingBubble.textContent = "No connection right now — I'll be right here when you're back online. 💜";
     log.scrollTop = log.scrollHeight;
     return;
   }
   try {
     const { data, error } = await sb.functions.invoke("companion", { body: { message: msg } });
     const reply = (error?.message ? null : (data?.reply as string)) || "I'm here with you. Try again in a moment. 💜";
-    const elThink = $("#rudy-think");
-    if (elThink) {
-      elThink.classList.remove("think");
-      elThink.textContent = reply;
-    }
+    thinkingBubble.classList.remove("think");
+    thinkingBubble.textContent = reply;
     // Persist Rudy's reply
     void pushChatMessage("assistant", reply);
-    const lsAfter = (() => {
-      try { return JSON.parse(localStorage.getItem("dsm-jobs-chat") || "[]") as Array<{ role: string; body: string }>; } catch { return []; }
-    })();
-    saveChatToLocal([...lsAfter, { role: "assistant", body: reply }]);
+    appendChatToLocal("assistant", reply);
     speakText(reply);
   } catch {
-    const el = $("#rudy-think");
-    if (el) { el.classList.remove("think"); el.textContent = "Connection blip — you're still safe. Try again. 💜"; }
+    thinkingBubble.classList.remove("think");
+    thinkingBubble.textContent = "Connection blip — you're still safe. Try again. 💜";
   }
   log.scrollTop = log.scrollHeight;
 }
 
-function spookLoaderHTML(jobTitle: string): string {
-  return `<div class="spookload">
-    <div class="spooksky"><span class="spookmoon"></span>
-      <span class="bat b1">🦇</span><span class="bat b2">🦇</span><span class="bat b3">🦇</span></div>
-    <div class="spookbar"><i id="spookfill"></i></div>
-    <div class="spookmsg" id="spookmsg">${esc(pickSaying(TAILOR_LINES))}</div>
+function tailorLoaderHTML(jobTitle: string): string {
+  return `<div class="tailor-load">
+    <div class="tailor-route" aria-hidden="true">
+      <span class="route-track"></span><span class="route-stop route-stop-a"></span><span class="route-stop route-stop-b"></span><span class="route-stop route-stop-c"></span>
+    </div>
+    <div class="tailor-bar"><i id="tailor-progress"></i></div>
+    <div class="tailor-stage" id="tailor-stage">${esc(pickSaying(TAILOR_LINES))}</div>
     <p class="field-hint" style="margin-top:8px;text-align:center">Tailoring for ${esc(jobTitle)}…</p>
   </div>`;
 }
 
-function startSpook(jobTitle: string): void {
+function startTailorLoader(jobTitle: string): void {
   const body = $("#tailor-body");
   if (!body) return;
-  body.innerHTML = spookLoaderHTML(jobTitle);
-  const fill = document.getElementById("spookfill");
-  const msg = document.getElementById("spookmsg");
+  body.innerHTML = tailorLoaderHTML(jobTitle);
+  const fill = document.getElementById("tailor-progress");
+  const msg = document.getElementById("tailor-stage");
   const stages = [
     "Reading her real experience…",
     "Matching it to this job…",
@@ -1383,8 +1335,8 @@ function startSpook(jobTitle: string): void {
   ];
   const t0 = Date.now();
   const DUR = 9000;
-  if (spookTimer) clearInterval(spookTimer);
-  spookTimer = setInterval(() => {
+  if (tailorTimer) clearInterval(tailorTimer);
+  tailorTimer = setInterval(() => {
     const el = Date.now() - t0;
     if (fill) fill.style.width = `${Math.min(94, (el / DUR) * 94).toFixed(1)}%`;
     if (msg) {
@@ -1394,12 +1346,12 @@ function startSpook(jobTitle: string): void {
   }, 180);
 }
 
-function stopSpook(): void {
-  if (spookTimer) {
-    clearInterval(spookTimer);
-    spookTimer = null;
+function stopTailorLoader(): void {
+  if (tailorTimer) {
+    clearInterval(tailorTimer);
+    tailorTimer = null;
   }
-  const fill = document.getElementById("spookfill");
+  const fill = document.getElementById("tailor-progress");
   if (fill) fill.style.width = "100%";
 }
 
@@ -1411,15 +1363,13 @@ function openTailor(job: Job): void {
     setView("corner");
     return;
   }
-  tailorJob = job;
-  tailorData = null;
   const modal = $("#tailor-modal");
   const body = $("#tailor-body");
   if (!modal || !body) return;
   modal.hidden = false;
   const full = (job.descFull || "").trim();
   if (full.length >= 200) {
-    startSpook(job.title);
+    startTailorLoader(job.title);
     runTailor(job, resume, full);
   } else {
     body.innerHTML = `
@@ -1429,7 +1379,7 @@ function openTailor(job: Job): void {
     `;
     $("#tailor-run")?.addEventListener("click", () => {
       const paste = (document.getElementById("tailor-paste") as HTMLTextAreaElement)?.value.trim() || "";
-      startSpook(job.title);
+      startTailorLoader(job.title);
       runTailor(job, resume, paste);
     }, { once: true });
   }
@@ -1438,13 +1388,10 @@ function openTailor(job: Job): void {
 function closeTailor(): void {
   const modal = $("#tailor-modal");
   if (modal) modal.hidden = true;
-  stopSpook();
-  tailorJob = null;
-  tailorData = null;
+  stopTailorLoader();
 }
 
 function renderTailorResult(job: Job, data: { resume: string; cover_note?: string }): void {
-  tailorData = data;
   const body = $("#tailor-body");
   if (!body) return;
   body.innerHTML = `
@@ -1488,7 +1435,7 @@ async function runTailor(job: Job, resume: string, jobText: string): Promise<voi
   const sb = getClient();
   const body = $("#tailor-body");
   if (!sb || !body) {
-    stopSpook();
+    stopTailorLoader();
     if (body) body.innerHTML = `<p class="job-meta">Sign in to tailor — keeps her résumé private.</p>`;
     return;
   }
@@ -1496,14 +1443,14 @@ async function runTailor(job: Job, resume: string, jobText: string): Promise<voi
     const { data, error } = await sb.functions.invoke("resume-tailor", {
       body: { resume, jobTitle: job.title, company: job.company, jobText },
     });
-    stopSpook();
+    stopTailorLoader();
     if (error || !data?.resume) {
       body.innerHTML = `<p class="job-meta">${esc((data?.error as string) || error?.message || "Couldn't tailor just now — try again.")}</p>`;
       return;
     }
     renderTailorResult(job, data as { resume: string; cover_note?: string });
   } catch {
-    stopSpook();
+    stopTailorLoader();
     body.innerHTML = `<p class="job-meta">No connection right now — try again when she's back online.</p>`;
   }
 }
@@ -1588,6 +1535,10 @@ function wirePullToRefresh(): void {
 async function boot(): Promise<void> {
   loadLocal();
   migrateLocalV1();
+  try {
+    const savedFiltersExpanded = localStorage.getItem("dsm-jobs-filters-expanded");
+    if (savedFiltersExpanded != null) filtersExpanded = savedFiltersExpanded !== "0";
+  } catch { /* quota */ }
   commuteMax = getState().commuteRadius;
   bindViewHost();
   updateOfflineBanner();

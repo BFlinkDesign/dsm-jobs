@@ -99,12 +99,11 @@ def inspect(page):
     page.wait_for_selector("#jobs-list .job-card", timeout=15000)
 
     meta_txt = page.inner_text("#meta-generated")
-    badge_txt = page.inner_text(".badge-safe")
     out.append(
         check(
             "header_scam_checked",
-            "safe job" in meta_txt.lower() and "scam-checked" in badge_txt.lower(),
-            f"meta={meta_txt[:60]} badge={badge_txt[:40]}",
+            "safe job" in meta_txt.lower() and "scam-checked" in meta_txt.lower(),
+            f"meta={meta_txt[:80]}",
         )
     )
 
@@ -174,13 +173,13 @@ def inspect(page):
     for view, key in [("today", "today_locked"), ("apps", "apps_locked"), ("corner", "corner_locked")]:
         page.click(f'.nav-bottom .tab[data-view="{view}"]')
         page.wait_for_timeout(150)
-        nav[key] = page.eval_on_selector("#view-host .lock-screen", "el => !!el")
+        nav[key] = page.query_selector("#view-host .lock-screen") is not None
     page.click('.nav-bottom .tab[data-view="help"]')
     page.wait_for_timeout(150)
     nav["help"] = page.inner_text("#view-host").lower().count("stays safe") >= 1
     page.click('.nav-bottom .tab[data-view="jobs"]')
     page.wait_for_timeout(150)
-    nav["jobs"] = page.eval_on_selector("#jobs-list", "el => !!el")
+    nav["jobs"] = page.query_selector("#jobs-list") is not None
     out.append(check("nav_switches_views", all(nav.values()), nav))
 
     auth = page.evaluate("""() => ({
@@ -233,7 +232,7 @@ def extra_shots(page):
     )
     if opened:
         page.wait_for_timeout(300)
-        page.screenshot(path=str(SHOTS / "07-ruby.png"), full_page=False)
+        page.screenshot(path=str(SHOTS / "07-rudy.png"), full_page=False)
     return opened
 
 

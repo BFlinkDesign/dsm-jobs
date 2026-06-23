@@ -1,60 +1,61 @@
-/* ── Sparkle Goth design system — glitter purple + black ───────────────────
+/* ── Night-shift job board design system ───────────────────────────────────
    One token layer; every surface derives from here. No one-off hex in components. */
 
 :root {
-  /* Ink & void */
-  --void: #030205;
-  --paper: #07050c;
-  --card: #110d18;
-  --surface: #1a1424;
-  --elevated: #221a30;
+  /* Dispatch-board neutrals */
+  --void: #07070b;
+  --paper: #0c0b10;
+  --card: #15131c;
+  --surface: #201c29;
+  --elevated: #292432;
 
-  /* Glitter purple ramp (sparkle highlights sit on the light end) */
-  --purple-deep: #4c1d95;
-  --purple: #7c3aed;
-  --purple-bright: #a855f7;
-  --purple-spark: #d8b4fe;
-  --purple-glitter: #e9d5ff;
-  --purple-glow: color-mix(in oklab, var(--purple-bright) 35%, transparent);
+  /* Safety/checkpoint accents */
+  --purple-deep: #2f245b;
+  --purple: #5140aa;
+  --purple-bright: #6c4bd8;
+  --purple-spark: #bca9ff;
+  --purple-glitter: #e8dcf7;
+  --purple-glow: color-mix(in oklab, var(--purple-bright) 30%, transparent);
+  --route: #f0b35a;
 
   /* Ink on dark */
-  --ink: #f5f0ff;
-  --ink-soft: #c4b5d8;
-  --ink-muted: #a094bc;
-  --line: #2d2440;
+  --ink: #faf7f0;
+  --ink-soft: #d7ccde;
+  --ink-muted: #a79ab1;
+  --line: #383140;
+  --border: var(--line);
 
   /* Semantic */
-  --safe: #86efac;
+  --safe: #84f3b7;
   --safe-soft: color-mix(in oklab, var(--safe) 18%, transparent);
-  --danger: #f87171;
-  --gold: var(--purple-glitter);
+  --danger: #ff7f8f;
+  --gold: var(--route);
+  --accent: var(--route);
 
-  /* Sparkle gradients — used on accents, rings, hero type */
+  /* One signature gradient: used only for safety rails and primary actions. */
   --glitter-gradient: linear-gradient(
-    125deg,
-    #6d28d9 0%,
-    #a855f7 22%,
-    #f0abfc 45%,
-    #c084fc 58%,
-    #7c3aed 78%,
-    #4c1d95 100%
+    135deg,
+    var(--safe) 0%,
+    var(--route) 45%,
+    var(--purple-bright) 100%
   );
   --glitter-shine: linear-gradient(
-    105deg,
+    90deg,
     transparent 35%,
-    rgba(255, 255, 255, 0.45) 48%,
+    rgba(255, 255, 255, 0.13) 48%,
     transparent 62%
   );
 
-  /* Elevation — layered, no neon */
+  /* Elevation */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.55);
   --shadow-md: 0 8px 28px -8px rgba(0, 0, 0, 0.65);
-  --shadow-lg: 0 20px 50px -12px rgba(88, 28, 135, 0.35);
-  --ring: 0 0 0 3px var(--purple-glow);
+  --shadow-lg: 0 18px 44px -18px rgba(7, 7, 11, 0.9);
+  --ring: 0 0 0 3px color-mix(in oklab, var(--route) 34%, transparent);
 
   /* Type */
-  --font-display: "Playfair Display", Georgia, serif;
+  --font-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
   --font-body: "Atkinson Hyperlegible", system-ui, sans-serif;
+  --font-utility: ui-monospace, "SFMono-Regular", "Cascadia Mono", monospace;
   --text-xs: 0.75rem;
   --text-sm: 0.9375rem;
   --text-base: 1.0625rem;
@@ -71,9 +72,9 @@
   --space-8: 32px;
 
   /* Radius */
-  --radius-sm: 10px;
-  --radius-md: 14px;
-  --radius-lg: 20px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 8px;
   --radius-full: 999px;
 
   /* Motion */

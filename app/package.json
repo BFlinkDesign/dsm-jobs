@@ -7,12 +7,22 @@
   },
   "scripts": {
     "dev": "astro dev",
-    "build": "astro build",
+    "typecheck": "astro check",
+    "build": "npm run typecheck && astro build",
     "preview": "astro preview",
     "astro": "astro"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.8",
     "astro": "^7.0.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "typescript": "^6.0.3"
+  },
+  "overrides": {
+    "yaml-language-server": {
+      "yaml": "^2.9.0"
+    }
   }
 }

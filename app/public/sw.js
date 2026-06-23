@@ -12,7 +12,7 @@ function isFeedRequest(url) {
   return FEED_PATHS.has(leaf);
 }
 
-function networkFirst(req, cacheKey) {
+async function networkFirst(req, cacheKey) {
   return fetch(req)
     .then((res) => {
       if (res.ok) {

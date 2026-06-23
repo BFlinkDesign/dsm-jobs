@@ -20,11 +20,12 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
     <link rel="icon" href={`${base}icon-192.png`} />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Sans+Condensed:wght@600;700&display=swap" rel="stylesheet" />
     <title>Jobs for you — Grimes & Des Moines</title>
     {sentryDsn ? (
       <>
         <script
+          is:inline
           src="https://browser.sentry-cdn.com/10.57.0/bundle.tracing.min.js"
           integrity="sha384-fm7orKrUHTJhAKcdqNq6Kb/0qIpMNYz3TbwoEoiA3hdbnHqSBhIqMAZ4XS09pCU5"
           crossorigin="anonymous"
@@ -68,7 +69,7 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
       <header class="topbar">
         <div class="brand">
           <h1>Jobs for you</h1>
-          <p id="meta-generated">Researching… I hear you and Daddy do too 🐄😉</p>
+          <p id="meta-generated">Researching safe jobs near Des Moines…</p>
         </div>
         <span class="badge-safe" aria-label="Scam shield active">🛡 Scam-checked</span>
         <div class="acct">
@@ -144,7 +145,7 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
             <input class="field" id="auth-pass" type="password" autocomplete="current-password" placeholder="Password" />
             <button type="button" class="field-password-toggle" aria-label="Show password" aria-pressed="false">
               <svg class="field-password-icon field-password-icon--show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <svg class="field-password-icon field-password-icon--hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" hidden><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+              <svg class="field-password-icon field-password-icon--hide is-hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
             </button>
           </div>
           <button type="button" class="btn btn-primary" id="auth-signin" style="width:100%;margin-top:12px">Sign in</button>
@@ -174,14 +175,14 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
             <input class="field" id="auth-newpass" type="password" autocomplete="new-password" placeholder="New password (8+ characters)" />
             <button type="button" class="field-password-toggle" aria-label="Show password" aria-pressed="false">
               <svg class="field-password-icon field-password-icon--show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <svg class="field-password-icon field-password-icon--hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" hidden><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+              <svg class="field-password-icon field-password-icon--hide is-hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
             </button>
           </div>
           <div class="field-password">
             <input class="field" id="auth-newpass-confirm" type="password" autocomplete="new-password" placeholder="Confirm new password" />
             <button type="button" class="field-password-toggle" aria-label="Show password" aria-pressed="false">
               <svg class="field-password-icon field-password-icon--show" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-              <svg class="field-password-icon field-password-icon--hide" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true" hidden><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+              <svg class="field-password-icon field-password-icon--hide is-hidden" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M17.94 17.94A10.07 10.07 0 0112 20c-7 0-11-8-11-8a18.45 18.45 0 015.06-5.94M9.9 4.24A9.12 9.12 0 0112 4c7 0 11 8 11 8a18.5 18.5 0 01-2.16 3.19m-6.72-1.07a3 3 0 11-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
             </button>
           </div>
           <button type="button" class="btn btn-primary" id="auth-setpass" style="width:100%;margin-top:12px">Save new password</button>
