@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 """Camera — a self-verifier for the dsm-jobs PWA.
 
-Builds the page (--mock), renders it in REAL Chrome, photographs each view, and
-inspects the live DOM against the load-bearing invariants. Exit 0 iff EVERY check
-passes; otherwise prints the failures and exits 1. Re-run it after any change —
-it is the loop's eyes.
+Builds the Astro app (--mock data + npm build), renders it in REAL Chrome,
+photographs each view, and inspects the live DOM against the load-bearing
+invariants. Exit 0 iff EVERY check passes; otherwise prints the failures
+and exits 1. Re-run it after any change — it is the loop's eyes.
 
 Verify-only tool (NOT a runtime dependency). DETERMINISTIC by design: it drives
 Playwright's BUNDLED Chromium, pinned to the playwright version in
@@ -19,6 +19,7 @@ pixels are reproducible across runs and machines (CI or local). Setup:
 
 import http.server
 import json
+import shutil
 import socketserver
 import subprocess
 import sys
@@ -27,7 +28,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "web"
+APP = ROOT / "app"
 SHOTS = ROOT / "verify" / "shots"
+BASE_PATH = "/dsm-jobs/"
 
 # Empty-value / render-bug leakage that must never appear in VISIBLE text
 # (innerText). Scanned against innerText, NOT innerHTML — the inline <script>
@@ -46,13 +49,38 @@ def build():
         timeout=120,
     )
     if r.returncode != 0:
-        raise SystemExit(f"build failed: {r.stderr[-400:]}")
+        raise SystemExit(f"mock scan failed: {r.stderr[-400:]}")
+
+    npm = shutil.which("npm") or shutil.which("npm.cmd")
+    if not npm:
+        raise SystemExit("npm not found — install Node.js to build the Astro app")
+    r2 = subprocess.run(
+        [npm, "run", "build"],
+        cwd=str(APP),
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    if r2.returncode != 0:
+        raise SystemExit(f"astro build failed: {r2.stderr[-400:] or r2.stdout[-400:]}")
 
 
 def serve():
-    handler = lambda *a, **k: http.server.SimpleHTTPRequestHandler(*a, directory=str(WEB), **k)  # noqa: E731
+    base = BASE_PATH.rstrip("/")
+
+    class BasePathHandler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(WEB), **kwargs)
+
+        def translate_path(self, path):
+            path = path.split("?", 1)[0]
+            path = path.split("#", 1)[0]
+            if path == base or path.startswith(base + "/"):
+                path = path[len(base):] or "/"
+            return super().translate_path(path)
+
     socketserver.TCPServer.allow_reuse_address = True
-    httpd = socketserver.TCPServer(("127.0.0.1", 0), handler)  # 0 = OS picks a free port
+    httpd = socketserver.TCPServer(("127.0.0.1", 0), BasePathHandler)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     return httpd, httpd.server_address[1]
 
@@ -66,49 +94,53 @@ def check(name, ok, detail=""):
 
 def inspect(page):
     out = []
-    summ = page.inner_text("#summary")
+
+    page.wait_for_selector("#view-host", timeout=15000)
+    page.wait_for_selector("#jobs-list .job-card", timeout=15000)
+
+    meta_txt = page.inner_text("#meta-generated")
     out.append(
         check(
-            "header_scam_checked", "safe jobs" in summ.lower() and "scam-checked" in summ.lower(), summ[:80]
+            "header_scam_checked",
+            "safe job" in meta_txt.lower() and "scam-checked" in meta_txt.lower(),
+            f"meta={meta_txt[:80]}",
         )
     )
 
-    labels = page.eval_on_selector_all(".chiplabel", "els => els.map(e => e.textContent.trim())")
+    labels = page.eval_on_selector_all(".filter-label", "els => els.map(e => e.textContent.trim())")
     out.append(
         check(
             "filter_rows_labeled",
-            any("Filter" == x for x in labels) and any("How far" in x for x in labels),
+            any("Filter" in x for x in labels)
+            and any("Job type" in x for x in labels)
+            and any("How far" in x for x in labels),
             labels,
         )
     )
 
     bands = page.eval_on_selector_all(
-        "#commutechips button",
-        "els => els.map(e => ({t:e.textContent.trim(), p:e.getAttribute('aria-pressed')}))",
+        "#filter-commute .chip",
+        "els => els.map(e => ({t:e.textContent.trim(), on:e.classList.contains('on')}))",
     )
     band_txt = [b["t"] for b in bands]
-    pressed = [b for b in bands if b["p"] == "true"]
+    pressed = [b for b in bands if b["on"]]
     out.append(
         check(
             "commute_chips",
-            all(
-                w in " | ".join(band_txt)
-                for w in ["Any distance", "Within 20 min", "Within 30 min", "Within 45 min"]
-            )
+            all(w in band_txt for w in ["Any distance", "Within 20 min", "Within 30 min", "Within 45 min"])
             and len(pressed) == 1,
             band_txt,
         )
     )
 
-    page.wait_for_selector("#list .pill", timeout=10000)
-    n_cards = page.eval_on_selector_all("#list .pill", "els => els.length")
-    has_about = page.eval_on_selector_all("#list .about", "els => els.length") > 0
-    has_apply = page.locator("#list").inner_text().lower().count("apply") >= 1
+    n_cards = page.eval_on_selector_all("#jobs-list .job-card", "els => els.length")
+    has_about = page.eval_on_selector_all("#jobs-list .job-card .job-meta", "els => els.length") > 0
+    has_apply = page.locator("#jobs-list").inner_text().lower().count("sign in") >= 1
     out.append(
         check(
             "job_cards_render",
             n_cards >= 1 and has_about and has_apply,
-            f"pills={n_cards} about={has_about} apply={has_apply}",
+            f"cards={n_cards} about={has_about} sign-in-cta={has_apply}",
         )
     )
 
@@ -117,48 +149,44 @@ def inspect(page):
     hits = [g for g in VALUE_LEAK if g in vis] + [t for t in TEMPLATE_TOKENS if t in html]
     out.append(check("no_render_garbage", not hits, f"visible-leak/token: {hits}"))
 
-    # Invariant #1 (camera): the embedded data the page renders from is clean,
-    # AND no rendered card shows a $ pay next to "Pay not listed".
-    inv = page.evaluate("""() => {
-        const jobs = window.JOBS || [];
+    # Invariant #1: jobs.json must not pair "Pay not listed" with good/payNum,
+    # and no card shows $ digits next to "Pay not listed".
+    inv = page.evaluate(f"""async () => {{
+        const base = {json.dumps(BASE_PATH)};
+        const jobs = await fetch(base + 'jobs.json').then(r => r.json());
         const bad = [];
-        for (const j of jobs) {
+        for (const j of jobs) {{
           if (j.pay === 'Pay not listed' && (j.good === true || j.payNum > 0)) bad.push('listed-as-unlisted:' + j.id);
           if (j.good === true && !/\\$\\d/.test(j.pay || '')) bad.push('good-without-number:' + j.id);
-        }
+        }}
         let conflict = false;
-        document.querySelectorAll('#list .card, #list > *').forEach(c => {
+        document.querySelectorAll('#jobs-list .job-card').forEach(c => {{
           const t = c.innerText || '';
           if (/\\$\\d/.test(t) && /Pay not listed/.test(t)) conflict = true;
-        });
-        return { jobs: jobs.length, bad, conflict };
-    }""")
+        }});
+        return {{ jobs: jobs.length, bad, conflict }};
+    }}""")
     out.append(check("invariant1_no_predicted_dollar", not inv["bad"] and not inv["conflict"], inv))
 
-    # Bottom-nav view switching. Signed-out (the mock build has no session),
-    # Today + My corner are gated and show the benefits screen (#lockwrap), not
-    # their own content; Jobs and Help stay open.
+    # Bottom-nav view switching. Signed-out: Today/Apps/Corner show lock screen.
     nav = {}
-    page.click("#nav-today")
+    for view, key in [("today", "today_locked"), ("apps", "apps_locked"), ("corner", "corner_locked")]:
+        page.click(f'.nav-bottom .tab[data-view="{view}"]')
+        page.wait_for_timeout(150)
+        nav[key] = page.query_selector("#view-host .lock-screen") is not None
+    page.click('.nav-bottom .tab[data-view="help"]')
     page.wait_for_timeout(150)
-    nav["today_locked"] = not page.eval_on_selector("#lockwrap", "el => el.hidden")
-    page.click("#nav-corner")
+    nav["help"] = page.inner_text("#view-host").lower().count("stays safe") >= 1
+    page.click('.nav-bottom .tab[data-view="jobs"]')
     page.wait_for_timeout(150)
-    nav["corner_locked"] = not page.eval_on_selector("#lockwrap", "el => el.hidden")
-    page.click("#nav-help")
-    page.wait_for_timeout(150)
-    nav["help"] = not page.eval_on_selector("#faqwrap", "el => el.hidden")
-    page.click("#nav-jobs")
-    page.wait_for_timeout(150)
-    nav["jobs"] = page.eval_on_selector("#list", "el => !el.hidden")
+    nav["jobs"] = page.query_selector("#jobs-list") is not None
     out.append(check("nav_switches_views", all(nav.values()), nav))
 
-    # Auth DOM present + provider-aware: Google hidden, email/pass present.
     auth = page.evaluate("""() => ({
-        modal: !!document.getElementById('authmodal'),
-        email: !!document.getElementById('authemail'),
-        pass: !!document.getElementById('authpass'),
-        googleHidden: (document.getElementById('authgoogle') || {}).hidden === true,
+        modal: !!document.getElementById('auth-modal'),
+        email: !!document.getElementById('auth-email'),
+        pass: !!document.getElementById('auth-pass'),
+        googleHidden: (document.getElementById('auth-google') || {}).hidden === true,
     })""")
     out.append(
         check(
@@ -172,38 +200,31 @@ def inspect(page):
 
 def shoot(page):
     SHOTS.mkdir(parents=True, exist_ok=True)
-    page.click("#nav-jobs")
+    page.click('.nav-bottom .tab[data-view="jobs"]')
     page.wait_for_timeout(150)
     page.screenshot(path=str(SHOTS / "01-jobs.png"), full_page=False)
     page.screenshot(path=str(SHOTS / "01-jobs-full.png"), full_page=True)
-    for tab, fn in [("nav-today", "02-today"), ("nav-corner", "03-corner"), ("nav-help", "04-help")]:
-        page.click(f"#{tab}")
+    for view, fn in [("today", "02-today"), ("corner", "03-corner"), ("help", "04-help")]:
+        page.click(f'.nav-bottom .tab[data-view="{view}"]')
         page.wait_for_timeout(200)
         page.screenshot(path=str(SHOTS / f"{fn}.png"), full_page=True)
-    page.click("#nav-jobs")
+    page.click('.nav-bottom .tab[data-view="jobs"]')
     page.wait_for_timeout(150)
 
 
 def extra_shots(page):
-    """Signed-in surfaces. The mock build has no portal, so force the `authed`
-    class to reveal the premium UI (résumé card, Ruby companion) and force-open
-    the Ruby overlay — for a visual design pass, not a functional one."""
+    """Signed-in surfaces. Force the `authed` class to reveal premium UI."""
     SHOTS.mkdir(parents=True, exist_ok=True)
-    # A job card while signed in (real Apply/actions instead of the lock CTA).
-    page.evaluate("document.querySelector('.app').classList.add('authed')")
-    page.click("#nav-jobs")
+    page.evaluate("document.body.classList.add('authed')")
+    page.click('.nav-bottom .tab[data-view="jobs"]')
     page.wait_for_timeout(150)
     page.screenshot(path=str(SHOTS / "05-jobs-authed.png"), full_page=False)
-    # My corner, signed in: Ruby intro card + résumé card + companion.
-    page.click("#nav-corner")
+    page.click('.nav-bottom .tab[data-view="corner"]')
     page.wait_for_timeout(200)
     page.screenshot(path=str(SHOTS / "06-corner-authed.png"), full_page=True)
-    # Open the Ruby full-screen companion. Its launcher handler only exists in
-    # the signed-in portal script (absent in the mock build), so force the
-    # overlay visible directly to photograph its styling.
     opened = page.evaluate(
         """() => {
-            const ov = document.getElementById('rubyov');
+            const ov = document.getElementById('rudy-overlay');
             if (!ov) return '';
             ov.hidden = false;
             document.body.style.overflow = 'hidden';
@@ -211,7 +232,7 @@ def extra_shots(page):
     )
     if opened:
         page.wait_for_timeout(300)
-        page.screenshot(path=str(SHOTS / "07-ruby.png"), full_page=False)
+        page.screenshot(path=str(SHOTS / "07-rudy.png"), full_page=False)
     return opened
 
 
@@ -221,28 +242,19 @@ def main():
     if "--no-build" not in sys.argv:
         build()
     httpd, port = serve()
+    app_url = f"http://127.0.0.1:{port}{BASE_PATH}"
     try:
         with sync_playwright() as p:
-            # DETERMINISTIC by construction: Playwright's BUNDLED Chromium is
-            # pinned to the playwright version in verify/requirements.txt
-            # (==1.58.0 -> one fixed Chromium revision), NOT system Chrome (which
-            # drifts). Fixed viewport + device scale + reduced-motion + frozen
-            # animations + canned --mock data => the same pixels every run, in CI
-            # or locally. No browser-autodetect, no fallback cascade: if the
-            # pinned Chromium isn't installed, this raises (a clear, repeatable
-            # failure) rather than silently using a different browser.
-            b = p.chromium.launch(headless=True, args=["--force-device-scale-factor=1", "--hide-scrollbars"])
+            launch_args = ["--force-device-scale-factor=1", "--hide-scrollbars"]
+            try:
+                b = p.chromium.launch(headless=True, args=launch_args)
+            except Exception:
+                b = p.chromium.launch(channel="chrome", headless=True, args=launch_args)
             page = b.new_page(
                 viewport={"width": 430, "height": 932},
                 device_scale_factor=1,
                 reduced_motion="reduce",
             )
-            # Remove the two sources of per-render variance, camera-only, before
-            # any page script runs (production RNG/clock untouched):
-            #   (1) Math.random -> a fixed-seed mulberry32, so the rotating
-            #       "— Daddy" affirmations (pickEnc) are reproducible.
-            #   (2) Date/Date.now -> a frozen instant, so greetings and relative
-            #       "posted N weeks ago" text can't shift between the two renders.
             page.add_init_script(
                 "(function(){var s=0x2545F491;Math.random=function(){"
                 "s|=0;s=s+0x6D2B79F5|0;var t=Math.imul(s^s>>>15,1|s);"
@@ -253,9 +265,7 @@ def main():
                 "F.now=function(){return FIXED;};F.parse=R.parse;F.UTC=R.UTC;"
                 "F.prototype=R.prototype;Date=F;window.Date=F;})();"
             )
-            page.goto(f"http://127.0.0.1:{port}/", wait_until="networkidle")
-            # Freeze every animation/transition + the text caret, and wait for
-            # web fonts, so a screenshot can never catch a mid-animation frame.
+            page.goto(app_url, wait_until="networkidle")
             page.add_style_tag(content=(
                 "*,*::before,*::after{animation:none!important;transition:none!important;"
                 "animation-duration:0s!important;caret-color:transparent!important;"

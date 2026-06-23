@@ -1323,6 +1323,33 @@ def _sentry_head(sentry_cfg):
     return SENTRY_CDN_TAG + "\n" + _SENTRY_INIT_TMPL.replace("__DSN__", dsn_js)
 
 
+def write_jobs_bundle(safe_rows, hidden_count, total_checked, web_dir, generated,
+                      contact="me", contact_phone="", portal_cfg=None):
+    """Emit static JSON the Astro front-end consumes (jobs + meta + public portal config)."""
+    os.makedirs(web_dir, exist_ok=True)
+    jobs_path = os.path.join(web_dir, "jobs.json")
+    meta_path = os.path.join(web_dir, "meta.json")
+    portal_path = os.path.join(web_dir, "portal.json")
+    jobs = _jobs_payload(safe_rows)
+    meta = {
+        "contact": contact,
+        "phone": contact_phone,
+        "generated": generated,
+        "hidden": hidden_count,
+        "total": total_checked,
+        "safe": len(safe_rows),
+    }
+    with open(jobs_path, "w", encoding="utf-8") as fh:
+        json.dump(jobs, fh, ensure_ascii=False)
+        fh.write("\n")
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False)
+        fh.write("\n")
+    with open(portal_path, "w", encoding="utf-8") as fh:
+        json.dump(portal_cfg or {}, fh, ensure_ascii=False)
+        fh.write("\n")
+
+
 def write_html(safe_rows, hidden_count, total_checked, path, generated,
                contact="me", contact_phone="", portal_cfg=None, sentry_cfg=None):
     jobs = _jobs_payload(safe_rows)
@@ -3252,101 +3279,31 @@ window.addEventListener("appinstalled", function(){
 // Deterministic per-day hash — used by todaysPicks() to rotate which jobs lead
 // the Today view (stable for a given day so the list doesn't shuffle on every tap).
 function dayHash(){ const d=today(); let h=0; for(let i=0;i<d.length;i++) h=(h*31+d.charCodeAt(i))>>>0; return h; }
-// Words of affirmation — a LARGE pool in Daddy's voice. pickEnc() draws from a
+// Words of affirmation. pickEnc() draws from a
 // shuffled "bag" so every line shows once before any repeats (then reshuffles),
 // and the footer + greeting + each visit get a fresh one — never the same phrase
 // sitting there all day.
 const ENC_LINES = [
-  "Job ads are wish lists. If you can do half of it, apply — you're more qualified than you let yourself believe. — Daddy",
-  "You showed up today. That's the whole battle, and you won it. — Daddy",
-  "One application beats five you never send. Small is enough. I'm proud of you. — Daddy",
-  "“Pay not listed” isn't a no — it's just a question you get to ask. — Daddy",
-  "Rough day? The jobs will keep. Be as kind to yourself as I am to you. — Daddy",
-  "You are not behind. You're exactly where the next right step starts. — Daddy",
-  "Your worth was never up for hire. A job is something you do, not who you are. — Daddy",
-  "Send one. Just one. Then go rest knowing you moved the needle. — Daddy",
-  "A 'no' from one office is just a door pointing you to the right one. — Daddy",
-  "The bravest thing you'll do today is try. You've already got that in you. — Daddy",
-  "Nervous hands still fill out applications. Do it scared — that counts double. — Daddy",
-  "You don't have to feel ready. You just have to begin. I'm right here. — Daddy",
-  "Every screen you fill out is proof you didn't give up. That's everything. — Daddy",
-  "Slow progress is still progress. We're not racing anyone. — Daddy",
-  "I'd hire you in a heartbeat. The right employer will see what I see. — Daddy",
-  "Take the morning gently. The afternoon can hold one small step. — Daddy",
-  "You survived 100% of your hardest days. Today's no match for you. — Daddy",
-  "Rejection isn't a verdict on you. It's just traffic on the way there. — Daddy",
-  "Tidy beats perfect. Send the good-enough application and breathe. — Daddy",
-  "You are allowed to be proud of small wins. I sure am. — Daddy",
-  "The fact that you're still trying tells me everything about your heart. — Daddy",
-  "Rest is part of the work, not a break from it. Lie down guilt-free. — Daddy",
-  "One steady step a day adds up faster than you'd ever guess. — Daddy",
-  "You don't need to have it figured out. You just need to keep showing up. — Daddy",
-  "Whatever today holds, you won't face it alone. — Daddy",
-  "Courage isn't loud. Sometimes it's just opening the app again. — Daddy",
-  "Your past doesn't disqualify you. It made you someone who keeps going. — Daddy",
-  "Apply like someone who's already been believed in — because you have. — Daddy",
-  "The hard part is starting. You're stronger than the blank form. — Daddy",
-  "Good things are coming, and you're doing the work to meet them. — Daddy",
-  "You are not too much, and you are not too late. — Daddy",
-  "Every employer here was checked, so you're safe to just be yourself. — Daddy",
-  "Drink some water, take a breath, and tap one job. That's a full day's brave. — Daddy",
-  "I'm not proud of you because you applied. I'm proud of you, period. — Daddy",
-  "The version of you a year from now is cheering for this exact moment. — Daddy",
-  "You can do hard things gently. There's no prize for white-knuckling it. — Daddy",
-  "If today all you did was open this, that's a start — and starts matter. — Daddy",
-  "Confidence comes after you act, not before. So act, and let it catch up. — Daddy",
-  "You've got a steady, capable mind. Let an employer be lucky to find it. — Daddy",
-  "No experience? You have a lifetime of figuring things out. That's experience. — Daddy",
-  "The right job is looking for someone exactly like you. Help it find you. — Daddy",
-  "Be patient with yourself. Healing and job-hunting run on the same clock. — Daddy",
-  "You don't have to earn rest. But you've earned it anyway today. — Daddy",
-  "Tap one job before the doubt talks you out of it. Quick — I'll wait. — Daddy",
-  "Whatever the inner critic says, I outrank it. And I say you've got this. — Daddy",
-  "Some days 'enough' is just getting out of bed. That's a yes from me. — Daddy",
-  "You are building a life, one small honest step at a time. Keep building. — Daddy",
-  "Showing up imperfectly beats waiting to be perfect every single time. — Daddy",
-  "The work you put in today is a gift to the you of next month. — Daddy",
-  "You're not starting over. You're starting from experience. — Daddy",
-  "I believe in you on the days you can't, so lean on that and keep moving. — Daddy",
-  "A quiet day of trying is still a day you didn't quit. I see it. — Daddy",
-  "Worthy of the job, worthy of rest, worthy of good things. All of it. — Daddy",
-  "One foot, then the other. That's the whole secret. — Daddy",
-  "You handle more than you give yourself credit for. Give yourself credit. — Daddy",
-  "Send it before you're sure. Sure is overrated; brave is everything. — Daddy",
-  "The list felt long, so just take the top one. Done is better than perfect. — Daddy",
-  "Your name on an application is a small act of hope. I love seeing it. — Daddy",
-  "If it was easy you wouldn't need to be brave — and look, you are. — Daddy",
-  "Take up space. You belong in that interview chair. — Daddy",
-  "Progress you can't feel is still progress you're making. Trust it. — Daddy",
-  "You are doing better than the voice in your head is telling you. — Daddy",
-  "Today doesn't have to be a big day. It just has to be a kind one. — Daddy",
-  "Whatever happens with the search, you're still my greatest pride. — Daddy",
-  "The effort is yours to give; the outcome isn't yours to carry alone. — Daddy",
-  "One application is a complete success. Don't let 'more' steal that. — Daddy",
-  "Breathe in: I can try. Breathe out: that's enough. Now tap one. — Daddy",
-  "You've come further than you can see from where you're standing. — Daddy",
-  "Steady wins this. And steady is exactly what you are. — Daddy",
-  "There's no wrong pace for healing or hunting. Yours is the right one. — Daddy",
-  "I'd rather you send one with a calm heart than ten in a panic. — Daddy",
-  "The door you're looking for opens for the people who keep knocking. — Daddy",
-  "You are not a burden for needing time. You're a person, and you're mine. — Daddy",
-  "Small and consistent beats big and burned-out. Go small today. — Daddy",
-  "Each 'apply' is you betting on yourself. Smart bet. I'd take it. — Daddy",
-  "You don't have to be fearless. You just have to be willing. You are. — Daddy",
-  "The right people will be glad you walked in. Go let them. — Daddy",
-  "Give yourself the grace you'd give anyone you love. You deserve it too. — Daddy",
-  "However today goes, you can come back tomorrow. The door stays open. — Daddy",
-  "You're allowed to want a good life. Reaching for it is not too much. — Daddy",
-  "Quiet courage is still courage. You've got more than you know. — Daddy",
-  "One honest try today. That's the assignment, and you're acing it. — Daddy",
-  "Your effort counts even when no one writes back. I'm counting it. — Daddy",
-  "Be brave for ten minutes. That's usually all a step takes. — Daddy",
-  "You are not behind your old self, your friends, or anyone. You're on time. — Daddy",
-  "The hardest worker I know is also allowed to rest. Both are true. — Daddy",
-  "Keep going gently. Gentle and forward is still forward. — Daddy",
-  "If you can read this and try one thing, today was a win. — Daddy",
-  "You're worth the wait, and you're worth the work. Now go, sweetheart. — Daddy",
-  "Whatever you get done today, come back and let me tell you I'm proud. ✦ — Daddy",
+  "Job ads are wish lists. If you match the core work, it is worth applying.",
+  "One focused application is progress. Small steps still count.",
+  "Pay not listed is a question to ask, not a reason to count yourself out.",
+  "Start with the clearest match. Momentum is easier after the first step.",
+  "A saved job is not a commitment. It is just a useful option to revisit.",
+  "If a posting feels confusing, slow down and use the checklist.",
+  "You can take this one task at a time. The app will keep track.",
+  "The goal is not a perfect search. The goal is a steady one.",
+  "A no from one employer is information, not a verdict.",
+  "Apply before doubt turns a good match into extra work.",
+  "A short, honest note is better than waiting for perfect wording.",
+  "Trust the scam checks, then make the next practical move.",
+  "Your experience does not need to match every bullet to matter.",
+  "Send the application that is ready enough. Improve the next one.",
+  "If today is busy, choose one job and save the rest.",
+  "A calm pace is still a real pace.",
+  "Every reviewed posting narrows the search.",
+  "The best next step is usually the smallest clear one.",
+  "You are allowed to ask about pay, hours, and training.",
+  "Keep the search simple: review, save, apply, follow up.",
 ];
 let _encBag = [];
 function pickEnc(){
@@ -3356,20 +3313,14 @@ function pickEnc(){
   return ENC_LINES[i];
 }
 const KIND_LINES = [
-  "That took real effort. Proud of you. ✦ — Daddy",
-  "Applied! That's a genuine step forward. ✦ — Daddy",
-  "Look at you go. One more out the door. ✦ — Daddy",
-  "Done — and it's in your weekly log too. ✦ — Daddy",
-  "That's my girl. Keep that momentum. ✦ — Daddy",
-  "Sent! That's courage you can be proud of. ✦ — Daddy",
-  "Another one in. You're on a roll. ✦ — Daddy",
-  "Yes! That's a real step toward a real job. ✦ — Daddy",
-  "Brave done quietly is still brave. Proud of you. ✦ — Daddy",
-  "That's the way. One honest try at a time. ✦ — Daddy",
-  "Logged and counted. You're building something. ✦ — Daddy",
-  "Look at you keeping promises to yourself. ✦ — Daddy",
-  "You did the scary thing. I'm beaming. ✦ — Daddy",
-  "Steady and brave — that's exactly who you are. ✦ — Daddy",
+  "Applied. That is a real step forward.",
+  "Sent and logged.",
+  "Good progress. One more application is out the door.",
+  "That application is now in your weekly log.",
+  "Momentum counts. Keep the next step simple.",
+  "Saved. You can come back to it later.",
+  "Follow-up noted.",
+  "Done. The search is more organized than it was a minute ago.",
 ];
 let toastTimer = null;
 function showToast(text, label, fn){
@@ -3866,7 +3817,7 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
       localStorage.setItem("pk_offered:" + user.id, "1");
       showToast("Add Face ID for instant sign-in next time?", "Add", function(){
         sb.auth.registerPasskey().then(function(r){
-          showToast(r.error ? "Couldn't add it — that's okay, you're still signed in." : "Face ID ready ✦ — Daddy");
+          showToast(r.error ? "Couldn't add it — that's okay, you're still signed in." : "Face ID ready");
         }).catch(function(){ showToast("Couldn't add it this time — no worries."); });
       });
     }
@@ -4296,9 +4247,11 @@ def main():
 
     base = os.path.dirname(os.path.abspath(__file__))
     web_dir = os.path.join(base, "web")
+    bundle_dir = os.path.join(base, "app", "public")
     os.makedirs(web_dir, exist_ok=True)
+    os.makedirs(bundle_dir, exist_ok=True)
     csv_path = os.path.join(base, f"admin-jobs-{datestr}.csv")
-    html_path = os.path.join(web_dir, "index.html")     # the mobile PWA
+    html_path = os.path.join(web_dir, "index.html")     # legacy fallback until Astro-only
     write_csv(sort_rows(rows), csv_path)                 # full audit incl. hidden
     # Portal config never reaches a --mock page: canned data must not gain a
     # sign-in surface, and a mock page must never be deployed anyway.
@@ -4307,6 +4260,9 @@ def main():
     write_html(safe, len(hidden), len(rows), html_path, human,
                contact=args.contact, contact_phone=args.contact_phone,
                portal_cfg=portal_cfg, sentry_cfg=sentry_cfg)
+    write_jobs_bundle(safe, len(hidden), len(rows), bundle_dir, human,
+                      contact=args.contact, contact_phone=args.contact_phone,
+                      portal_cfg=portal_cfg)
 
     if args.push_supabase:
         if args.mock:

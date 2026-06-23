@@ -7,6 +7,23 @@ __pycache__/
 .add_secret_status.json
 push_secrets_to_github.py
 web/index.html
+web/_astro/
+web/jobs.json
+web/meta.json
+web/portal.json
+web/favicon.ico
+web/favicon.svg
+web/rudy.jpg
+app/public/jobs.json
+app/public/meta.json
+app/public/portal.json
+
+# Local agent/editor runtime state. Keep product source, CI config, and checked-in
+# Claude settings separate from per-machine automation scratch files.
+.agent/
+.codex/
+.cursor/
+.omc/
 
 # Supabase CLI local state (keep config.toml + functions/ tracked)
 supabase/.temp/
@@ -28,3 +45,5 @@ verify/css/_page.html
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
+
+local-serve/

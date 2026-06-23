@@ -6,7 +6,7 @@ loop's eyes: run it after any change; exit 0 means every check passed.
 
 ```bash
 pip install -r verify/requirements.txt   # playwright (verify-only; NOT a runtime dep)
-python verify/camera.py                   # build --mock + shoot + inspect
+python verify/camera.py                   # --mock scan + `cd app && npm run build` + shoot + inspect at /dsm-jobs/
 python verify/camera.py --no-build        # inspect the existing web/ build
 ```
 

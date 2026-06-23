@@ -52,8 +52,8 @@ jobs:
           PAGE="published/index.html"
 
           # 1) Published content is the real app (read from the gh-pages checkout)
-          if [ -f "$PAGE" ] && grep -q "Job Board" "$PAGE"; then ok "published build has the app"
-          else bad "published build missing 'Job Board' (file: $([ -f "$PAGE" ] && echo present || echo MISSING))"; fi
+          if [ -f "$PAGE" ] && grep -q "Jobs for you" "$PAGE"; then ok "published build has the app"
+          else bad "published build missing 'Jobs for you' (file: $([ -f "$PAGE" ] && echo present || echo MISSING))"; fi
 
           # 2) Freshness: the daily scan embeds the build date in the inline JSON
           #    as  "generated": "YYYY-MM-DD HH:MM"  (the visible "· updated ..."
