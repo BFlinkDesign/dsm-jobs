@@ -88,3 +88,7 @@ def test_service_worker_only_caches_same_origin_gets():
     sw = _read("app/public/sw.js")
     assert "const url = new URL(req.url);" in sw
     assert "if (url.origin !== self.location.origin) return;" in sw
+
+
+def test_github_pages_serves_astro_underscore_assets():
+    assert (ROOT / "app/public/.nojekyll").is_file()

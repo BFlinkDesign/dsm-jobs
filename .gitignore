@@ -11,6 +11,7 @@ web/_astro/
 web/jobs.json
 web/meta.json
 web/portal.json
+web/.nojekyll
 web/favicon.ico
 web/favicon.svg
 web/rudy.jpg
