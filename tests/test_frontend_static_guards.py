@@ -82,3 +82,9 @@ def test_pre_publish_gate_checks_meta_json_before_reading():
     assert 'mp = web / "meta.json"' in scan
     assert "if not mp.exists()" in scan
     assert 'mp.read_text(encoding="utf-8")' in scan
+
+
+def test_service_worker_only_caches_same_origin_gets():
+    sw = _read("app/public/sw.js")
+    assert "const url = new URL(req.url);" in sw
+    assert "if (url.origin !== self.location.origin) return;" in sw
