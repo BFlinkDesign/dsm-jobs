@@ -1,7 +1,7 @@
 # Plan — iPad/iPhone PWA redesign (wireframe-first, Relume++ process)
 
 **Date:** 2026-06-22  
-**Status:** DRAFT — awaiting D1–D4 confirmations  
+**Status:** PARTIALLY SHIPPED — Astro goth shell live on branch; see `docs/HANDOFF.md` for session closure. **Open:** collapsible `FilterSheet`, iPad layouts, camera per-device matrix.
 **Goal:** Calm-premium mobile product for one end user — scam-vetted jobs, Rudy companion, résumé tailor — optimized for **iPhone + iPad**, built with a real design process and maintainable front-end.
 
 ---

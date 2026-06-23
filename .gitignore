@@ -37,3 +37,5 @@ verify/css/_page.html
 .claude/*
 !.claude/settings.json
 !.claude/hooks/
+
+local-serve/

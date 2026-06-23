@@ -1,5 +1,7 @@
 # Portal (Supabase) — scaffold
 
+**Session handoff (2026-06-22):** see `docs/HANDOFF.md` for full operator checklist.
+
 Multi-user portal (~5 invited users) on Supabase: shared jobs feed, per-user
 **Applied** status + dates, per-job **conversation notes** (interview-prep log),
 Google + email magic-link sign-in. AI chat comes **after** the portal works
@@ -50,29 +52,25 @@ setup steps below remain the canonical runbook for re-creating or auditing it.
   device's existing `myjobs:v1` state (applied/saved/hidden/notes) into the
   user's rows, then keeps localStorage as offline cache.
 
-## Build order (queued)
+## Status update (2026-06-22): Astro PWA is the shipped app
 
-1. Scanner upsert: `--push-supabase` flag posting rows to `jobs` (service key).
-2. Web app auth + remote status/notes sync (publishable key, supabase-js via
-   CDN to stay build-free; pin the version).
-3. localStorage → portal import on first sign-in.
-4. AI chat Edge Function (Anthropic API; per-user rate cap; AFTER the above).
+The live product is the **Astro PWA** in `app/` → built to `web/` on deploy.
+Auth, profile blob sync (`user_profile`), per-job notes (`job_notes`), Rudy chat
+(`chat_messages`), passkeys, magic-link sign-in, and follow-up tracking all run
+through `app/src/scripts/*.ts`. The legacy `APP_TEMPLATE` HTML in
+`find_admin_jobs.py` is still generated during scan but **overwritten** by the
+Astro build — do not treat it as the product surface.
 
-## Status update (2026-06-12): 1–3 are BUILT, 4 is staged
+**Sync model:** applied/saved/hidden/snoozed/followUps/filters/commute live in
+the `user_profile.profile` JSON blob (plus `job_notes` + `chat_messages` tables).
+The legacy `user_job_status` table is **migrate-only** on first sign-in.
 
-All three build-order items now live in the app template (`find_admin_jobs.py`):
-sign-in bar (magic link + Google), pull/merge/push sync with union semantics,
-and the implicit localStorage import (first sync pushes everything local the
-server didn't have). The scanner upsert is `--push-supabase` (transport in
-`push.py`), already passed by the daily CD — it self-disables until secrets
-exist. The page embeds supabase-js 2.108.1 pinned + SRI-locked, only when
-`SUPABASE_URL` + `SUPABASE_PUBLISHABLE_KEY` are set at build time.
+## Build order (historical)
 
-The companion (item 4) lives at `../supabase/functions/companion/index.ts`
-(the Supabase-CLI standard path, deployed with `supabase functions deploy`) — see the
-header comment for deploy + the guardrails baked into its system prompt
-(support tool, NOT therapy; verified crisis numbers; profile learning via a
-`save_profile` tool that feeds the app's For-you ranking).
+1. Scanner upsert: `--push-supabase` flag posting rows to `jobs` (service key). **Done**
+2. Web app auth + remote sync. **Done (Astro)**
+3. localStorage → portal import on first sign-in. **Done**
+4. AI chat Edge Function. **Done (`companion`, `resume-tailor`)**
 
 ### Activation checklist (one sitting, off the office network — the firewall
 ### geo-blocks auth.supabase.io)
@@ -84,3 +82,66 @@ header comment for deploy + the guardrails baked into its system prompt
    `SUPABASE_PUBLISHABLE_KEY` — next daily run lights up sign-in + jobs push.
 4. Companion: `supabase functions deploy companion` +
    `supabase secrets set ANTHROPIC_API_KEY=...` (masked dialog, never chat).
+
+## Supabase CLI (Windows operator)
+
+Local config lives in `supabase/` (tracked): `config.toml` pins
+`project_id = tcclohxvhmwgjrtdkkuw`, plus migrations and edge functions.
+Link state is gitignored under `supabase/.temp/` (created by `supabase link`).
+
+**Eagle network (CNC-1):** `supabase login` redirects to `auth.supabase.io`,
+which the firewall blocks. **Skip CLI login** — the project was configured with
+`.env` keys from the first build, not CLI auth. Put these in repo-root `.env`
+(copy from the legacy Desktop folder if needed; never commit):
+
+- `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_PUBLISHABLE_KEY` (scanner +
+  PWA build)
+- `SUPABASE_ACCESS_TOKEN` (Management API — full schema verify without CLI)
+- optional: `SUPABASE_DB_PASSWORD` (direct Postgres if you need it)
+
+Schema changes: paste `portal/schema.sql` in the **dashboard SQL editor** from
+a device that can reach the dashboard, or use the Management API with your
+access token. `api.supabase.com` and `<ref>.supabase.co` work from Eagle; only
+`auth.supabase.io` is blocked.
+
+**Verify schema (no login):**
+
+```powershell
+.\scripts\verify_supabase_schema.ps1
+```
+
+Loads `.env` from the repo root (then
+`C:\Users\Brady.EAGLE\Desktop\admin-job-finder\.env` as fallback). With
+`SUPABASE_ACCESS_TOKEN` it runs read-only SQL via `api.supabase.com` (tables,
+RLS flags, policy counts). With only `SUPABASE_SERVICE_KEY` it probes tables
+via PostgREST (partial — RLS not checked). Publishable key alone is not enough.
+
+**Optional CLI** (off-network or when `auth.supabase.io` is reachable):
+
+```powershell
+npm install -g supabase   # if supabase --version fails
+supabase login            # opens browser → auth.supabase.io
+supabase link --project-ref tcclohxvhmwgjrtdkkuw
+supabase db query --linked "SELECT 1"
+```
+
+Non-interactive CLI alternative: set `SUPABASE_ACCESS_TOKEN` in `.env` or
+user env (personal access token from
+https://supabase.com/dashboard/account/tokens), then `supabase link` (still
+needs the project database password once).
+
+## Sentry (browser + edge monitoring)
+
+The Astro app reads **`SENTRY_DSN`** at build time (`app/astro.config.mjs` →
+`index.astro`). When unset, monitoring is a clean no-op — the app still ships.
+
+**GitHub Actions:** set a repo **Variable** named `SENTRY_DSN` (not a secret —
+the browser DSN is publishable). `.github/workflows/scan.yml` already passes
+`SENTRY_DSN: ${{ vars.SENTRY_DSN }}` into the Astro build step and uses the
+same value for Sentry Cron check-ins on the daily scan. Leave the variable empty
+until you have a project DSN from https://sentry.io — then paste the browser
+DSN (starts with `https://`) into **Settings → Secrets and variables → Actions
+→ Variables**.
+
+Edge functions (`companion`, `resume-tailor`) gate on the same `SENTRY_DSN`
+Supabase secret when deployed.

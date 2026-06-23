@@ -42,12 +42,51 @@ export type FollowUp = {
   done: boolean;
 };
 
+export type FilterPrefs = {
+  searchQ: string;
+  filterRemote: "all" | "local" | "remote";
+  filterPay: boolean;
+  filterSaved: boolean;
+  filterApplied: boolean;
+  filterTrain: boolean;
+  filterTrusted: boolean;
+  filterCategory: string;
+  showHidden: boolean;
+};
+
+export function defaultFilters(): FilterPrefs {
+  return {
+    searchQ: "",
+    filterRemote: "all",
+    filterPay: false,
+    filterSaved: false,
+    filterApplied: false,
+    filterTrain: false,
+    filterTrusted: false,
+    filterCategory: "",
+    showHidden: false,
+  };
+}
+
+export type AppliedEntry = {
+  t: string;   // job title (captured at apply time so log survives job leaving feed)
+  c: string;   // company
+  d: string;   // ISO date applied
+  u: string;   // apply URL
+  ts?: string; // ISO timestamp (for finer sort/display)
+};
+
 export type AppState = {
   applied: Record<string, boolean>;
   saved: Record<string, boolean>;
   hidden: Record<string, boolean>;
+  snoozedUntil: Record<string, string>;  // id -> ISO date; job hidden until >= this date
+  notes: Record<string, string>;          // per-job text notes (synced to job_notes table)
   followUps: Record<string, FollowUp>;
-  appliedLog: Record<string, string>;
+  appliedLog: Record<string, AppliedEntry>;
+  followAlertDay: string;                 // last day follow-up browser notifications fired
+  seen: string[];                         // job ids from previous visit (for "New" badges)
+  filters: FilterPrefs;
   profile: {
     preferredName: string;
     legalName: string;

@@ -20,7 +20,7 @@
   /* Ink on dark */
   --ink: #f5f0ff;
   --ink-soft: #c4b5d8;
-  --ink-muted: #8b7fa3;
+  --ink-muted: #a094bc;
   --line: #2d2440;
 
   /* Semantic */
@@ -53,13 +53,13 @@
   --ring: 0 0 0 3px var(--purple-glow);
 
   /* Type */
-  --font-display: "Cinzel", Georgia, serif;
+  --font-display: "Playfair Display", Georgia, serif;
   --font-body: "Atkinson Hyperlegible", system-ui, sans-serif;
   --text-xs: 0.75rem;
-  --text-sm: 0.875rem;
+  --text-sm: 0.9375rem;
   --text-base: 1.0625rem;
   --text-lg: 1.25rem;
-  --text-xl: 1.5rem;
+  --text-xl: 1.5625rem;
 
   /* Space (4px grid) */
   --space-1: 4px;

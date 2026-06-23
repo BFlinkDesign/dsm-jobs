@@ -79,9 +79,10 @@ body::after {
 .brand h1 {
   margin: 0;
   font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: 600;
-  letter-spacing: 0.04em;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.15;
   background: var(--glitter-gradient);
   background-size: 200% auto;
   -webkit-background-clip: text;
@@ -258,6 +259,7 @@ body::after {
   margin: 0;
   font-size: var(--text-lg);
   font-weight: 700;
+  line-height: 1.3;
   color: var(--ink);
 }
 .job-meta {
@@ -369,6 +371,62 @@ body::after {
   color: var(--ink-muted);
   margin: var(--space-4) 0 var(--space-2);
 }
+.filter-label:first-of-type {
+  margin-top: var(--space-2);
+}
+.quiz-q {
+  font-weight: 700;
+  margin: var(--space-4) 0 var(--space-2);
+}
+.quiz-opts {
+  margin-bottom: var(--space-2);
+}
+.quiz-done {
+  color: var(--purple-spark);
+  margin-top: var(--space-3);
+}
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}
+.auth-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--purple-spark);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.auth-link:hover,
+.auth-link:focus-visible {
+  color: var(--ink);
+}
+.auth-link--block {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-top: var(--space-4);
+}
+.auth-divider {
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+  margin: var(--space-4) 0 var(--space-2);
+}
+.auth-err {
+  color: var(--danger, #ff6b8a);
+}
+.call-btn {
+  display: block;
+  width: 100%;
+  text-align: center;
+  margin-bottom: var(--space-3);
+}
 .chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -391,6 +449,8 @@ body::after {
   font-family: var(--font-display);
   margin: 0 0 var(--space-3);
   font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 .lock-screen p {
   color: var(--ink-soft);
@@ -533,6 +593,8 @@ body::after {
 .modal h2 {
   margin: 0 0 var(--space-2);
   font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 .field {
   width: 100%;
@@ -551,6 +613,44 @@ body::after {
   box-shadow: var(--ring);
 }
 
+.field-password {
+  position: relative;
+  margin-top: var(--space-3);
+}
+.field-password .field {
+  margin-top: 0;
+  padding-right: 52px;
+}
+.field-password-toggle {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-muted);
+  cursor: pointer;
+}
+.field-password-toggle:hover {
+  color: var(--purple-spark);
+}
+.field-password-toggle:focus-visible {
+  outline: none;
+  color: var(--purple-bright);
+  box-shadow: var(--ring);
+}
+.field-password-icon {
+  display: block;
+  pointer-events: none;
+}
+
 /* ── Crisis — always visible, never gated ─────────────────────────────── */
 .crisis {
   margin-top: var(--space-6);
@@ -561,6 +661,49 @@ body::after {
 }
 .crisis b { color: var(--ink); }
 .crisis a { color: var(--purple-spark); }
+
+/* ── Lock screen crisis lines — always visible, never behind a gate ──────── */
+.lock-crisis {
+  font-size: var(--text-xs);
+  color: var(--ink-soft);
+  margin-top: var(--space-4);
+  line-height: 1.6;
+}
+.lock-crisis a { color: var(--purple-spark); font-weight: 700; }
+
+/* ── Rudy overlay crisis footer ────────────────────────────────────────── */
+.rudy-crisis {
+  font-size: var(--text-xs);
+  color: var(--ink-muted);
+  padding: var(--space-2) 0 0;
+  text-align: center;
+  line-height: 1.6;
+  border-top: 1px solid var(--line);
+  margin-top: var(--space-2);
+}
+.rudy-crisis a { color: var(--purple-spark); font-weight: 700; }
+
+/* ── Iowa work-search log print area — screen: invisible; print: all that shows ── */
+#print-worklog { display: none; }
+
+@media print {
+  body { background: #fff !important; color: #000 !important; }
+  body::before, body::after { display: none !important; }
+  .app, .nav-bottom, .nav-side, .topbar, .toast,
+  .rudy-overlay, .modal-back { display: none !important; }
+  #print-worklog {
+    display: block !important;
+    color: #000;
+    padding: 16px;
+    font-family: Georgia, serif;
+  }
+  #print-worklog h1 { font-size: 18px; margin: 0 0 4px; }
+  #print-worklog p { font-size: 12px; margin: 0 0 10px; line-height: 1.5; }
+  #print-worklog table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  #print-worklog th,
+  #print-worklog td { border: 1px solid #444; padding: 6px 8px; text-align: left; vertical-align: top; }
+  #print-worklog th { background: #eee; }
+}
 
 /* ── Inputs — no Save buttons; fields autosave on blur/input ─────────────── */
 .field-hint {
@@ -584,11 +727,16 @@ body::after {
   margin: 0 0 8px;
   font-family: var(--font-display);
   font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
 }
 .section-title {
   margin: 0 0 8px;
   font-size: var(--text-base);
   font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.01em;
 }
 .help-list {
   padding-left: 1.2rem;
@@ -633,4 +781,250 @@ body::after {
 .bubble.think {
   opacity: 0.7;
   font-style: italic;
+}
+
+/* ── Per-job notes textarea ─────────────────────────────────────────────── */
+.notes-area {
+  width: 100%;
+  margin-top: var(--space-3);
+  padding: 8px 10px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 52px;
+}
+.notes-area:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.notes-area::placeholder { color: var(--ink-muted); }
+
+/* ── Affirmation on Today view ──────────────────────────────────────────── */
+.affirmation {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-size: var(--text-sm);
+  color: var(--ink-soft);
+  line-height: 1.5;
+  margin: 0 0 4px;
+  border-left: 3px solid var(--accent);
+  padding-left: 10px;
+}
+
+/* ── Follow-up due badge on nav tabs ────────────────────────────────────── */
+.tab { position: relative; }
+.follow-badge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 4px;
+  border-radius: var(--radius-full);
+  min-width: 16px;
+  text-align: center;
+}
+
+/* ── Follow-up due banner in My apps ───────────────────────────────────── */
+.follow-alert {
+  background: color-mix(in srgb, var(--accent) 18%, var(--surface));
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--ink);
+}
+
+/* ── Hidden job card (dim when shown in show-all mode) ──────────────────── */
+.card-hidden {
+  opacity: 0.55;
+  filter: grayscale(25%);
+}
+
+/* ── Rudy voice controls ────────────────────────────────────────────────── */
+.rudy-voice-btn {
+  padding: 8px;
+  min-width: 0;
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.rudy-voice-btn.on,
+.rudy-voice-btn[aria-pressed="false"] {
+  color: var(--ink-muted);
+}
+.rudy-voice-btn[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+/* ── Rudy "Listening…" indicator ────────────────────────────────────────── */
+.rudy-listen {
+  font-size: var(--text-xs);
+  color: var(--accent);
+  text-align: center;
+  margin: 4px 0 0;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rudy-listen { animation: none; }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+/* ── Small secondary button variant ────────────────────────────────────── */
+.btn-sm {
+  font-size: var(--text-xs);
+  padding: 4px 10px;
+  min-height: 28px;
+}
+
+/* ── PWA install footer ─────────────────────────────────────────────────── */
+.app-foot {
+  padding: var(--space-4) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom));
+  text-align: center;
+}
+.install-btn {
+  margin-top: var(--space-2);
+  border-radius: 999px;
+}
+
+/* ── Spooky résumé tailor loader ────────────────────────────────────────── */
+.spookload { padding: 6px 2px 2px; }
+.spooksky {
+  position: relative;
+  height: 64px;
+  margin: 4px 0 16px;
+  border-radius: 14px;
+  overflow: hidden;
+  background:
+    radial-gradient(ellipse 120% 90% at 82% 12%, rgba(147, 51, 234, 0.24), transparent 60%),
+    linear-gradient(180deg, #130d20, #0e0a16);
+  border: 1px solid var(--line);
+}
+.spookmoon {
+  position: absolute;
+  right: 16px;
+  top: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 36% 34%, #f3ecff, #c9a8ff 60%, #7e22ce);
+  box-shadow: 0 0 22px rgba(201, 168, 255, 0.6);
+}
+.bat {
+  position: absolute;
+  left: -30px;
+  line-height: 1;
+  filter: drop-shadow(0 0 5px rgba(168, 85, 247, 0.55));
+  will-change: left, transform;
+  animation: batfly linear infinite;
+}
+.bat.b1 { top: 8%; font-size: 20px; animation-duration: 3.4s; animation-delay: -0.2s; }
+.bat.b2 { top: 44%; font-size: 14px; opacity: 0.85; animation-duration: 4.6s; animation-delay: -1.6s; }
+.bat.b3 { top: 62%; font-size: 16px; opacity: 0.9; animation-duration: 2.9s; animation-delay: -2.4s; }
+@keyframes batfly {
+  0% { left: -30px; transform: translateY(0) rotate(-5deg); }
+  25% { transform: translateY(-9px) rotate(5deg); }
+  50% { transform: translateY(5px) rotate(-5deg); }
+  75% { transform: translateY(-7px) rotate(5deg); }
+  100% { left: calc(100% + 30px); transform: translateY(0) rotate(-5deg); }
+}
+.spookbar {
+  height: 11px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  overflow: hidden;
+}
+.spookbar i {
+  display: block;
+  height: 100%;
+  width: 0;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #6b21a8, #9333ea, #c084fc);
+  box-shadow: 0 0 14px rgba(168, 85, 247, 0.7);
+  transition: width 0.35s cubic-bezier(0.3, 0.7, 0.3, 1);
+}
+.spookmsg {
+  margin-top: 11px;
+  text-align: center;
+  color: var(--purple-spark);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+@media (prefers-reduced-motion: reduce) {
+  .bat { display: none; }
+}
+
+.banner {
+  margin: 0 0 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+.banner-offline {
+  background: rgba(180, 83, 9, 0.15);
+  border: 1px solid rgba(251, 191, 36, 0.35);
+  color: var(--ink);
+}
+.banner-stale {
+  background: rgba(124, 58, 237, 0.12);
+  border: 1px solid var(--line);
+  color: var(--ink2);
+}
+.newtag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--purple-spark);
+  color: #fff;
+  margin-left: 6px;
+}
+.traintag {
+  font-size: var(--text-xs);
+  color: var(--purple-spark);
+  margin-left: 6px;
+}
+.follow-block .follow-field {
+  width: 100%;
+  margin-top: 6px;
+}
+.script summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--purple-spark);
+}
+.script blockquote {
+  margin: 8px 0 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--purple-spark);
+  font-size: var(--text-sm);
+  color: var(--ink2);
+}
+.toast-undo {
+  margin-left: 8px;
+  text-decoration: underline;
+  font-weight: 700;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
 }

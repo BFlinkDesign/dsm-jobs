@@ -1,9 +1,18 @@
 // @ts-check
-import { defineConfig } from "astro/config";
+import { defineConfig, envField } from "astro/config";
 
 export default defineConfig({
   base: "/dsm-jobs/",
   outDir: "../web",
+  env: {
+    schema: {
+      SENTRY_DSN: envField.string({
+        context: "server",
+        access: "public",
+        optional: true,
+      }),
+    },
+  },
   build: {
     assets: "_astro",
     inlineStylesheets: "auto",

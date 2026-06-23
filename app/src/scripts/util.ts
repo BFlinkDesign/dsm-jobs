@@ -35,6 +35,39 @@ export function todayISO(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
+export function weekStart(): string {
+  const d = new Date();
+  d.setDate(d.getDate() - d.getDay()); // back to Sunday (Iowa week runs Sun–Sat)
+  return d.toISOString().slice(0, 10);
+}
+
+export function fmtStamp(ts: string | undefined, date: string): string {
+  if (ts) {
+    const dt = new Date(ts);
+    if (!isNaN(dt.getTime())) {
+      return dt.toLocaleString([], { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+    }
+  }
+  return date || "";
+}
+
+export function daysSince(iso: string): number | null {
+  if (!iso) return null;
+  const t = Date.parse(String(iso).slice(0, 10) + "T12:00:00");
+  if (Number.isNaN(t)) return null;
+  return Math.floor((Date.now() - t) / 86400000);
+}
+
+export function ago(iso: string): string {
+  const d = daysSince(iso);
+  if (d == null) return "";
+  if (d < 1) return "today";
+  if (d === 1) return "yesterday";
+  if (d < 7) return `${d} days ago`;
+  const w = Math.floor(d / 7);
+  return `${w} week${w === 1 ? "" : "s"} ago`;
+}
+
 export function relativePosted(posted: string): string {
   if (!posted) return "";
   const t = Date.parse(posted);
