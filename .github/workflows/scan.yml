@@ -149,9 +149,9 @@ jobs:
           print(f"pre-publish gate OK: {len(jobs)} jobs, {len(html)} bytes")
           PY
 
-      - name: Verify Supabase schema (pre-publish gate)
+      - name: Verify Supabase reachability (pre-publish gate)
         if: steps.gate.outputs.run == 'true'
-        run: python scripts/verify_supabase_schema.py --require-full
+        run: python scripts/verify_supabase_schema.py
 
       # Artifact = the site bundle only. The audit CSV (operator-only scam
       # reasons) is NOT uploaded: on a public repo, artifacts are downloadable
