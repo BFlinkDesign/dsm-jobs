@@ -456,6 +456,7 @@ function followUpHtml(j: Job): string {
     }
   }
   html += `<details class="follow-edit" style="margin-top:8px"><summary>Edit contact</summary>`;
+  html += `<label class="field-hint follow-date-label">Follow up on <input class="field follow-field" data-follow-date="${esc(j.id)}" type="date" value="${esc(fu.on)}" min="${esc(todayISO())}" /></label>`;
   html += `<input class="field follow-field" data-follow-name="${esc(j.id)}" placeholder="Contact name" value="${esc(fu.name)}" />`;
   html += `<input class="field follow-field" data-follow-phone="${esc(j.id)}" type="tel" placeholder="Phone" value="${esc(fu.phone)}" />`;
   html += `<input class="field follow-field" data-follow-email="${esc(j.id)}" type="email" placeholder="Email" value="${esc(fu.email)}" />`;
@@ -486,7 +487,7 @@ function jobCard(j: Job): string {
     ${j.about ? `<p class="job-meta">${esc(j.about)}</p>` : ""}
     <div class="job-actions">
       ${applied
-    ? `<span class="badge-safe">Applied</span>`
+    ? `<span class="badge-safe">Applied</span><button type="button" class="btn btn-ghost btn-sm" data-unapply="${esc(j.id)}">Undo applied</button>`
     : authed
       ? `<button type="button" class="btn btn-primary" data-apply="${esc(j.id)}">Mark applied</button>`
       : `<button type="button" class="btn btn-ghost" data-needs-auth>Sign in to apply</button>`}
@@ -779,7 +780,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-save], [data-remind], [data-remote], [data-commute], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-tailor], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-tailor], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -919,6 +920,31 @@ function handleViewClick(e: Event): void {
     });
     return;
   }
+  if (t.hasAttribute("data-unapply")) {
+    const id = t.getAttribute("data-unapply")!;
+    const prev = {
+      applied: !!getState().applied[id],
+      log: getState().appliedLog[id] ? { ...getState().appliedLog[id] } : undefined,
+      fu: getState().followUps[id] ? { ...getState().followUps[id] } : undefined,
+    };
+    patchState((s) => {
+      delete s.applied[id];
+      delete s.appliedLog[id];
+      delete s.followUps[id];
+    });
+    autosave();
+    render();
+    toast("Applied status removed", () => {
+      patchState((s) => {
+        if (prev.applied) s.applied[id] = true;
+        if (prev.log) s.appliedLog[id] = prev.log;
+        if (prev.fu) s.followUps[id] = prev.fu;
+      });
+      autosave();
+      render();
+    });
+    return;
+  }
   if (t.hasAttribute("data-save")) {
     const id = t.getAttribute("data-save")!;
     patchState((s) => { s.saved[id] = !s.saved[id]; });
@@ -931,7 +957,10 @@ function handleViewClick(e: Event): void {
     const days = Number(t.getAttribute("data-days"));
     patchState((s) => {
       const fu = s.followUps[id];
-      if (fu) fu.on = addDaysISO(s.appliedLog[id]?.d || todayISO(), days);
+      if (fu) {
+        fu.on = addDaysISO(s.appliedLog[id]?.d || todayISO(), days);
+        fu.done = false;
+      }
     });
     autosave();
     render();
@@ -1079,6 +1108,21 @@ function bindViewHost(): void {
       const id = t.getAttribute("data-follow-email")!;
       patchState((s) => { const fu = s.followUps[id]; if (fu) fu.email = (t as HTMLInputElement).value; });
       autosave();
+      return;
+    }
+    if (t.hasAttribute("data-follow-date")) {
+      const id = t.getAttribute("data-follow-date")!;
+      const value = (t as HTMLInputElement).value;
+      patchState((s) => {
+        const fu = s.followUps[id];
+        if (fu && value) {
+          fu.on = value;
+          fu.done = false;
+        }
+      });
+      autosave();
+      refreshJobsView();
+      renderFollowBadge();
       return;
     }
     if (t.id === "filter-category") {
