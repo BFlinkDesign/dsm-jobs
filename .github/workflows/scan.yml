@@ -95,7 +95,7 @@ jobs:
         shell: bash
         run: |
           start=$SECONDS
-          timeout 540s python find_admin_jobs.py --contact "Daddy" --push-supabase
+          timeout 540s python find_admin_jobs.py --contact "Brady" --push-supabase
           echo "Build mobile job app completed in $((SECONDS - start))s"
 
       - name: Set up Node
