@@ -475,6 +475,20 @@ body::after {
   text-align: center;
   margin-bottom: var(--space-3);
 }
+@media (max-width: 859px) {
+  .call-btn {
+    position: fixed;
+    left: var(--space-4);
+    right: var(--space-4);
+    bottom: calc(var(--nav-h) + var(--safe-bottom) + 12px);
+    z-index: 45;
+    width: auto;
+    box-shadow: var(--shadow-lg);
+  }
+  .app-foot .field-hint {
+    display: none;
+  }
+}
 .chip-row {
   display: flex;
   flex-wrap: wrap;
@@ -578,6 +592,18 @@ body::after {
   display: flex;
   gap: var(--space-2);
   padding-top: var(--space-3);
+}
+.rudy-prompts {
+  display: flex;
+  gap: var(--space-2);
+  overflow-x: auto;
+  padding: 0 0 var(--space-2);
+  scrollbar-width: none;
+}
+.rudy-prompts::-webkit-scrollbar { display: none; }
+.rudy-prompts .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
 }
 .rudy-input {
   flex: 1;
@@ -1004,6 +1030,19 @@ body::after {
 .rudy-voice-btn[aria-pressed="true"] {
   color: var(--accent);
 }
+.rudy-tone-btn {
+  min-width: 0;
+  padding: 8px 10px;
+  border-color: var(--line);
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+}
+.rudy-tone-btn[aria-pressed="true"],
+.rudy-tone-btn.on {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent), transparent 42%);
+  background: color-mix(in srgb, var(--accent), transparent 88%);
+}
 
 /* ── Rudy "Listening…" indicator ────────────────────────────────────────── */
 .rudy-listen {
@@ -1030,7 +1069,7 @@ body::after {
 
 /* ── PWA install footer ─────────────────────────────────────────────────── */
 .app-foot {
-  padding: var(--space-4) var(--space-4) calc(var(--space-6) + env(safe-area-inset-bottom));
+  padding: var(--space-4) var(--space-4) calc(var(--nav-h) + var(--safe-bottom) + var(--space-6));
   text-align: center;
 }
 .install-btn {

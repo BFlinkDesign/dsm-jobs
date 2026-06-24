@@ -1,15 +1,15 @@
-// Anti-confabulation grounding for the companion (Ruby), extracted from index.ts
+// Anti-confabulation grounding for the companion (Rudy), extracted from index.ts
 // so it can be unit-tested WITHOUT importing the function's Deno.serve entrypoint
 // (importing index.ts would start the HTTP server). Supabase bundles sibling files
 // in a function directory, so this deploys with companion unchanged.
 //
 // knownFacts builds the ONLY record of her the model may use: a baseline truth
-// (set by Brady, not assumable by the model) plus facts she actually stated, each
+// (set by Daddy, not assumable by the model) plus facts she actually stated, each
 // source-tagged. `time`/availability is governed ONLY by the baseline line, so a
 // stale stored value can never reopen "open on hours".
 export function knownFacts(profile: Record<string, unknown> | null | undefined): string {
   const lines = [
-    "- availability: she needs DAYTIME hours (she is raising her son); flexible ONLY if the job is remote. She is NOT open on hours for in-person work. [set by Brady]",
+    "- availability: she needs DAYTIME hours (she is raising her son); flexible ONLY if the job is remote. She is NOT open on hours for in-person work. [set by Daddy]",
   ];
   const labels: Record<string, string> = {
     kind: "kind of work she likes",

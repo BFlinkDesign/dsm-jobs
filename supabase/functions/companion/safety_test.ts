@@ -1,6 +1,6 @@
 // Structural regression guard for the companion's safety-critical content.
 //
-// HONEST SCOPE: this is NOT a behavioral test that Ruby actually routes a user in
+// HONEST SCOPE: this is NOT a behavioral test that Rudy actually routes a user in
 // crisis to the right place — that requires a live-model eval (the behavioral half,
 // tracked separately). What this DOES guarantee is that the verified crisis
 // resources, the not-a-therapist boundary, the locked CORS origin, and the
@@ -22,6 +22,13 @@ Deno.test("verified crisis resources are present verbatim (988 / Your Life Iowa)
 Deno.test("the not-a-therapist + no-advice boundary is present", () => {
   assertStringIncludes(src, "NOT a therapist");
   assertStringIncludes(src, "No financial, legal, or medical advice");
+});
+
+Deno.test("spicy tone is explicit opt-in and never sexual or unsafe", () => {
+  assertStringIncludes(src, "body?.spicy === true");
+  assertStringIncludes(src, "SPICY_TONE_PROMPT");
+  assertStringIncludes(src, "Spicy never means sexual");
+  assertStringIncludes(src, "The HARD RULES, crisis routing, anti-confabulation");
 });
 
 Deno.test("CORS is locked to the production origin", () => {
