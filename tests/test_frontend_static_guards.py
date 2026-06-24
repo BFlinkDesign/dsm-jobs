@@ -91,6 +91,14 @@ def test_health_monitor_reads_published_meta_json_for_freshness():
     assert 'grep -oE \'"generated": *"[0-9]{4}-[0-9]{2}-[0-9]{2}\' "$PAGE"' not in health
 
 
+def test_mobile_bottom_nav_does_not_show_content_underneath():
+    css = _read("app/src/styles/app.css")
+    assert "calc(var(--nav-h) + var(--safe-bottom) + var(--space-8))" in css
+    assert ".nav-bottom" in css
+    assert "background: var(--paper);" in css
+    assert "box-shadow: 0 -12px 28px" in css
+
+
 def test_service_worker_only_caches_same_origin_gets():
     sw = _read("app/public/sw.js")
     assert "const url = new URL(req.url);" in sw
