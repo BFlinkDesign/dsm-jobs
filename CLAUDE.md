@@ -13,7 +13,7 @@ A job finder built **for one specific end user** on three hard design constraint
 ## Commands
 
 ```bash
-python find_admin_jobs.py --contact "Daddy"     # live scan -> web/index.html + audit CSV (needs .env keys)
+python find_admin_jobs.py --contact "Brady"     # live scan -> web/index.html + audit CSV (needs .env keys)
 python find_admin_jobs.py --mock                 # full pipeline on canned data, no API key
 python find_admin_jobs.py --min-hourly 20        # raise the wage floor
 python find_admin_jobs.py --contact-phone "+1515..."  # adds a tel: "call" button to the page

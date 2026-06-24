@@ -1384,8 +1384,8 @@ function isPasswordRecoveryHash(): boolean {
 function renderCallButton(): void {
   const btn = $("#call-btn");
   if (!btn) return;
-  const rawWho = meta.contact?.trim() || "Daddy";
-  const who = /^(brady|me)$/i.test(rawWho) ? "Daddy" : rawWho;
+  const rawWho = meta.contact?.trim() || "Brady";
+  const who = /^me$/i.test(rawWho) ? "Brady" : rawWho;
   if (meta.phone?.trim()) {
     const tel = meta.phone.replace(/[^0-9+]/g, "");
     btn.setAttribute("href", `tel:${tel}`);

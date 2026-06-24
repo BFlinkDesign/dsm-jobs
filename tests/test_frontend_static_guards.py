@@ -57,7 +57,7 @@ def test_rudy_voice_and_spicy_modes_are_explicit_opt_in():
     assert "Spicy never means sexual" in fn
     assert "HARD RULES, crisis routing, anti-confabulation" in fn
     assert "private life-and-job app that Daddy built" in fn
-    assert '/^(brady|me)$/i.test(rawWho) ? "Daddy" : rawWho' in app
+    assert '/^me$/i.test(rawWho) ? "Brady" : rawWho' in app
 
 
 def test_rudy_thinking_bubbles_are_bound_by_element_reference():
@@ -225,7 +225,7 @@ def test_frontend_ci_uses_exact_node_engine_floor_and_generator():
     assert "python scripts/generate_rudy_sayings.py" in ci
     assert "python scripts/generate_rudy_sayings.py" in scan
     assert 'PYTHONUNBUFFERED: "1"' in scan
-    assert 'timeout 540s python find_admin_jobs.py --contact "Daddy" --push-supabase' in scan
+    assert 'timeout 540s python find_admin_jobs.py --contact "Brady" --push-supabase' in scan
     assert "Build mobile job app completed in" in scan
 
 
