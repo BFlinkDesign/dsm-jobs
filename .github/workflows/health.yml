@@ -50,15 +50,15 @@ jobs:
           bad() { echo "::error::$1"; S="${S}- ❌ ${1}"$'\n'; FAILED=1; }
           SITE="https://bflinkdesign.github.io/dsm-jobs/"
           PAGE="published/index.html"
+          META="published/meta.json"
 
           # 1) Published content is the real app (read from the gh-pages checkout)
           if [ -f "$PAGE" ] && grep -q "Jobs for you" "$PAGE"; then ok "published build has the app"
           else bad "published build missing 'Jobs for you' (file: $([ -f "$PAGE" ] && echo present || echo MISSING))"; fi
 
-          # 2) Freshness: the daily scan embeds the build date in the inline JSON
-          #    as  "generated": "YYYY-MM-DD HH:MM"  (the visible "· updated ..."
-          #    text is built in JS at runtime, so it is NOT in the static HTML).
-          updated="$(grep -oE '"generated": *"[0-9]{4}-[0-9]{2}-[0-9]{2}' "$PAGE" 2>/dev/null | head -1 | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}')"
+          # 2) Freshness: the Astro app loads the daily scan timestamp from
+          #    meta.json at runtime. index.html is just the shell.
+          updated="$(grep -oE '"generated": *"[0-9]{4}-[0-9]{2}-[0-9]{2}' "$META" 2>/dev/null | head -1 | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}')"
           if [ -n "$updated" ]; then
             age=$(( ( $(date +%s) - $(date -d "$updated" +%s) ) / 86400 ))
             if [ "$age" -le 3 ]; then ok "fresh ($updated, ${age}d ago)"; else bad "stale build ($updated, ${age}d ago) — daily scan may be failing"; fi
