@@ -50,12 +50,14 @@ let feedLoadFailed = false;
 let rudyHistoryLoaded = false;
 let tailorTimer: ReturnType<typeof setInterval> | null = null;
 let filtersExpanded = false;
+let lastTailorRequest: { job: Job; resume: string; jobText: string } | null = null;
 type BeforeInstallPromptEvent = Event & {
   prompt(): Promise<void>;
   userChoice: Promise<{ outcome: string }>;
 };
 let deferredInstall: BeforeInstallPromptEvent | null = null;
 let authMode: "signin" | "signup" = "signin";
+type TailorResult = { resume: string; changes?: string[]; cover_note?: string };
 
 const QUIZ: Array<[string, string, Array<[string, string]>]> = [
   ["kind", "What kind of work sounds best right now?", [
@@ -476,7 +478,7 @@ function jobCard(j: Job): string {
       : `<button type="button" class="btn btn-ghost" data-needs-auth>Sign in to apply</button>`}
       ${authed ? `<button type="button" class="btn btn-ghost" data-save="${esc(j.id)}">${s.saved[j.id] ? "Saved ✓" : "Save"}</button>` : ""}
       ${authed && j.url ? `<a class="btn btn-ghost" href="${esc(safeUrl(j.url))}" target="_blank" rel="noopener">Apply ↗</a>` : ""}
-      ${authed && hasResume ? `<button type="button" class="btn btn-ghost" data-tailor="${esc(j.id)}">✦ Tailor résumé</button>` : ""}
+      ${authed && hasResume ? `<button type="button" class="btn btn-ghost" data-tailor="${esc(j.id)}">Rudy tailor résumé</button>` : ""}
       <button type="button" class="btn btn-ghost btn-sm" data-snooze="${esc(j.id)}">${isSnoozed ? "👁 Napping" : "Not today"}</button>
       <button type="button" class="btn btn-ghost btn-sm" data-hide="${esc(j.id)}">${isHidden ? "Unhide" : "Hide"}</button>
       ${shareBtn}
@@ -1309,36 +1311,53 @@ async function sendRudy(): Promise<void> {
   log.scrollTop = log.scrollHeight;
 }
 
-function tailorLoaderHTML(jobTitle: string): string {
-  return `<div class="tailor-load">
+function tailorLabel(job: Job): string {
+  return `${job.title} at ${job.company}`;
+}
+
+function tailorLoaderHTML(job: Job): string {
+  return `<section class="tailor-load" aria-label="Rudy is tailoring this resume">
+    <div class="tailor-load-head">
+      <p class="tailor-kicker">Rudy is tailoring</p>
+      <h3>${esc(job.title)}</h3>
+      <p>${esc(job.company)}</p>
+    </div>
     <div class="tailor-route" aria-hidden="true">
       <span class="route-track"></span><span class="route-stop route-stop-a"></span><span class="route-stop route-stop-b"></span><span class="route-stop route-stop-c"></span>
     </div>
-    <div class="tailor-bar"><i id="tailor-progress"></i></div>
-    <div class="tailor-stage" id="tailor-stage">${esc(pickSaying(TAILOR_LINES))}</div>
-    <p class="field-hint" style="margin-top:8px;text-align:center">Tailoring for ${esc(jobTitle)}…</p>
-  </div>`;
+    <div class="tailor-bar" id="tailor-meter" role="progressbar" aria-label="Resume tailoring progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="tailor-progress"></i></div>
+    <div class="tailor-stage" id="tailor-stage" role="status" aria-live="polite">${esc(pickSaying(TAILOR_LINES))}</div>
+    <p class="tailor-time">Usually takes 15-30 seconds. Keep this open; nothing is submitted for you.</p>
+    <ul class="tailor-trust">
+      <li>Uses only her saved resume text and this job posting.</li>
+      <li>Checks the draft for made-up details before showing it.</li>
+      <li>You choose what to copy, download, or ignore.</li>
+    </ul>
+  </section>`;
 }
 
-function startTailorLoader(jobTitle: string): void {
+function startTailorLoader(job: Job): void {
   const body = $("#tailor-body");
   if (!body) return;
-  body.innerHTML = tailorLoaderHTML(jobTitle);
+  body.innerHTML = tailorLoaderHTML(job);
   const fill = document.getElementById("tailor-progress");
+  const meter = document.getElementById("tailor-meter");
   const msg = document.getElementById("tailor-stage");
   const stages = [
-    "Reading her real experience…",
-    "Matching it to this job…",
-    "Choosing what to lead with…",
-    "Polishing the wording…",
-    "Almost there…",
+    "Reading the resume and this posting side by side...",
+    "Matching real experience to the job requirements...",
+    "Rudy is side-eyeing the buzzwords and cutting fluff...",
+    "Checking the draft for made-up details...",
+    "Getting copy buttons ready...",
   ];
   const t0 = Date.now();
   const DUR = 9000;
   if (tailorTimer) clearInterval(tailorTimer);
   tailorTimer = setInterval(() => {
     const el = Date.now() - t0;
-    if (fill) fill.style.width = `${Math.min(94, (el / DUR) * 94).toFixed(1)}%`;
+    const pct = Math.min(94, (el / DUR) * 94);
+    if (fill) fill.style.width = `${pct.toFixed(1)}%`;
+    if (meter) meter.setAttribute("aria-valuenow", Math.round(pct).toString());
     if (msg) {
       const i = Math.min(stages.length - 1, Math.floor(el / (DUR / stages.length)));
       msg.textContent = stages[i];
@@ -1352,7 +1371,9 @@ function stopTailorLoader(): void {
     tailorTimer = null;
   }
   const fill = document.getElementById("tailor-progress");
+  const meter = document.getElementById("tailor-meter");
   if (fill) fill.style.width = "100%";
+  if (meter) meter.setAttribute("aria-valuenow", "100");
 }
 
 function openTailor(job: Job): void {
@@ -1367,35 +1388,121 @@ function openTailor(job: Job): void {
   const body = $("#tailor-body");
   if (!modal || !body) return;
   modal.hidden = false;
+  document.body.style.overflow = "hidden";
   const full = (job.descFull || "").trim();
   if (full.length >= 200) {
-    startTailorLoader(job.title);
-    runTailor(job, resume, full);
+    startTailorLoader(job);
+    void runTailor(job, resume, full);
   } else {
-    body.innerHTML = `
-      <p class="job-meta">For <b>${esc(job.title)}</b> at ${esc(job.company)} — paste the full posting if you have it.</p>
-      <textarea class="field" id="tailor-paste" rows="5" placeholder="Job posting text…"></textarea>
-      <button type="button" class="btn btn-primary" id="tailor-run" style="margin-top:12px">Tailor résumé</button>
-    `;
-    $("#tailor-run")?.addEventListener("click", () => {
-      const paste = (document.getElementById("tailor-paste") as HTMLTextAreaElement)?.value.trim() || "";
-      startTailorLoader(job.title);
-      runTailor(job, resume, paste);
-    }, { once: true });
+    renderTailorPaste(job, resume);
   }
 }
 
 function closeTailor(): void {
   const modal = $("#tailor-modal");
   if (modal) modal.hidden = true;
+  document.body.style.overflow = "";
   stopTailorLoader();
 }
 
-function renderTailorResult(job: Job, data: { resume: string; cover_note?: string }): void {
+function renderTailorPaste(job: Job, resume: string, initialText = ""): void {
   const body = $("#tailor-body");
   if (!body) return;
   body.innerHTML = `
-    <p class="job-meta">Tailored for <b>${esc(job.title)}</b> at ${esc(job.company)} — her real experience, rewritten to fit.</p>
+    <div class="tailor-paste-panel">
+      <p class="tailor-kicker">More detail helps</p>
+      <h3>${esc(job.title)}</h3>
+      <p class="job-meta">${esc(job.company)} does not have a full posting saved here yet.</p>
+      <p class="job-meta">Paste the full posting if you have it. Rudy can still use the title and company, but the result is better with the real requirements.</p>
+      <textarea class="field" id="tailor-paste" rows="6" placeholder="Paste job posting text here...">${esc(initialText)}</textarea>
+      <p class="field-hint" id="tailor-paste-msg" aria-live="polite"></p>
+      <div class="tailor-actions">
+        <button type="button" class="btn btn-primary" id="tailor-run-paste">Tailor with pasted posting</button>
+        <button type="button" class="btn btn-ghost" id="tailor-run-title">Use title only</button>
+      </div>
+    </div>
+  `;
+  $("#tailor-run-paste")?.addEventListener("click", () => {
+    const pasteEl = document.getElementById("tailor-paste") as HTMLTextAreaElement | null;
+    const paste = pasteEl?.value.trim() || "";
+    if (paste.length < 80) {
+      const msg = document.getElementById("tailor-paste-msg");
+      if (msg) msg.textContent = "Paste more of the posting, or choose Use title only.";
+      pasteEl?.focus();
+      return;
+    }
+    startTailorLoader(job);
+    void runTailor(job, resume, paste);
+  });
+  $("#tailor-run-title")?.addEventListener("click", () => {
+    startTailorLoader(job);
+    void runTailor(job, resume, "");
+  });
+}
+
+function friendlyTailorError(message?: string): string {
+  const lower = (message || "").toLowerCase();
+  if (lower.includes("auth") || lower.includes("jwt") || lower.includes("session")) {
+    return "Your sign-in needs a refresh. Sign in again, then try this tailor.";
+  }
+  if (lower.includes("resume") || lower.includes("too short")) {
+    return "The resume text looks too short to tailor well. Check My corner, then try again.";
+  }
+  if (lower.includes("timeout") || lower.includes("network") || lower.includes("fetch")) {
+    return "The connection stalled before Rudy finished. Nothing was changed.";
+  }
+  return "Rudy couldn't finish this version. Nothing was changed.";
+}
+
+function renderTailorError(job: Job, message: string): void {
+  const body = $("#tailor-body");
+  if (!body) return;
+  body.innerHTML = `
+    <div class="tailor-error" role="alert">
+      <p class="tailor-kicker">Tailor paused</p>
+      <h3>${esc(tailorLabel(job))}</h3>
+      <p>${esc(message)}</p>
+      <p class="field-hint">You can retry the same request or paste the full job posting before trying again.</p>
+      <div class="tailor-actions">
+        <button type="button" class="btn btn-primary" data-tailor-retry>Try again</button>
+        <button type="button" class="btn btn-ghost" data-tailor-edit>Edit posting text</button>
+      </div>
+    </div>
+  `;
+  body.querySelector("[data-tailor-retry]")?.addEventListener("click", () => {
+    if (!lastTailorRequest) return;
+    startTailorLoader(lastTailorRequest.job);
+    void runTailor(lastTailorRequest.job, lastTailorRequest.resume, lastTailorRequest.jobText);
+  });
+  body.querySelector("[data-tailor-edit]")?.addEventListener("click", () => {
+    if (!lastTailorRequest) return;
+    renderTailorPaste(lastTailorRequest.job, lastTailorRequest.resume, lastTailorRequest.jobText);
+  });
+}
+
+function renderTailorResult(job: Job, data: TailorResult): void {
+  const body = $("#tailor-body");
+  if (!body) return;
+  const changes = (Array.isArray(data.changes) ? data.changes : [])
+    .map((x) => String(x).trim())
+    .filter(Boolean)
+    .slice(0, 6);
+  body.innerHTML = `
+    <div class="tailor-result-head">
+      <p class="tailor-kicker">Ready to review</p>
+      <h3>${esc(tailorLabel(job))}</h3>
+      <p class="job-meta">Rudy tailored this using her real experience, rewritten to fit. Review before copying.</p>
+    </div>
+    <div class="tailor-changes">
+      <h3 class="section-title">What Rudy changed</h3>
+      ${changes.length
+    ? `<ul>${changes.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>`
+    : `<p class="field-hint">No change summary came back. Read the text before using it.</p>`}
+    </div>
+    <div class="tailor-result-actions">
+      <button type="button" class="btn btn-primary" data-copy="both">Copy both</button>
+      <button type="button" class="btn btn-ghost" data-download>Download</button>
+    </div>
     <div class="tailor-block">
       <h3 class="section-title">Résumé</h3>
       <textarea class="field tailor-ta" id="tailor-resume" rows="8" readonly>${esc(data.resume)}</textarea>
@@ -1408,10 +1515,10 @@ function renderTailorResult(job: Job, data: { resume: string; cover_note?: strin
       <button type="button" class="btn btn-ghost" data-copy="cover">Copy cover note</button>
     </div>` : ""}
     <button type="button" class="btn btn-primary" data-copy="both" style="margin-top:12px">Copy both</button>
-    <button type="button" class="btn btn-ghost" id="tailor-download" style="margin-top:8px">Download text file</button>
+    <button type="button" class="btn btn-ghost" data-download style="margin-top:8px">Download text file</button>
   `;
   const downloadText = data.cover_note ? `${data.resume}\n\n\n=== COVER NOTE ===\n\n${data.cover_note}` : data.resume;
-  $("#tailor-download")?.addEventListener("click", () => {
+  body.querySelectorAll("[data-download]").forEach((btn) => btn.addEventListener("click", () => {
     const blob = new Blob([downloadText], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
@@ -1419,14 +1526,24 @@ function renderTailorResult(job: Job, data: { resume: string; cover_note?: strin
     a.click();
     URL.revokeObjectURL(a.href);
     toast("Downloaded ✦");
-  });
+  }));
   body.querySelectorAll("[data-copy]").forEach((btn) => {
     btn.addEventListener("click", () => {
       const which = btn.getAttribute("data-copy");
       let text = data.resume;
       if (which === "cover") text = data.cover_note || "";
       else if (which === "both") text = data.cover_note ? `${data.resume}\n\n\n=== COVER NOTE ===\n\n${data.cover_note}` : data.resume;
-      navigator.clipboard?.writeText(text).then(() => toast("Copied")).catch(() => toast("Copy failed — select text manually"));
+      const button = btn as HTMLButtonElement;
+      const original = button.textContent || "Copy";
+      navigator.clipboard?.writeText(text).then(() => {
+        button.textContent = "Copied";
+        button.classList.add("is-done");
+        toast("Copied");
+        setTimeout(() => {
+          button.textContent = original;
+          button.classList.remove("is-done");
+        }, 1400);
+      }).catch(() => toast("Copy failed — select text manually"));
     });
   });
 }
@@ -1434,9 +1551,10 @@ function renderTailorResult(job: Job, data: { resume: string; cover_note?: strin
 async function runTailor(job: Job, resume: string, jobText: string): Promise<void> {
   const sb = getClient();
   const body = $("#tailor-body");
+  lastTailorRequest = { job, resume, jobText };
   if (!sb || !body) {
     stopTailorLoader();
-    if (body) body.innerHTML = `<p class="job-meta">Sign in to tailor — keeps her résumé private.</p>`;
+    if (body) renderTailorError(job, "Sign in to tailor. That keeps her resume private and saved to her account.");
     return;
   }
   try {
@@ -1445,13 +1563,13 @@ async function runTailor(job: Job, resume: string, jobText: string): Promise<voi
     });
     stopTailorLoader();
     if (error || !data?.resume) {
-      body.innerHTML = `<p class="job-meta">${esc((data?.error as string) || error?.message || "Couldn't tailor just now — try again.")}</p>`;
+      renderTailorError(job, friendlyTailorError((data?.error as string | undefined) || error?.message));
       return;
     }
-    renderTailorResult(job, data as { resume: string; cover_note?: string });
+    renderTailorResult(job, data as TailorResult);
   } catch {
     stopTailorLoader();
-    body.innerHTML = `<p class="job-meta">No connection right now — try again when she's back online.</p>`;
+    renderTailorError(job, "No connection right now. Nothing was changed; try again when the connection is back.");
   }
 }
 
@@ -1699,7 +1817,9 @@ async function boot(): Promise<void> {
       resumeFile.value = "";
       return;
     }
-    if (msgEl) msgEl.textContent = `Reading ${file.name}…`;
+    if (msgEl) {
+      msgEl.innerHTML = `<span class="resume-readout">Reading ${esc(file.name)}<i aria-hidden="true"></i></span>`;
+    }
     void extractResumeFile(file).then((text) => {
       text = (text || "").trim();
       if (text.length < 40) {

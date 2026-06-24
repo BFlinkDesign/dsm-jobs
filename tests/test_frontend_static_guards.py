@@ -50,6 +50,67 @@ def test_rudy_thinking_bubbles_are_bound_by_element_reference():
     assert "thinkingBubble" in text
 
 
+def test_rudy_resume_tailor_uses_mischief_voice_and_sparkler_meter():
+    app = _read("app/src/scripts/app.ts")
+    css = _read("app/src/styles/app.css")
+    sayings = _read("app/src/scripts/rudy-sayings.ts")
+    generator = _read("scripts/generate_rudy_sayings.py")
+
+    assert "Rudy tailor résumé" in app
+    assert "Rudy tailored this" in app
+    assert "Rudy is side-eyeing the buzzwords" in app
+    assert "Making the boring form behave" in sayings
+    assert "Scammy listing energy detected" in generator
+    assert "role=\"progressbar\"" in app
+    assert "id=\"tailor-meter\"" in app
+    assert "role=\"status\"" in app
+    assert "spark-shower" in css
+    assert "spark-fall" in css
+    assert "route-sweep" in css
+    assert "resume-readout" in css
+
+
+def test_resume_tailor_is_trust_first_with_recovery_paths():
+    app = _read("app/src/scripts/app.ts")
+    css = _read("app/src/styles/app.css")
+
+    assert "Usually takes 15-30 seconds" in app
+    assert "Uses only her saved resume text and this job posting" in app
+    assert "Checks the draft for made-up details" in app
+    assert "You choose what to copy" in app
+    assert "Tailor with pasted posting" in app
+    assert "Use title only" in app
+    assert "What Rudy changed" in app
+    assert "tailor-result-actions" in app
+    assert "data-download" in app
+    assert "data-tailor-retry" in app
+    assert "data-tailor-edit" in app
+    assert "friendlyTailorError" in app
+    assert ".tailor-trust" in css
+    assert ".tailor-changes" in css
+    assert ".tailor-result-actions" in css
+    assert ".tailor-error" in css
+
+
+def test_resume_upload_parser_has_explicit_formats_and_clear_fallbacks():
+    resume = _read("app/src/scripts/resume.ts")
+    app = _read("app/src/scripts/app.ts")
+
+    assert "PDFJS_SRI" in resume
+    assert "PDFJS_WORKER_SRI" in resume
+    assert "word/document.xml" in resume
+    assert "Old .doc files aren't supported" in resume
+    assert "Use a .docx, .pdf, .md, or .txt file" in resume
+    assert "a scanned PDF, maybe?" in app
+
+
+def test_resume_tailor_function_requires_jwt_in_supabase_config():
+    cfg = _read("supabase/config.toml")
+    assert "[functions.resume-tailor]" in cfg
+    section = cfg.split("[functions.resume-tailor]", 1)[1].split("[", 1)[0]
+    assert "verify_jwt = true" in section
+
+
 def test_chat_local_storage_is_user_scoped_when_signed_in():
     autosave = _read("app/src/scripts/autosave.ts")
     app = _read("app/src/scripts/app.ts")
