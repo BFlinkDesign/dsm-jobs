@@ -1,4 +1,4 @@
-import type { ApplicationPack, AtsAlignment, Job, Meta, ViewName } from "./types";
+import type { AppState, ApplicationPack, AtsAlignment, Job, Meta, ResumeDocument, ViewName } from "./types";
 import {
   appendChatToLocal,
   autosave,
@@ -46,6 +46,8 @@ let isNewJobs: Record<string, boolean> = {};
 const scrollByView: Partial<Record<ViewName, number>> = {};
 let jobsShellReady = false;
 let pullStartY = 0;
+let pullReady = false;
+let pullRefreshing = false;
 let feedLoadFailed = false;
 let rudyHistoryLoaded = false;
 let tailorTimer: ReturnType<typeof setInterval> | null = null;
@@ -374,6 +376,98 @@ function quizComplete(): boolean {
   return QUIZ_KEYS.every((k) => !!q[k]);
 }
 
+function newDocumentId(): string {
+  return `doc-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function documentStats(text: string): string {
+  const words = text.trim().split(/\s+/).filter(Boolean).length;
+  const chars = text.length;
+  return `${words} word${words === 1 ? "" : "s"} · ${chars.toLocaleString()} character${chars === 1 ? "" : "s"}`;
+}
+
+function setActiveResumeText(profile: AppState["profile"], text: string): void {
+  profile.resume = text;
+  if (!text.trim()) return;
+  let doc = profile.documents.find((item) => item.id === profile.activeDocumentId);
+  const ts = new Date().toISOString();
+  if (!doc) {
+    doc = {
+      id: newDocumentId(),
+      name: "Pasted résumé",
+      text,
+      source: "paste",
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    profile.documents.unshift(doc);
+    profile.activeDocumentId = doc.id;
+    return;
+  }
+  doc.text = text;
+  doc.updatedAt = ts;
+  if (!doc.name.trim()) doc.name = "Pasted résumé";
+}
+
+function addResumeDocument(profile: AppState["profile"], name: string, text: string, source: ResumeDocument["source"]): ResumeDocument {
+  const ts = new Date().toISOString();
+  const doc: ResumeDocument = {
+    id: newDocumentId(),
+    name: name.trim() || "Résumé",
+    text,
+    source,
+    createdAt: ts,
+    updatedAt: ts,
+  };
+  profile.documents = [doc, ...profile.documents];
+  profile.activeDocumentId = doc.id;
+  profile.resume = text;
+  return doc;
+}
+
+function selectResumeDocument(profile: AppState["profile"], id: string): ResumeDocument | null {
+  const doc = profile.documents.find((item) => item.id === id);
+  if (!doc) return null;
+  profile.activeDocumentId = doc.id;
+  profile.resume = doc.text;
+  return doc;
+}
+
+function removeResumeDocument(profile: AppState["profile"], id: string): ResumeDocument | null {
+  const doc = profile.documents.find((item) => item.id === id);
+  if (!doc) return null;
+  profile.documents = profile.documents.filter((item) => item.id !== id);
+  if (profile.activeDocumentId === id) {
+    const next = profile.documents[0];
+    profile.activeDocumentId = next?.id ?? "";
+    profile.resume = next?.text ?? "";
+  }
+  return doc;
+}
+
+function renderResumeDocuments(docs: ResumeDocument[], activeId: string): string {
+  if (!docs.length) {
+    return `<p class="field-hint doc-empty">No documents saved yet. Upload a file or paste text below.</p>`;
+  }
+  return `<div class="doc-list" aria-label="Saved résumé documents">
+    ${docs.map((doc) => {
+    const active = doc.id === activeId;
+    const preview = doc.text.trim().slice(0, 260);
+    return `<article class="doc-item${active ? " is-active" : ""}">
+        <div class="doc-main">
+          <span class="doc-name">${esc(doc.name)}</span>
+          <span class="doc-meta">${esc(documentStats(doc.text))}${active ? " · selected" : ""}</span>
+          ${preview ? `<p class="doc-preview">${esc(preview)}${doc.text.length > preview.length ? "..." : ""}</p>` : ""}
+        </div>
+        <div class="doc-actions">
+          ${active ? `<span class="badge-safe">Selected</span>` : `<button type="button" class="btn btn-ghost btn-sm" data-doc-active="${esc(doc.id)}">Use this</button>`}
+          <button type="button" class="btn btn-ghost btn-sm" data-doc-delete="${esc(doc.id)}">Delete</button>
+        </div>
+      </article>`;
+  }).join("")}
+  </div>`;
+}
+
 /** Quiz answers gently float matching jobs upward — never buries low scorers. */
 function forYouScore(j: Job): number {
   const p = getState().profile.quiz;
@@ -688,10 +782,11 @@ function renderCorner(): void {
     </div>
     <div class="card">
       <h3 class="section-title">Résumé</h3>
-      <button type="button" class="btn btn-ghost" id="upload-resume" style="margin-bottom:8px">Upload .docx or .pdf</button>
+      <button type="button" class="btn btn-ghost" id="upload-resume" style="margin-bottom:8px">Add .docx, .pdf, .txt, or .md</button>
       <p class="field-hint" id="resume-msg"></p>
+      ${renderResumeDocuments(p.documents, p.activeDocumentId)}
       <textarea class="field" id="pf-resume" rows="6" placeholder="Paste résumé — auto-saved">${esc(p.resume)}</textarea>
-      <p class="field-hint">Tailor from any job card once text is here.</p>
+      <p class="field-hint">Rudy tailors from the selected résumé. Pasted changes save to that selected document.</p>
     </div>
   `;
 }
@@ -780,7 +875,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-tailor], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -970,6 +1065,36 @@ function handleViewClick(e: Event): void {
     (document.getElementById("resume-file") as HTMLInputElement | null)?.click();
     return;
   }
+  if (t.hasAttribute("data-doc-active")) {
+    const id = t.getAttribute("data-doc-active")!;
+    let selectedName = "";
+    patchState((s) => {
+      selectedName = selectResumeDocument(s.profile, id)?.name ?? "";
+    });
+    autosave();
+    renderCorner();
+    if (selectedName) toast(`Using ${selectedName}`);
+    return;
+  }
+  if (t.hasAttribute("data-doc-delete")) {
+    const id = t.getAttribute("data-doc-delete")!;
+    const prev = {
+      profile: JSON.parse(JSON.stringify(getState().profile)) as AppState["profile"],
+    };
+    let deletedName = "";
+    patchState((s) => {
+      deletedName = removeResumeDocument(s.profile, id)?.name ?? "";
+    });
+    if (!deletedName) return;
+    autosave();
+    renderCorner();
+    toast("Document deleted", () => {
+      patchState((s) => { s.profile = prev.profile; });
+      autosave();
+      renderCorner();
+    });
+    return;
+  }
   if (t.hasAttribute("data-share")) {
     const id = t.getAttribute("data-share")!;
     const job = jobs.find((x) => x.id === id);
@@ -1065,7 +1190,7 @@ const onProfileInput = debounce((e: Event) => {
   const t = e.target as HTMLElement;
   if (t.id === "pf-preferred") patchState((s) => { s.profile.preferredName = (t as HTMLInputElement).value; });
   else if (t.id === "pf-legal") patchState((s) => { s.profile.legalName = (t as HTMLInputElement).value; });
-  else if (t.id === "pf-resume") patchState((s) => { s.profile.resume = (t as HTMLTextAreaElement).value; });
+  else if (t.id === "pf-resume") patchState((s) => { setActiveResumeText(s.profile, (t as HTMLTextAreaElement).value); });
   else return;
   autosave();
 }, 400);
@@ -1381,7 +1506,7 @@ function tailorLabel(job: Job): string {
 }
 
 function tailorLoaderHTML(job: Job): string {
-  return `<section class="tailor-load" aria-label="Rudy is tailoring this resume">
+  return `<section class="tailor-load" aria-label="Rudy is tailoring this résumé">
     <div class="tailor-load-head">
       <p class="tailor-kicker">Rudy is tailoring</p>
       <h3>${esc(job.title)}</h3>
@@ -1390,11 +1515,11 @@ function tailorLoaderHTML(job: Job): string {
     <div class="tailor-route" aria-hidden="true">
       <span class="route-track"></span><span class="route-stop route-stop-a"></span><span class="route-stop route-stop-b"></span><span class="route-stop route-stop-c"></span>
     </div>
-    <div class="tailor-bar" id="tailor-meter" role="progressbar" aria-label="Resume tailoring progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="tailor-progress"></i></div>
+    <div class="tailor-bar" id="tailor-meter" role="progressbar" aria-label="Résumé tailoring progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><i id="tailor-progress"></i></div>
     <div class="tailor-stage" id="tailor-stage" role="status" aria-live="polite">${esc(pickSaying(TAILOR_LINES))}</div>
     <p class="tailor-time">Usually takes 15-30 seconds. Keep this open; nothing is submitted for you.</p>
     <ul class="tailor-trust">
-      <li>Uses only her saved resume text and this job posting.</li>
+      <li>Uses only her saved résumé text and this job posting.</li>
       <li>Checks the draft for made-up details before showing it.</li>
       <li>You choose what to copy, download, or ignore.</li>
     </ul>
@@ -1409,7 +1534,7 @@ function startTailorLoader(job: Job): void {
   const meter = document.getElementById("tailor-meter");
   const msg = document.getElementById("tailor-stage");
   const stages = [
-    "Reading the resume and this posting side by side...",
+    "Reading the résumé and this posting side by side...",
     "Matching real experience to the job requirements...",
     "Rudy is side-eyeing the buzzwords and cutting fluff...",
     "Checking the draft for made-up details...",
@@ -1564,7 +1689,7 @@ function friendlyTailorError(message?: string): string {
     return "Your sign-in needs a refresh. Sign in again, then try this tailor.";
   }
   if (lower.includes("resume") || lower.includes("too short")) {
-    return "The resume text looks too short to tailor well. Check My corner, then try again.";
+    return "The résumé text looks too short to tailor well. Check My corner, then try again.";
   }
   if (lower.includes("timeout") || lower.includes("network") || lower.includes("fetch")) {
     return "The connection stalled before Rudy finished. Nothing was changed.";
@@ -1613,7 +1738,7 @@ function normalizeAtsAlignment(value: TailorResult["ats_alignment"]): AtsAlignme
     suggested_keywords: cleanPackList(value?.suggested_keywords, 6),
     note: typeof value?.note === "string" && value.note.trim()
       ? value.note.trim()
-      : "Use the strongest truthful matches. Do not add keywords unless her resume actually supports them.",
+      : "Use the strongest truthful matches. Do not add keywords unless her résumé actually supports them.",
   };
 }
 
@@ -1761,7 +1886,7 @@ async function runTailor(job: Job, resume: string, jobText: string): Promise<voi
   lastTailorRequest = { job, resume, jobText };
   if (!sb || !body) {
     stopTailorLoader();
-    if (body) renderTailorError(job, "Sign in to tailor. That keeps her resume private and saved to her account.");
+    if (body) renderTailorError(job, "Sign in to tailor. That keeps her résumé private and saved to her account.");
     return;
   }
   try {
@@ -1846,14 +1971,43 @@ function wirePullToRefresh(): void {
   host.addEventListener("touchstart", (e) => {
     if (view !== "jobs" || window.scrollY > 8) return;
     pullStartY = e.touches[0]?.clientY ?? 0;
+    pullReady = false;
+  }, { passive: true });
+  host.addEventListener("touchmove", (e) => {
+    if (view !== "jobs" || window.scrollY > 8 || pullRefreshing) return;
+    const dy = (e.touches[0]?.clientY ?? 0) - pullStartY;
+    if (dy > 70 && !pullReady) {
+      pullReady = true;
+      try { navigator.vibrate?.(10); } catch { /* unsupported */ }
+      toast("Release to refresh jobs");
+    }
   }, { passive: true });
   host.addEventListener("touchend", (e) => {
-    if (view !== "jobs" || window.scrollY > 8) return;
+    if (view !== "jobs" || window.scrollY > 8 || pullRefreshing) return;
     const dy = (e.changedTouches[0]?.clientY ?? 0) - pullStartY;
     if (dy > 90) {
+      pullRefreshing = true;
       toast("Refreshing jobs…");
-      void loadFeed().then((ok) => { if (ok) render(); });
+      void loadFeed()
+        .then((ok) => {
+          if (ok) {
+            render();
+            toast("Jobs refreshed");
+          } else {
+            toast("Couldn't refresh jobs — check connection");
+          }
+        })
+        .finally(() => {
+          pullReady = false;
+          pullRefreshing = false;
+        });
+    } else {
+      pullReady = false;
     }
+  }, { passive: true });
+  host.addEventListener("touchcancel", () => {
+    pullReady = false;
+    pullRefreshing = false;
   }, { passive: true });
 }
 
@@ -2034,12 +2188,15 @@ async function boot(): Promise<void> {
         resumeFile.value = "";
         return;
       }
-      const box = document.getElementById("pf-resume") as HTMLTextAreaElement | null;
-      if (box) box.value = text;
-      patchState((s) => { s.profile.resume = text; });
+      let docName = file.name;
+      patchState((s) => {
+        docName = addResumeDocument(s.profile, file.name, text, "upload").name;
+      });
       autosave();
-      if (msgEl) msgEl.textContent = `Loaded from ${file.name} ✦ — saved automatically.`;
-      toast("Résumé loaded ✦");
+      renderCorner();
+      const freshMsg = document.getElementById("resume-msg");
+      if (freshMsg) freshMsg.textContent = `Loaded ${docName} ✦ — saved automatically.`;
+      toast("Résumé document added ✦");
       resumeFile.value = "";
     }).catch((err: Error) => {
       if (msgEl) msgEl.textContent = err?.message || "I couldn't read that file — try paste instead.";

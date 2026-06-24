@@ -77,7 +77,7 @@ def test_resume_tailor_is_trust_first_with_recovery_paths():
     css = _read("app/src/styles/app.css")
 
     assert "Usually takes 15-30 seconds" in app
-    assert "Uses only her saved resume text and this job posting" in app
+    assert "Uses only her saved résumé text and this job posting" in app
     assert "Checks the draft for made-up details" in app
     assert "You choose what to copy" in app
     assert "Tailor with pasted posting" in app
@@ -127,6 +127,29 @@ def test_application_status_has_persistent_undo_and_custom_followup_date():
     assert "Follow up on" in app
     assert "fu.done = false" in app
     assert ".follow-date-label" in css
+
+
+def test_resume_document_manager_preserves_multiple_documents():
+    app = _read("app/src/scripts/app.ts")
+    types = _read("app/src/scripts/types.ts")
+    store = _read("app/src/scripts/store.ts")
+    css = _read("app/src/styles/app.css")
+
+    assert "export type ResumeDocument" in types
+    assert "documents: ResumeDocument[]" in types
+    assert "activeDocumentId: string" in types
+    assert "legacyResumeDocument" in store
+    assert "Saved résumé" in store
+    assert "normalizeProfile" in store
+    assert "addResumeDocument" in app
+    assert "selectResumeDocument" in app
+    assert "removeResumeDocument" in app
+    assert "data-doc-active" in app
+    assert "data-doc-delete" in app
+    assert "Rudy tailors from the selected résumé" in app
+    assert "saved resume text" not in app
+    assert ".doc-list" in css
+    assert ".doc-item.is-active" in css
 
 
 def test_resume_tailor_edge_function_returns_application_pack_fields():
@@ -206,6 +229,16 @@ def test_mobile_bottom_nav_does_not_show_content_underneath():
     assert ".nav-bottom" in css
     assert "background: var(--paper);" in css
     assert "box-shadow: 0 -12px 28px" in css
+
+
+def test_ios_pull_to_refresh_has_release_hint_and_duplicate_guard():
+    app = _read("app/src/scripts/app.ts")
+    assert "function wirePullToRefresh()" in app
+    assert "touchmove" in app
+    assert "Release to refresh jobs" in app
+    assert "Jobs refreshed" in app
+    assert "pullRefreshing" in app
+    assert "navigator.vibrate?.(10)" in app
 
 
 def test_service_worker_only_caches_same_origin_gets():

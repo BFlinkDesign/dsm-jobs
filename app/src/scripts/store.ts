@@ -1,9 +1,95 @@
-import type { AppState, AppliedEntry } from "./types";
+import type { AppState, AppliedEntry, ResumeDocument } from "./types";
 import { defaultFilters } from "./types";
 
 const LS = "dsm-jobs-state-v2";
 const V1_KEY = "myjobs:v1";
 const V1_MIGRATED = "dsm-jobs-v1-migrated";
+
+function defaultProfile(): AppState["profile"] {
+  return {
+    preferredName: "",
+    legalName: "",
+    resume: "",
+    documents: [],
+    activeDocumentId: "",
+    quiz: {},
+  };
+}
+
+function cleanResumeDocuments(raw: unknown): ResumeDocument[] {
+  if (!Array.isArray(raw)) return [];
+  const docs: ResumeDocument[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const doc = item as Partial<ResumeDocument>;
+    const id = typeof doc.id === "string" ? doc.id.trim() : "";
+    const text = typeof doc.text === "string" ? doc.text : "";
+    if (!id || !text.trim()) continue;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const createdAt = typeof doc.createdAt === "string" ? doc.createdAt : "";
+    docs.push({
+      id,
+      text,
+      name: typeof doc.name === "string" && doc.name.trim() ? doc.name.trim() : "Résumé",
+      source: doc.source === "upload" ? "upload" : "paste",
+      createdAt,
+      updatedAt: typeof doc.updatedAt === "string" ? doc.updatedAt : createdAt,
+    });
+  }
+  return docs;
+}
+
+function legacyResumeDocument(text: string): ResumeDocument {
+  const ts = new Date().toISOString();
+  return {
+    id: "legacy-resume",
+    name: "Saved résumé",
+    text,
+    source: "paste",
+    createdAt: ts,
+    updatedAt: ts,
+  };
+}
+
+function normalizeProfile(raw: Partial<AppState["profile"]> | undefined): AppState["profile"] {
+  const base = defaultProfile();
+  const profile = { ...base, ...(raw ?? {}) };
+  const quiz = raw?.quiz && typeof raw.quiz === "object" ? raw.quiz : {};
+  const docs = cleanResumeDocuments((raw as { documents?: unknown } | undefined)?.documents);
+  const resume = typeof raw?.resume === "string" ? raw.resume : "";
+  let activeDocumentId = typeof raw?.activeDocumentId === "string" ? raw.activeDocumentId : "";
+
+  if (resume.trim()) {
+    const activeDoc = activeDocumentId ? docs.find((doc) => doc.id === activeDocumentId) : undefined;
+    if (activeDoc) {
+      activeDoc.text = resume;
+      activeDoc.updatedAt = activeDoc.updatedAt || new Date().toISOString();
+    } else {
+      let legacy = docs.find((doc) => doc.id === "legacy-resume");
+      if (!legacy) {
+        legacy = legacyResumeDocument(resume);
+        docs.unshift(legacy);
+      } else {
+        legacy.text = resume;
+        legacy.updatedAt = new Date().toISOString();
+      }
+      activeDocumentId = legacy.id;
+    }
+  }
+
+  if (!activeDocumentId && docs.length) activeDocumentId = docs[0].id;
+  const activeDoc = docs.find((doc) => doc.id === activeDocumentId);
+
+  return {
+    ...profile,
+    resume: activeDoc?.text ?? resume,
+    documents: docs,
+    activeDocumentId,
+    quiz,
+  };
+}
 
 export function defaultState(): AppState {
   return {
@@ -18,7 +104,7 @@ export function defaultState(): AppState {
     followAlertDay: "",
     seen: [],
     filters: defaultFilters(),
-    profile: { preferredName: "", legalName: "", resume: "", quiz: {} },
+    profile: defaultProfile(),
     commuteRadius: null,
     coachOff: false,
   };
@@ -31,7 +117,9 @@ export function getState(): AppState {
 }
 
 export function setState(patch: Partial<AppState>): void {
-  state = { ...state, ...patch };
+  const next = { ...state, ...patch };
+  if (patch.profile) next.profile = normalizeProfile({ ...state.profile, ...patch.profile });
+  state = next;
   persistLocal();
 }
 
@@ -57,7 +145,7 @@ export function loadLocal(): void {
       ...defaultState(),
       ...parsed,
       filters: { ...defaultFilters(), ...parsed.filters },
-      profile: { ...defaultState().profile, ...parsed.profile },
+      profile: normalizeProfile(parsed.profile),
     };
   } catch {
     /* ignore corrupt */
@@ -91,7 +179,7 @@ export function migrateLocalV1(): void {
       appliedLog: {},
       followUps: {},
       applicationPacks: {},
-      profile: { ...defaultState().profile },
+      profile: defaultProfile(),
       commuteRadius: null,
     };
 
@@ -141,6 +229,9 @@ export function migrateLocalV1(): void {
       const p = old.profile as Record<string, unknown>;
       if (typeof p.legalName === "string") patch.profile!.legalName = p.legalName;
       if (typeof p.preferredName === "string") patch.profile!.preferredName = p.preferredName;
+      if (typeof p.resume === "string" && !patch.profile!.resume) patch.profile!.resume = p.resume;
+      if (Array.isArray(p.documents)) patch.profile!.documents = cleanResumeDocuments(p.documents);
+      if (typeof p.activeDocumentId === "string") patch.profile!.activeDocumentId = p.activeDocumentId;
       const quizKeys = ["kind", "where", "time", "pay", "confidence"];
       for (const k of quizKeys) {
         if (typeof p[k] === "string") patch.profile!.quiz[k] = p[k] as string;
@@ -169,7 +260,8 @@ export function migrateLocalV1(): void {
 
     // Merge: current v2 wins when it has a real value; old fills empty defaults.
     const cur = state;
-    const oldProfile = patch.profile ?? defaultState().profile;
+    const oldProfile = normalizeProfile(patch.profile);
+    const curProfile = normalizeProfile(cur.profile);
     setState({
       applied: { ...patch.applied, ...cur.applied },
       saved: { ...patch.saved, ...cur.saved },
@@ -180,13 +272,16 @@ export function migrateLocalV1(): void {
       followUps: { ...patch.followUps, ...cur.followUps },
       applicationPacks: { ...patch.applicationPacks, ...cur.applicationPacks },
       followAlertDay: cur.followAlertDay || "",
-      profile: {
-        ...cur.profile,
-        preferredName: cur.profile.preferredName || oldProfile.preferredName || "",
-        legalName: cur.profile.legalName || oldProfile.legalName || "",
-        resume: cur.profile.resume || oldProfile.resume || "",
-        quiz: { ...oldProfile.quiz, ...cur.profile.quiz },
-      },
+      profile: normalizeProfile({
+        ...oldProfile,
+        ...curProfile,
+        preferredName: curProfile.preferredName || oldProfile.preferredName || "",
+        legalName: curProfile.legalName || oldProfile.legalName || "",
+        resume: curProfile.resume || oldProfile.resume || "",
+        documents: [...curProfile.documents, ...oldProfile.documents],
+        activeDocumentId: curProfile.activeDocumentId || oldProfile.activeDocumentId,
+        quiz: { ...oldProfile.quiz, ...curProfile.quiz },
+      }),
       commuteRadius: cur.commuteRadius ?? patch.commuteRadius,
       coachOff: cur.coachOff || (patch.coachOff ?? false),
     });
