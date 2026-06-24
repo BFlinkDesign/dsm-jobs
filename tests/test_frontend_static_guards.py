@@ -84,6 +84,13 @@ def test_pre_publish_gate_checks_meta_json_before_reading():
     assert 'mp.read_text(encoding="utf-8")' in scan
 
 
+def test_health_monitor_reads_published_meta_json_for_freshness():
+    health = _read(".github/workflows/health.yml")
+    assert 'META="published/meta.json"' in health
+    assert 'grep -oE \'"generated": *"[0-9]{4}-[0-9]{2}-[0-9]{2}\' "$META"' in health
+    assert 'grep -oE \'"generated": *"[0-9]{4}-[0-9]{2}-[0-9]{2}\' "$PAGE"' not in health
+
+
 def test_service_worker_only_caches_same_origin_gets():
     sw = _read("app/public/sw.js")
     assert "const url = new URL(req.url);" in sw
