@@ -24,6 +24,11 @@ SEARCHING_SEEDS = [
     "Checking the commute, pay wording, and employer signals.",
     "Looking for a few strong starts instead of a wall of noise.",
     "Matching the list to what you said matters.",
+    "Pay not listed? Side-eye logged.",
+    "Filtering out risky listings before they waste your time.",
+    "If the commute is nonsense, Rudy is judging it.",
+    "Making the job pile behave.",
+    "Sorting the chaos before it gets ideas.",
 ]
 
 THINKING_SEEDS = [
@@ -39,6 +44,10 @@ THINKING_SEEDS = [
     "Keeping this focused on your real options.",
     "Making sure I do not overstate anything.",
     "Finding the clearest way to say it.",
+    "Rudy is side-eyeing the vague part.",
+    "Checking the facts before the confidence gets spicy.",
+    "Making the messy bit sit down and explain itself.",
+    "Tiny chaos audit in progress.",
 ]
 
 TAILOR_SEEDS = [
@@ -53,6 +62,11 @@ TAILOR_SEEDS = [
     "Highlighting transferable skills.",
     "Tightening the language for a hiring manager.",
     "Preparing a clean version to review.",
+    "Rudy is side-eyeing the buzzwords.",
+    "Making the boring form behave.",
+    "Polishing this without lying. Rudy has standards.",
+    "Putting the fluff on a short leash.",
+    "Turning job-posting nonsense into usable wording.",
 ]
 
 SEARCHING_TEMPLATES = [
