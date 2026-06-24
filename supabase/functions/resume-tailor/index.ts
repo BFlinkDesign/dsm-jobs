@@ -115,13 +115,19 @@ Return your answer using the provided JSON schema:
 - "changes": 3 to 6 short, plain-language bullets telling her what you emphasized and why — warm and
   encouraging, and TRUTHFUL (only what you actually surfaced from her real experience).
 - "cover_note": a short, honest, first-person cover note (4-7 sentences) she can edit, drawing only on
-  her real experience.`;
+  her real experience.
+- "follow_up": one short, polite follow-up message she can send after applying. Do not sound desperate.
+- "ats_alignment": an object with:
+  - "strong_matches": 3 to 6 job keywords/duties that are truthfully supported by her resume.
+  - "suggested_keywords": 0 to 6 job keywords worth adding ONLY if she can personally confirm them.
+  - "note": one plain sentence explaining how to use this without keyword stuffing or inventing facts.`;
 
 // The critic gets her ORIGINAL resume as ground truth plus the draft, and judges
 // drift — it does not treat the draft as authoritative.
 const CRITIC_SYSTEM = `You are a strict reviewer checking a tailored resume + cover note before a real
 person sends them to a real employer. You are given (1) her ORIGINAL resume — the only source of truth —
-(2) the job posting, and (3) the tailored DRAFT. Judge the draft on four things and be hard to please:
+  (2) the job posting, and (3) the tailored DRAFT, cover note, follow-up, and ATS alignment.
+Judge the draft on four things and be hard to please:
 
 1. TRUTH (most important): Does every claim in the draft trace to something in her ORIGINAL resume? Flag
    ANY invented employer, title, date, certification, degree, tool, metric, or accomplishment, and any
@@ -149,8 +155,19 @@ const WRITER_SCHEMA = {
     resume: { type: "string" },
     changes: { type: "array", items: { type: "string" } },
     cover_note: { type: "string" },
+    follow_up: { type: "string" },
+    ats_alignment: {
+      type: "object",
+      properties: {
+        strong_matches: { type: "array", items: { type: "string" } },
+        suggested_keywords: { type: "array", items: { type: "string" } },
+        note: { type: "string" },
+      },
+      required: ["strong_matches", "suggested_keywords", "note"],
+      additionalProperties: false,
+    },
   },
-  required: ["resume", "changes", "cover_note"],
+  required: ["resume", "changes", "cover_note", "follow_up", "ats_alignment"],
   additionalProperties: false,
 };
 
@@ -180,7 +197,17 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-type WriterOut = { resume: string; changes: string[]; cover_note: string };
+type WriterOut = {
+  resume: string;
+  changes: string[];
+  cover_note: string;
+  follow_up: string;
+  ats_alignment: {
+    strong_matches: string[];
+    suggested_keywords: string[];
+    note: string;
+  };
+};
 type CriticOut = {
   ok: boolean;
   fabrications: string[];
@@ -368,7 +395,9 @@ async function handle(req: Request): Promise<Response> {
     const critUser =
       `${RESUME_BLOCK}\n\n${POSTING}\n\n` +
       `TAILORED DRAFT TO REVIEW:\nRESUME:\n${draft.resume}\n\n` +
-      `COVER NOTE:\n${draft.cover_note || "(none)"}`;
+      `COVER NOTE:\n${draft.cover_note || "(none)"}\n\n` +
+      `FOLLOW-UP:\n${draft.follow_up || "(none)"}\n\n` +
+      `ATS ALIGNMENT:\n${JSON.stringify(draft.ats_alignment ?? {}, null, 2)}`;
     const crit = await callModel(apiKey, CRITIC_MODEL, CRITIC_SYSTEM, critUser, CRITIC_SCHEMA, "critique");
     if (!crit.ok) break; // keep the current draft; one bad critique shouldn't sink it
     spendCalls.push({ model: CRITIC_MODEL, usage: (crit.data as { usage?: Usage })?.usage });
@@ -382,7 +411,9 @@ async function handle(req: Request): Promise<Response> {
     const reviseUser =
       `${POSTING}\n\n${RESUME_BLOCK}\n\n` +
       `YOUR PREVIOUS DRAFT:\nRESUME:\n${draft.resume}\n\nCOVER NOTE:\n${draft.cover_note || "(none)"}\n\n` +
-      `A reviewer found issues. Fix ALL of them and return the corrected resume, changes, and cover note.\n` +
+      `FOLLOW-UP:\n${draft.follow_up || "(none)"}\n\n` +
+      `ATS ALIGNMENT:\n${JSON.stringify(draft.ats_alignment ?? {}, null, 2)}\n\n` +
+      `A reviewer found issues. Fix ALL of them and return the corrected resume, changes, cover note, follow-up, and ATS alignment.\n` +
       (fab.length ? `FABRICATIONS TO REMOVE (these are NOT in her real resume — delete or fix every one):\n- ${fab.join("\n- ")}\n` : "") +
       (tells.length ? `AI-SOUNDING PHRASES TO REWRITE in plain human language:\n- ${tells.join("\n- ")}\n` : "") +
       (misses.length ? `WAYS TO FIT THIS POSTING BETTER (using only her real experience):\n- ${misses.join("\n- ")}\n` : "") +
@@ -405,6 +436,12 @@ async function handle(req: Request): Promise<Response> {
     resume: draft.resume,
     changes: Array.isArray(draft.changes) ? draft.changes.slice(0, 8) : [],
     cover_note: typeof draft.cover_note === "string" ? draft.cover_note : "",
+    follow_up: typeof draft.follow_up === "string" ? draft.follow_up : "",
+    ats_alignment: {
+      strong_matches: Array.isArray(draft.ats_alignment?.strong_matches) ? draft.ats_alignment.strong_matches.slice(0, 8) : [],
+      suggested_keywords: Array.isArray(draft.ats_alignment?.suggested_keywords) ? draft.ats_alignment.suggested_keywords.slice(0, 8) : [],
+      note: typeof draft.ats_alignment?.note === "string" ? draft.ats_alignment.note : "",
+    },
   });
 }
 

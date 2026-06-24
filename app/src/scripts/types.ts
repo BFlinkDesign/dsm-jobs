@@ -76,6 +76,25 @@ export type AppliedEntry = {
   ts?: string; // ISO timestamp (for finer sort/display)
 };
 
+export type AtsAlignment = {
+  strong_matches: string[];
+  suggested_keywords: string[];
+  note: string;
+};
+
+export type ApplicationPack = {
+  id: string;
+  jobId: string;
+  jobTitle: string;
+  company: string;
+  createdAt: string;
+  resume: string;
+  coverNote: string;
+  followUp: string;
+  changes: string[];
+  ats: AtsAlignment;
+};
+
 export type AppState = {
   applied: Record<string, boolean>;
   saved: Record<string, boolean>;
@@ -84,6 +103,7 @@ export type AppState = {
   notes: Record<string, string>;          // per-job text notes (synced to job_notes table)
   followUps: Record<string, FollowUp>;
   appliedLog: Record<string, AppliedEntry>;
+  applicationPacks: Record<string, ApplicationPack>;
   followAlertDay: string;                 // last day follow-up browser notifications fired
   seen: string[];                         // job ids from previous visit (for "New" badges)
   filters: FilterPrefs;
