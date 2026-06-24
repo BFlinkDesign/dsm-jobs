@@ -1,4 +1,4 @@
-import type { Job, Meta, ViewName } from "./types";
+import type { ApplicationPack, AtsAlignment, Job, Meta, ViewName } from "./types";
 import {
   appendChatToLocal,
   autosave,
@@ -58,7 +58,13 @@ type BeforeInstallPromptEvent = Event & {
 let deferredInstall: BeforeInstallPromptEvent | null = null;
 let authMode: "signin" | "signup" = "signin";
 interface TailorRequest { job: Job; resume: string; jobText: string }
-interface TailorResult { resume: string; changes?: string[]; cover_note?: string }
+interface TailorResult {
+  resume: string;
+  changes?: string[];
+  cover_note?: string;
+  follow_up?: string;
+  ats_alignment?: Partial<AtsAlignment>;
+}
 type ErrorBodyLike = { error?: unknown; message?: unknown };
 type ResponseLike = {
   clone?: () => ResponseLike;
@@ -467,6 +473,7 @@ function jobCard(j: Job): string {
   const loc = j.remote ? "Remote" : esc(j.location);
   const commute = j.commute ? ` · ${esc(j.commute)}` : "";
   const hasResume = !!s.profile.resume.trim();
+  const hasPack = !!s.applicationPacks[j.id];
   const shareBtn =
     typeof navigator !== "undefined" && typeof navigator.share === "function"
       ? `<button type="button" class="btn btn-ghost btn-sm" data-share="${esc(j.id)}">Share</button>`
@@ -486,6 +493,7 @@ function jobCard(j: Job): string {
       ${authed ? `<button type="button" class="btn btn-ghost" data-save="${esc(j.id)}">${s.saved[j.id] ? "Saved ✓" : "Save"}</button>` : ""}
       ${authed && j.url ? `<a class="btn btn-ghost" href="${esc(safeUrl(j.url))}" target="_blank" rel="noopener">Apply ↗</a>` : ""}
       ${authed && hasResume ? `<button type="button" class="btn btn-ghost" data-tailor="${esc(j.id)}">Rudy tailor résumé</button>` : ""}
+      ${authed && hasPack ? `<button type="button" class="btn btn-ghost" data-pack="${esc(j.id)}">Open pack</button>` : ""}
       <button type="button" class="btn btn-ghost btn-sm" data-snooze="${esc(j.id)}">${isSnoozed ? "👁 Napping" : "Not today"}</button>
       <button type="button" class="btn btn-ghost btn-sm" data-hide="${esc(j.id)}">${isHidden ? "Unhide" : "Hide"}</button>
       ${shareBtn}
@@ -951,6 +959,12 @@ function handleViewClick(e: Event): void {
     if (job) openTailor(job);
     return;
   }
+  if (t.hasAttribute("data-pack")) {
+    const id = t.getAttribute("data-pack")!;
+    const job = jobs.find((x) => x.id === id);
+    if (job) openApplicationPack(job);
+    return;
+  }
   if (t.hasAttribute("data-hide")) {
     const id = t.getAttribute("data-hide")!;
     const wasHidden = !!getState().hidden[id];
@@ -1412,6 +1426,19 @@ function closeTailor(): void {
   stopTailorLoader();
 }
 
+function openApplicationPack(job: Job): void {
+  const pack = getState().applicationPacks[job.id];
+  if (!pack) {
+    toast("No saved pack for this job yet");
+    return;
+  }
+  const modal = $("#tailor-modal");
+  if (!modal) return;
+  modal.hidden = false;
+  document.body.style.overflow = "hidden";
+  renderTailorResult(job, packToTailorResult(pack));
+}
+
 function renderTailorPaste(job: Job, resume: string, initialText = ""): void {
   const body = $("#tailor-body");
   if (!body) return;
@@ -1527,6 +1554,60 @@ function renderTailorError(job: Job, message: string): void {
   });
 }
 
+function cleanPackList(items: unknown, limit: number): string[] {
+  if (!Array.isArray(items)) return [];
+  return items.map((x) => String(x).trim()).filter(Boolean).slice(0, limit);
+}
+
+function fallbackFollowUp(job: Job): string {
+  return `Hello, I applied for the ${job.title} position at ${job.company} and wanted to follow up. I am still interested and would be glad to answer any questions about my experience. Thank you for your time.`;
+}
+
+function normalizeAtsAlignment(value: TailorResult["ats_alignment"]): AtsAlignment {
+  return {
+    strong_matches: cleanPackList(value?.strong_matches, 6),
+    suggested_keywords: cleanPackList(value?.suggested_keywords, 6),
+    note: typeof value?.note === "string" && value.note.trim()
+      ? value.note.trim()
+      : "Use the strongest truthful matches. Do not add keywords unless her resume actually supports them.",
+  };
+}
+
+function buildApplicationPack(job: Job, data: TailorResult): ApplicationPack {
+  const createdAt = new Date().toISOString();
+  return {
+    id: `${job.id}:${createdAt}`,
+    jobId: job.id,
+    jobTitle: job.title,
+    company: job.company,
+    createdAt,
+    resume: data.resume,
+    coverNote: data.cover_note || "",
+    followUp: data.follow_up || fallbackFollowUp(job),
+    changes: cleanPackList(data.changes, 8),
+    ats: normalizeAtsAlignment(data.ats_alignment),
+  };
+}
+
+function packToTailorResult(pack: ApplicationPack): TailorResult {
+  return {
+    resume: pack.resume,
+    changes: pack.changes,
+    cover_note: pack.coverNote,
+    follow_up: pack.followUp,
+    ats_alignment: pack.ats,
+  };
+}
+
+function saveApplicationPack(pack: ApplicationPack): void {
+  patchState((s) => {
+    s.applicationPacks[pack.jobId] = pack;
+  });
+  autosave();
+  toast("Application pack saved ✦");
+  render();
+}
+
 function renderTailorResult(job: Job, data: TailorResult): void {
   const body = $("#tailor-body");
   if (!body) return;
@@ -1534,11 +1615,14 @@ function renderTailorResult(job: Job, data: TailorResult): void {
     .map((x) => String(x).trim())
     .filter(Boolean)
     .slice(0, 6);
+  const pack = buildApplicationPack(job, data);
+  const ats = pack.ats;
+  const saved = !!getState().applicationPacks[job.id];
   body.innerHTML = `
     <div class="tailor-result-head">
       <p class="tailor-kicker">Ready to review</p>
       <h3>${esc(tailorLabel(job))}</h3>
-      <p class="job-meta">Rudy tailored this using her real experience, rewritten to fit. Review before copying.</p>
+      <p class="job-meta">Rudy tailored this into an application pack using her real experience. Review before copying.</p>
     </div>
     <div class="tailor-changes">
       <h3 class="section-title">What Rudy changed</h3>
@@ -1549,6 +1633,7 @@ function renderTailorResult(job: Job, data: TailorResult): void {
     <div class="tailor-result-actions">
       <button type="button" class="btn btn-primary" data-copy="both">Copy both</button>
       <button type="button" class="btn btn-ghost" data-download>Download</button>
+      <button type="button" class="btn btn-ghost" data-save-pack>${saved ? "Saved pack" : "Save application pack"}</button>
     </div>
     <div class="tailor-block">
       <h3 class="section-title">Résumé</h3>
@@ -1561,8 +1646,37 @@ function renderTailorResult(job: Job, data: TailorResult): void {
       <textarea class="field tailor-ta" id="tailor-cover" rows="5" readonly>${esc(data.cover_note)}</textarea>
       <button type="button" class="btn btn-ghost" data-copy="cover">Copy cover note</button>
     </div>` : ""}
+    <div class="tailor-block">
+      <h3 class="section-title">Follow-up message</h3>
+      <textarea class="field tailor-ta" id="tailor-follow-up" rows="4" readonly>${esc(pack.followUp)}</textarea>
+      <button type="button" class="btn btn-ghost" data-copy="follow">Copy follow-up</button>
+    </div>
+    <div class="tailor-changes tailor-ats">
+      <h3 class="section-title">ATS alignment</h3>
+      ${ats.strong_matches.length
+    ? `<p class="field-hint"><b>Strong matches:</b> ${ats.strong_matches.map(esc).join(", ")}</p>`
+    : `<p class="field-hint"><b>Strong matches:</b> Review manually before applying.</p>`}
+      ${ats.suggested_keywords.length
+    ? `<p class="field-hint"><b>Use carefully:</b> ${ats.suggested_keywords.map(esc).join(", ")}</p>`
+    : ""}
+      <p class="field-hint">${esc(ats.note)}</p>
+    </div>
   `;
-  const downloadText = data.cover_note ? `${data.resume}\n\n\n=== COVER NOTE ===\n\n${data.cover_note}` : data.resume;
+  const downloadText = [
+    data.resume,
+    data.cover_note ? `=== COVER NOTE ===\n\n${data.cover_note}` : "",
+    `=== FOLLOW-UP MESSAGE ===\n\n${pack.followUp}`,
+    `=== WHAT CHANGED ===\n\n${changes.map((x) => `- ${x}`).join("\n") || "Review manually."}`,
+    `=== ATS ALIGNMENT ===\n\nStrong matches: ${ats.strong_matches.join(", ") || "Review manually."}\nUse carefully: ${ats.suggested_keywords.join(", ") || "None listed."}\n${ats.note}`,
+  ].filter(Boolean).join("\n\n\n");
+  body.querySelector("[data-save-pack]")?.addEventListener("click", () => {
+    saveApplicationPack(pack);
+    const btn = body.querySelector("[data-save-pack]") as HTMLButtonElement | null;
+    if (btn) {
+      btn.textContent = "Saved pack";
+      btn.classList.add("is-done");
+    }
+  });
   body.querySelectorAll("[data-download]").forEach((btn) => btn.addEventListener("click", () => {
     const blob = new Blob([downloadText], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a");
@@ -1577,7 +1691,8 @@ function renderTailorResult(job: Job, data: TailorResult): void {
       const which = btn.getAttribute("data-copy");
       let text = data.resume;
       if (which === "cover") text = data.cover_note || "";
-      else if (which === "both") text = data.cover_note ? `${data.resume}\n\n\n=== COVER NOTE ===\n\n${data.cover_note}` : data.resume;
+      else if (which === "follow") text = pack.followUp;
+      else if (which === "both") text = downloadText;
       const button = btn as HTMLButtonElement;
       const original = button.textContent || "Copy";
       try {

@@ -14,6 +14,7 @@ export function defaultState(): AppState {
     notes: {},
     followUps: {},
     appliedLog: {},
+    applicationPacks: {},
     followAlertDay: "",
     seen: [],
     filters: defaultFilters(),
@@ -89,6 +90,7 @@ export function migrateLocalV1(): void {
       hidden: {},
       appliedLog: {},
       followUps: {},
+      applicationPacks: {},
       profile: { ...defaultState().profile },
       commuteRadius: null,
     };
@@ -127,6 +129,10 @@ export function migrateLocalV1(): void {
     // followUps: same shape
     if (old.followUps && typeof old.followUps === "object") {
       Object.assign(patch.followUps!, old.followUps);
+    }
+    // applicationPacks: additive v3-ish field; keep if already present in a copied profile blob
+    if (old.applicationPacks && typeof old.applicationPacks === "object" && !Array.isArray(old.applicationPacks)) {
+      Object.assign(patch.applicationPacks!, old.applicationPacks);
     }
     // top-level resume → profile.resume
     if (typeof old.resume === "string") patch.profile!.resume = old.resume;
@@ -172,6 +178,7 @@ export function migrateLocalV1(): void {
       notes: { ...(patch.notes ?? {}), ...cur.notes },
       appliedLog: { ...patch.appliedLog, ...cur.appliedLog },
       followUps: { ...patch.followUps, ...cur.followUps },
+      applicationPacks: { ...patch.applicationPacks, ...cur.applicationPacks },
       followAlertDay: cur.followAlertDay || "",
       profile: {
         ...cur.profile,

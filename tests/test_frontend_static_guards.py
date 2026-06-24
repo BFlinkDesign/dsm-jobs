@@ -98,6 +98,35 @@ def test_resume_tailor_is_trust_first_with_recovery_paths():
     assert ".tailor-error" in css
 
 
+def test_application_pack_is_saved_and_reopenable():
+    app = _read("app/src/scripts/app.ts")
+    types = _read("app/src/scripts/types.ts")
+    store = _read("app/src/scripts/store.ts")
+    autosave = _read("app/src/scripts/autosave.ts")
+
+    assert "export type ApplicationPack" in types
+    assert "applicationPacks: Record<string, ApplicationPack>" in types
+    assert "applicationPacks: {}" in store
+    assert "applicationPacks: s.applicationPacks" in autosave
+    assert "Save application pack" in app
+    assert "data-save-pack" in app
+    assert "data-pack" in app
+    assert "openApplicationPack" in app
+    assert "Follow-up message" in app
+    assert "ATS alignment" in app
+
+
+def test_resume_tailor_edge_function_returns_application_pack_fields():
+    fn = _read("supabase/functions/resume-tailor/index.ts")
+
+    assert "follow_up" in fn
+    assert "ats_alignment" in fn
+    assert "strong_matches" in fn
+    assert "suggested_keywords" in fn
+    assert "without keyword stuffing or inventing facts" in fn
+    assert 'required: ["resume", "changes", "cover_note", "follow_up", "ats_alignment"]' in fn
+
+
 def test_resume_upload_parser_has_explicit_formats_and_clear_fallbacks():
     resume = _read("app/src/scripts/resume.ts")
     app = _read("app/src/scripts/app.ts")
