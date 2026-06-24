@@ -51,13 +51,13 @@ THINKING_SEEDS = [
 ]
 
 TAILOR_SEEDS = [
-    "Reading the resume and the job posting side by side.",
+    "Reading the résumé and the job posting side by side.",
     "Matching real experience to the job requirements.",
     "Pulling the strongest relevant details forward.",
     "Keeping the wording honest and specific.",
     "Trimming clutter so the useful parts stand out.",
-    "Shaping the resume for this role without inventing anything.",
-    "Checking that every claim stays grounded in the resume.",
+    "Shaping the résumé for this role without inventing anything.",
+    "Checking that every claim stays grounded in the résumé.",
     "Making the application easier to read.",
     "Highlighting transferable skills.",
     "Tightening the language for a hiring manager.",
@@ -120,7 +120,7 @@ THINKING_TEMPLATES = [
 ]
 
 TAILOR_TEMPLATES = [
-    ("{verb} the resume {target}.", "verb", [
+    ("{verb} the résumé {target}.", "verb", [
         "Aligning", "Tightening", "Polishing", "Trimming", "Reframing",
         "Organizing", "Sharpening", "Matching", "Clarifying", "Preparing",
     ], "target", [
@@ -130,7 +130,7 @@ TAILOR_TEMPLATES = [
         "so the strongest parts show first",
     ]),
     ("{lead}: {detail}.", "lead", [
-        "Resume pass", "Job match", "Cover note pass", "Experience check",
+        "Résumé pass", "Job match", "Cover note pass", "Experience check",
         "Bullet cleanup", "Hiring-manager pass", "Grounding check", "Final polish",
     ], "detail", [
         "real details only", "clearer wording", "no invented claims",

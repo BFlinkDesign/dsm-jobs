@@ -762,6 +762,61 @@ body::after {
   color: var(--ink-muted);
   margin-top: var(--space-1);
 }
+.doc-list {
+  display: grid;
+  gap: var(--space-2);
+  margin: var(--space-2) 0;
+}
+.doc-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: start;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: color-mix(in oklab, var(--surface) 82%, transparent);
+}
+.doc-item.is-active {
+  border-color: color-mix(in oklab, var(--safe) 58%, var(--line));
+  background: color-mix(in oklab, var(--safe) 10%, var(--surface));
+}
+.doc-main {
+  min-width: 0;
+}
+.doc-name {
+  display: block;
+  color: var(--ink);
+  font-weight: 800;
+}
+.doc-meta,
+.doc-preview {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+}
+.doc-preview {
+  max-width: 68ch;
+}
+.doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+.doc-empty {
+  margin-bottom: var(--space-2);
+}
+@media (max-width: 560px) {
+  .doc-item {
+    grid-template-columns: 1fr;
+  }
+  .doc-actions {
+    justify-content: flex-start;
+  }
+}
 .resume-readout {
   display: block;
   color: var(--route);

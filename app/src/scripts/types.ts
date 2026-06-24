@@ -95,6 +95,15 @@ export type ApplicationPack = {
   ats: AtsAlignment;
 };
 
+export type ResumeDocument = {
+  id: string;
+  name: string;
+  text: string;
+  source: "paste" | "upload";
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type AppState = {
   applied: Record<string, boolean>;
   saved: Record<string, boolean>;
@@ -111,6 +120,8 @@ export type AppState = {
     preferredName: string;
     legalName: string;
     resume: string;
+    documents: ResumeDocument[];
+    activeDocumentId: string;
     quiz: Record<string, string>;
   };
   commuteRadius: number | null;
