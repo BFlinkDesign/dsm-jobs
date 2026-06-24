@@ -1,8 +1,8 @@
-// Live-model BEHAVIORAL eval for the companion (Ruby).
+// Live-model BEHAVIORAL eval for the companion (Rudy).
 //
 // grounding_test.ts proves the pure helper; safety_test.ts guards the source
 // strings. This goes further: it sends adversarial messages to the REAL model
-// using the SAME system prompt the function deploys, and asserts Ruby actually
+// using the SAME system prompt the function deploys, and asserts Rudy actually
 // BEHAVES safely — routes a crisis to the verified lines, never confabulates,
 // never reopens "open on hours" for in-person work, and holds the not-a-therapist
 // boundary. This is the answer to "how do you know Rudy is safe for her?".

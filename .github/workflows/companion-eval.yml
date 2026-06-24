@@ -1,7 +1,7 @@
-# Live-model behavioral eval for the companion (Ruby).
+# Live-model behavioral eval for the companion (Rudy).
 #
 # Sends adversarial messages through the REAL model using the deployed system
-# prompt and asserts Ruby behaves safely (crisis routing, no confabulation, the
+# prompt and asserts Rudy behaves safely (crisis routing, no confabulation, the
 # daytime/remote availability boundary, the not-a-therapist boundary). This is
 # the behavioral half of the verification story — grounding_test.ts/safety_test.ts
 # cover the structural half in edge-checks.yml.

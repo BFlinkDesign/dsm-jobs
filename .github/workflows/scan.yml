@@ -37,6 +37,7 @@ jobs:
       USAJOBS_EMAIL: ${{ secrets.USAJOBS_EMAIL }}
       JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
       CAREERJET_AFFID: ${{ secrets.CAREERJET_AFFID }}
+      PYTHONUNBUFFERED: "1"
       # Portal (all optional; push + sign-in UI self-disable when unset).
       # SUPABASE_SERVICE_KEY never reaches the page; PUBLISHABLE is browser-safe.
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
@@ -90,7 +91,12 @@ jobs:
 
       - name: Build mobile job app
         if: steps.gate.outputs.run == 'true'
-        run: python find_admin_jobs.py --contact "Brady" --push-supabase
+        timeout-minutes: 9
+        shell: bash
+        run: |
+          start=$SECONDS
+          timeout 540s python find_admin_jobs.py --contact "Daddy" --push-supabase
+          echo "Build mobile job app completed in $((SECONDS - start))s"
 
       - name: Set up Node
         if: steps.gate.outputs.run == 'true'

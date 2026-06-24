@@ -12,7 +12,7 @@ Deno.test("baseline availability is injected with a null profile", () => {
   const out = knownFacts(null);
   assertStringIncludes(out, BASELINE);
   assertStringIncludes(out, "NOT open on hours for in-person work");
-  assertStringIncludes(out, "[set by Brady]");
+  assertStringIncludes(out, "[set by Daddy]");
   assertStringIncludes(out, "KNOWN FACTS about her");
 });
 

@@ -23,10 +23,10 @@ def test_user_facing_copy_is_professional_safe():
         ]
     )
     banned = [
-        "Daddy",
         "hot stuff",
         "on my knees",
         "flustered",
+        "horny",
         "dirty",
         "undressing",
         "undress",
@@ -41,6 +41,23 @@ def test_user_facing_copy_is_professional_safe():
     ]
     hits = [term for term in banned if term.lower() in text.lower()]
     assert not hits
+
+
+def test_rudy_voice_and_spicy_modes_are_explicit_opt_in():
+    app = _read("app/src/scripts/app.ts")
+    page = _read("app/src/pages/index.astro")
+    fn = _read("supabase/functions/companion/index.ts")
+
+    assert 'aria-pressed="false" title="Read Rudy aloud"' in page
+    assert 'localStorage.getItem("rudySpeak") === "1"' in app
+    assert 'localStorage.getItem("rudySpicy") === "1"' in app
+    assert 'body: { message: msg, spicy: spicyOn }' in app
+    assert "Spicy mode is off" in page
+    assert "body?.spicy === true" in fn
+    assert "Spicy never means sexual" in fn
+    assert "HARD RULES, crisis routing, anti-confabulation" in fn
+    assert "private life-and-job app that Daddy built" in fn
+    assert '/^(brady|me)$/i.test(rawWho) ? "Daddy" : rawWho' in app
 
 
 def test_rudy_thinking_bubbles_are_bound_by_element_reference():
@@ -207,6 +224,9 @@ def test_frontend_ci_uses_exact_node_engine_floor_and_generator():
     assert 'node-version: "22.12"' in scan
     assert "python scripts/generate_rudy_sayings.py" in ci
     assert "python scripts/generate_rudy_sayings.py" in scan
+    assert 'PYTHONUNBUFFERED: "1"' in scan
+    assert 'timeout 540s python find_admin_jobs.py --contact "Daddy" --push-supabase' in scan
+    assert "Build mobile job app completed in" in scan
 
 
 def test_pre_publish_gate_checks_meta_json_before_reading():
@@ -226,6 +246,10 @@ def test_health_monitor_reads_published_meta_json_for_freshness():
 def test_mobile_bottom_nav_does_not_show_content_underneath():
     css = _read("app/src/styles/app.css")
     assert "calc(var(--nav-h) + var(--safe-bottom) + var(--space-8))" in css
+    assert "calc(var(--nav-h) + var(--safe-bottom) + var(--space-6))" in css
+    assert ".call-btn" in css
+    assert "bottom: calc(var(--nav-h) + var(--safe-bottom) + 12px)" in css
+    assert ".app-foot .field-hint" in css
     assert ".nav-bottom" in css
     assert "background: var(--paper);" in css
     assert "box-shadow: 0 -12px 28px" in css

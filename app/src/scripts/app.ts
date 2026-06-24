@@ -102,6 +102,7 @@ const COMMUTE_BANDS: Array<[number | null, string]> = [
 // Speech state — stored in localStorage separate from AppState (device-specific opt-in)
 let speechSynthOK = false;
 let speakOn = false;
+let spicyOn = false;
 let speechVoice: SpeechSynthesisVoice | null = null;
 
 // ── Affirmations pool (per-day rotation via dayHash) ──────────────────────
@@ -1383,7 +1384,8 @@ function isPasswordRecoveryHash(): boolean {
 function renderCallButton(): void {
   const btn = $("#call-btn");
   if (!btn) return;
-  const who = meta.contact?.trim() || "someone you trust";
+  const rawWho = meta.contact?.trim() || "Daddy";
+  const who = /^(brady|me)$/i.test(rawWho) ? "Daddy" : rawWho;
   if (meta.phone?.trim()) {
     const tel = meta.phone.replace(/[^0-9+]/g, "");
     btn.setAttribute("href", `tel:${tel}`);
@@ -1451,7 +1453,7 @@ async function renderRudyLog(): Promise<void> {
     const p = getState().profile;
     const name = (p.preferredName || p.legalName).trim();
     const greeting = name ? `Hi ${esc(name)} —` : "Hi —";
-    log.insertAdjacentHTML("beforeend", `<div class="bubble ai">${greeting} I'm Rudy 🐄. No pressure today. Tell me how you're doing, or tap a job and I'll help you talk it through. Moo means I'm in your corner.</div>`);
+    log.insertAdjacentHTML("beforeend", `<div class="bubble ai">${greeting} I'm Rudy 🐄. No pressure today. Tell me how you're doing, ask for a tiny next step, or tap a job and I'll help you talk it through. Moo means I'm in your corner.</div>`);
   } else {
     for (const m of msgs) {
       const cls = m.role === "user" ? "me" : "ai";
@@ -1486,7 +1488,7 @@ async function sendRudy(): Promise<void> {
     return;
   }
   try {
-    const { data, error } = await sb.functions.invoke("companion", { body: { message: msg } });
+    const { data, error } = await sb.functions.invoke("companion", { body: { message: msg, spicy: spicyOn } });
     const reply = (error?.message ? null : (data?.reply as string)) || "I'm here with you. Try again in a moment. 💜";
     thinkingBubble.classList.remove("think");
     thinkingBubble.textContent = reply;
@@ -2230,10 +2232,36 @@ async function boot(): Promise<void> {
   $("#rudy-input")?.addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Enter") void sendRudy();
   });
+  document.querySelectorAll<HTMLElement>("[data-rudy-prompt]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const prompt = btn.dataset.rudyPrompt?.trim();
+      const inp = $("#rudy-input") as HTMLInputElement | null;
+      if (!prompt || !inp) return;
+      inp.value = prompt;
+      void sendRudy();
+    });
+  });
+  spicyOn = localStorage.getItem("rudySpicy") === "1";
+  const spicyBtn = $("#rudy-spicy");
+  const syncSpicy = (): void => {
+    if (!spicyBtn) return;
+    spicyBtn.setAttribute("aria-pressed", spicyOn ? "true" : "false");
+    spicyBtn.title = spicyOn ? "Spicy mode is on" : "Spicy mode is off";
+    spicyBtn.classList.toggle("on", spicyOn);
+  };
+  if (spicyBtn) {
+    syncSpicy();
+    spicyBtn.addEventListener("click", () => {
+      spicyOn = !spicyOn;
+      localStorage.setItem("rudySpicy", spicyOn ? "1" : "0");
+      syncSpicy();
+      toast(spicyOn ? "Spicy Rudy on" : "Spicy Rudy off");
+    });
+  }
 
   // ── Voice: SpeechSynthesis (read-aloud toggle) ──────────────────────────
   speechSynthOK = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
-  speakOn = speechSynthOK && localStorage.getItem("rudySpeak") !== "0";
+  speakOn = speechSynthOK && localStorage.getItem("rudySpeak") === "1";
   const pickVoice = (): void => {
     if (!speechSynthOK) return;
     try {
@@ -2252,15 +2280,19 @@ async function boot(): Promise<void> {
     try { window.speechSynthesis.onvoiceschanged = pickVoice; } catch { /* no-op */ }
   }
   const spkBtn = $("#rudy-spk");
-  if (spkBtn) {
+  const syncSpeaker = (): void => {
+    if (!spkBtn) return;
     spkBtn.hidden = !speechSynthOK;
     spkBtn.setAttribute("aria-pressed", speakOn ? "true" : "false");
-    spkBtn.title = speakOn ? "Mute Rudy" : "Unmute Rudy";
+    spkBtn.title = speakOn ? "Turn Rudy voice off" : "Read Rudy aloud";
+  };
+  if (spkBtn) {
+    syncSpeaker();
     spkBtn.addEventListener("click", () => {
       speakOn = !speakOn;
-      spkBtn.setAttribute("aria-pressed", speakOn ? "true" : "false");
-      spkBtn.title = speakOn ? "Mute Rudy" : "Unmute Rudy";
       localStorage.setItem("rudySpeak", speakOn ? "1" : "0");
+      syncSpeaker();
+      toast(speakOn ? "Rudy voice on" : "Rudy voice off");
       if (!speakOn) { try { window.speechSynthesis.cancel(); } catch { /* no-op */ } }
     });
   }
