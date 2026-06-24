@@ -116,6 +116,19 @@ def test_application_pack_is_saved_and_reopenable():
     assert "ATS alignment" in app
 
 
+def test_application_status_has_persistent_undo_and_custom_followup_date():
+    app = _read("app/src/scripts/app.ts")
+    css = _read("app/src/styles/app.css")
+
+    assert "Undo applied" in app
+    assert "data-unapply" in app
+    assert "Applied status removed" in app
+    assert "data-follow-date" in app
+    assert "Follow up on" in app
+    assert "fu.done = false" in app
+    assert ".follow-date-label" in css
+
+
 def test_resume_tailor_edge_function_returns_application_pack_fields():
     fn = _read("supabase/functions/resume-tailor/index.ts")
 
