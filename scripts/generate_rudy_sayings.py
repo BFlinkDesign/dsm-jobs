@@ -25,7 +25,7 @@ SEARCHING_SEEDS = [
     "Looking for a few strong starts instead of a wall of noise.",
     "Matching the list to what you said matters.",
     "Pay not listed? Side-eye logged.",
-    "Scammy listing energy detected; putting it in timeout.",
+    "Filtering out risky listings before they waste your time.",
     "If the commute is nonsense, Rudy is judging it.",
     "Making the job pile behave.",
     "Sorting the chaos before it gets ideas.",

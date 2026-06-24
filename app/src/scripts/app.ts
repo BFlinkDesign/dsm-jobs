@@ -50,14 +50,21 @@ let feedLoadFailed = false;
 let rudyHistoryLoaded = false;
 let tailorTimer: ReturnType<typeof setInterval> | null = null;
 let filtersExpanded = false;
-let lastTailorRequest: { job: Job; resume: string; jobText: string } | null = null;
+let lastTailorRequest: TailorRequest | null = null;
 type BeforeInstallPromptEvent = Event & {
   prompt(): Promise<void>;
   userChoice: Promise<{ outcome: string }>;
 };
 let deferredInstall: BeforeInstallPromptEvent | null = null;
 let authMode: "signin" | "signup" = "signin";
-type TailorResult = { resume: string; changes?: string[]; cover_note?: string };
+interface TailorRequest { job: Job; resume: string; jobText: string }
+interface TailorResult { resume: string; changes?: string[]; cover_note?: string }
+type ErrorBodyLike = { error?: unknown; message?: unknown };
+type ResponseLike = {
+  clone?: () => ResponseLike;
+  json?: () => Promise<unknown>;
+  text?: () => Promise<string>;
+};
 
 const QUIZ: Array<[string, string, Array<[string, string]>]> = [
   ["kind", "What kind of work sounds best right now?", [
@@ -1440,8 +1447,48 @@ function renderTailorPaste(job: Job, resume: string, initialText = ""): void {
   });
 }
 
+function normalizeTailorError(message?: string): string {
+  return Array.from((message || "").toLowerCase().normalize("NFD"))
+    .filter((ch) => {
+      const code = ch.charCodeAt(0);
+      return code < 0x0300 || code > 0x036f;
+    })
+    .join("");
+}
+
+function messageFromTailorErrorBody(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object") return undefined;
+  const body = value as ErrorBodyLike;
+  if (typeof body.error === "string") return body.error;
+  if (typeof body.message === "string") return body.message;
+  return undefined;
+}
+
+async function extractTailorErrorMessage(dataError: unknown, error: unknown): Promise<string | undefined> {
+  const fromData = messageFromTailorErrorBody(dataError);
+  if (fromData) return fromData;
+  const maybeError = error as { message?: unknown; context?: unknown } | null;
+  const context = maybeError?.context as ResponseLike | undefined;
+  if (context?.json) {
+    try {
+      const source = context.clone?.() ?? context;
+      const fromBody = messageFromTailorErrorBody(await source.json?.());
+      if (fromBody) return fromBody;
+    } catch { /* fall through to text / message */ }
+  }
+  if (context?.text) {
+    try {
+      const source = context.clone?.() ?? context;
+      const text = (await source.text?.())?.trim();
+      if (text) return text;
+    } catch { /* fall through to message */ }
+  }
+  return typeof maybeError?.message === "string" ? maybeError.message : undefined;
+}
+
 function friendlyTailorError(message?: string): string {
-  const lower = (message || "").toLowerCase();
+  const lower = normalizeTailorError(message);
   if (lower.includes("auth") || lower.includes("jwt") || lower.includes("session")) {
     return "Your sign-in needs a refresh. Sign in again, then try this tailor.";
   }
@@ -1514,8 +1561,6 @@ function renderTailorResult(job: Job, data: TailorResult): void {
       <textarea class="field tailor-ta" id="tailor-cover" rows="5" readonly>${esc(data.cover_note)}</textarea>
       <button type="button" class="btn btn-ghost" data-copy="cover">Copy cover note</button>
     </div>` : ""}
-    <button type="button" class="btn btn-primary" data-copy="both" style="margin-top:12px">Copy both</button>
-    <button type="button" class="btn btn-ghost" data-download style="margin-top:8px">Download text file</button>
   `;
   const downloadText = data.cover_note ? `${data.resume}\n\n\n=== COVER NOTE ===\n\n${data.cover_note}` : data.resume;
   body.querySelectorAll("[data-download]").forEach((btn) => btn.addEventListener("click", () => {
@@ -1528,14 +1573,15 @@ function renderTailorResult(job: Job, data: TailorResult): void {
     toast("Downloaded ✦");
   }));
   body.querySelectorAll("[data-copy]").forEach((btn) => {
-    btn.addEventListener("click", () => {
+    btn.addEventListener("click", async () => {
       const which = btn.getAttribute("data-copy");
       let text = data.resume;
       if (which === "cover") text = data.cover_note || "";
       else if (which === "both") text = data.cover_note ? `${data.resume}\n\n\n=== COVER NOTE ===\n\n${data.cover_note}` : data.resume;
       const button = btn as HTMLButtonElement;
       const original = button.textContent || "Copy";
-      navigator.clipboard?.writeText(text).then(() => {
+      try {
+        await navigator.clipboard?.writeText(text);
         button.textContent = "Copied";
         button.classList.add("is-done");
         toast("Copied");
@@ -1543,7 +1589,9 @@ function renderTailorResult(job: Job, data: TailorResult): void {
           button.textContent = original;
           button.classList.remove("is-done");
         }, 1400);
-      }).catch(() => toast("Copy failed — select text manually"));
+      } catch {
+        toast("Copy failed — select text manually");
+      }
     });
   });
 }
@@ -1563,7 +1611,7 @@ async function runTailor(job: Job, resume: string, jobText: string): Promise<voi
     });
     stopTailorLoader();
     if (error || !data?.resume) {
-      renderTailorError(job, friendlyTailorError((data?.error as string | undefined) || error?.message));
+      renderTailorError(job, friendlyTailorError(await extractTailorErrorMessage(data?.error, error)));
       return;
     }
     renderTailorResult(job, data as TailorResult);

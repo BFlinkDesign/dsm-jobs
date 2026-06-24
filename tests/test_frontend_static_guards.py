@@ -60,7 +60,7 @@ def test_rudy_resume_tailor_uses_mischief_voice_and_sparkler_meter():
     assert "Rudy tailored this" in app
     assert "Rudy is side-eyeing the buzzwords" in app
     assert "Making the boring form behave" in sayings
-    assert "Scammy listing energy detected" in generator
+    assert "Filtering out risky listings before they waste your time" in generator
     assert "role=\"progressbar\"" in app
     assert "id=\"tailor-meter\"" in app
     assert "role=\"status\"" in app
@@ -68,6 +68,8 @@ def test_rudy_resume_tailor_uses_mischief_voice_and_sparkler_meter():
     assert "spark-fall" in css
     assert "route-sweep" in css
     assert "resume-readout" in css
+    assert "Scammy listing energy detected" not in app
+    assert "Scammy listing energy detected" not in generator
 
 
 def test_resume_tailor_is_trust_first_with_recovery_paths():
@@ -83,9 +85,13 @@ def test_resume_tailor_is_trust_first_with_recovery_paths():
     assert "What Rudy changed" in app
     assert "tailor-result-actions" in app
     assert "data-download" in app
+    assert "Download text file</button>" not in app
     assert "data-tailor-retry" in app
     assert "data-tailor-edit" in app
     assert "friendlyTailorError" in app
+    assert "extractTailorErrorMessage" in app
+    assert "normalizeTailorError" in app
+    assert "navigator.clipboard?.writeText(text).then" not in app
     assert ".tailor-trust" in css
     assert ".tailor-changes" in css
     assert ".tailor-result-actions" in css
