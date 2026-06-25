@@ -25,6 +25,15 @@ permissions:
   contents: write   # push gh-pages within this repo
   issues: write     # open an issue if the daily build/publish fails (self-repair signal)
 
+# Only ever run ONE scan at a time. A merge to main triggers a push-scan, and a
+# manual workflow_dispatch (or the daily cron) can overlap it — two scans hitting
+# Adzuna at once trips its per-window rate limit (HTTP 429) and fails the deploy
+# (observed 2026-06-25). One shared group across every trigger serializes them;
+# cancel-in-progress drops the older, redundant run so the newest commit wins.
+concurrency:
+  group: scan-publish
+  cancel-in-progress: true
+
 jobs:
   scan:
     runs-on: ubuntu-24.04
