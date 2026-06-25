@@ -52,6 +52,7 @@ export type FilterPrefs = {
   filterTrusted: boolean;
   filterCategory: string;
   showHidden: boolean;
+  sortBy: "newest" | "match" | "remote" | "commute" | "pay";
 };
 
 export function defaultFilters(): FilterPrefs {
@@ -65,6 +66,7 @@ export function defaultFilters(): FilterPrefs {
     filterTrusted: false,
     filterCategory: "",
     showHidden: false,
+    sortBy: "newest",
   };
 }
 
@@ -128,4 +130,33 @@ export type AppState = {
   coachOff: boolean;
 };
 
-export type ViewName = "jobs" | "today" | "apps" | "corner" | "help";
+export type ViewName = "jobs" | "today" | "apps" | "corner" | "help" | "money";
+
+// Resources hub (Money & help tab) — loaded at runtime from resources.json.
+export type Resource = {
+  name: string;
+  what: string;
+  who?: string;
+  how?: string;
+  url?: string;
+  phone?: string;
+  whatToSay?: string;
+  time?: string;
+};
+
+export type ResourceSection = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  resources: Resource[];
+};
+
+export type ResourceHub = {
+  intro: string;
+  startHere?: { title: string; body: string; phone?: string };
+  sections: ResourceSection[];
+  skillsIntro?: string;
+  skills: Resource[];
+  safetyNote?: string;
+  updated?: string;
+};

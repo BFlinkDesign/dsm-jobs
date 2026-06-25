@@ -1,4 +1,4 @@
-import type { AppState, ApplicationPack, AtsAlignment, Job, Meta, ResumeDocument, ViewName } from "./types";
+import type { AppState, ApplicationPack, AtsAlignment, FilterPrefs, Job, Meta, Resource, ResourceHub, ResumeDocument, ViewName } from "./types";
 import {
   appendChatToLocal,
   autosave,
@@ -39,6 +39,7 @@ const LOCKED: Record<string, boolean> = { today: true, apps: true, corner: true 
 
 let jobs: Job[] = [];
 let meta: Meta = { contact: "", phone: "", generated: "", hidden: 0, total: 0, safe: 0 };
+let hub: ResourceHub | null = null;
 let view: ViewName = "jobs";
 let authed = false;
 let commuteMax: number | null = null;
@@ -160,28 +161,58 @@ function speakText(text: string): void {
   } catch { /* no-op */ }
 }
 
-/** 3 deterministic daily picks: trusted/trains-first, seeded by dayHash. */
+/** How strong a lead is FOR HER — her quiz answers weigh most, then remote,
+ * known/safe employer, will-train, confirmed pay, a short commute, and freshness. */
+function pickScore(j: Job): number {
+  const s = getState();
+  let sc = forYouScore(j) * 2;                 // her own answers matter most
+  if (j.remote) sc += 3;                        // she prefers remote
+  if (j.trusted) sc += 2;                       // known / safer employer
+  if (j.trains) sc += 2;                        // will train — good when starting over
+  if (j.good) sc += 1;                          // confirmed $19+/hr
+  if (!j.remote && j.commuteMin != null) {
+    if (j.commuteMin <= 20) sc += 2;
+    else if (j.commuteMin <= 30) sc += 1;
+  }
+  const days = (j.posted ? daysSince(j.posted) : 99) ?? 99;
+  if (days <= 2) sc += 2; else if (days <= 7) sc += 1;
+  if (s.saved[j.id]) sc += 1;                   // she already flagged interest
+  return sc;
+}
+
+/** The 3 strongest leads for her right now — genuinely scored, not random.
+ * Skips ones she's hidden, snoozed, or already applied to. */
 function todaysPicks(): Job[] {
   const s = getState();
   const pool = jobs.filter((j) => {
     if (s.hidden[j.id]) return false;
     if (snoozedNow(j.id)) return false;
+    if (s.applied[j.id]) return false;          // don't re-pitch what she already did
     if (commuteMax != null && !j.remote && j.commuteMin != null && j.commuteMin > commuteMax) return false;
     return true;
   });
-  const ranked = pool.slice().sort((a, b) => {
-    const sa = (a.trusted ? 2 : 0) + (a.trains ? 1 : 0);
-    const sb2 = (b.trusted ? 2 : 0) + (b.trains ? 1 : 0);
-    return sb2 - sa;
-  });
-  const picks: Job[] = [];
-  const h = dayHash();
-  const top = ranked.slice(0, Math.min(12, ranked.length));
-  for (let k = 0; k < top.length && picks.length < 3; k++) {
-    const pick = top[(h + k * 5) % top.length];
-    if (!picks.includes(pick)) picks.push(pick);
-  }
-  return picks;
+  return pool
+    .map((j, i) => [pickScore(j), -i, j] as const)
+    .sort((a, b) => b[0] - a[0] || b[1] - a[1])
+    .slice(0, 3)
+    .map((x) => x[2]);
+}
+
+/** One short, warm line explaining why a pick fits HER — built from real fields. */
+function pickReason(j: Job): string {
+  const p = getState().profile.quiz;
+  const bits: string[] = [];
+  if (j.remote) bits.push("works from home");
+  else if (j.commuteMin != null && j.commuteMin <= 20) bits.push(`only about ${j.commuteMin} min away`);
+  else if (j.commute) bits.push(j.commute.replace("~", "about "));
+  if (p.kind === "quiet" && j.category === "Office") bits.push("the calm office work she likes");
+  else if (p.kind === "people" && j.category === "Customer service") bits.push("the people work she likes");
+  else if ((p.kind === "care" || p.kind === "hands") && j.category === "Caregiving") bits.push("the caregiving she likes");
+  if (j.trains) bits.push("they'll train her");
+  if (j.good) bits.push("pays $19+/hr");
+  if (j.trusted && bits.length < 2) bits.push(j.trustLabel ? `${j.trustLabel.toLowerCase()} employer` : "a known employer");
+  if (!bits.length) bits.push("a solid, scam-checked lead");
+  return `Why this one: ${bits.slice(0, 3).join(", ")}.`;
 }
 
 /** Update the "My apps" tab badge to show count of due follow-ups. */
@@ -337,6 +368,9 @@ function syncFilterChips(): void {
   document.querySelectorAll("#filter-remote .chip").forEach((btn) => {
     btn.classList.toggle("on", btn.getAttribute("data-remote") === f.filterRemote);
   });
+  document.querySelectorAll("#sort-row .chip").forEach((btn) => {
+    btn.classList.toggle("on", btn.getAttribute("data-sort") === (f.sortBy || "newest"));
+  });
   document.querySelectorAll("#filter-commute .chip").forEach((btn) => {
     const v = btn.getAttribute("data-commute");
     const m = v === "any" ? null : Number(v);
@@ -379,7 +413,7 @@ function updateJobsListOnly(): void {
     renderJobsMain();
     return;
   }
-  const list = orderForYou(filteredJobs());
+  const list = sortJobs(filteredJobs());
   listEl.innerHTML = list.map(jobCard).join("") || "<p class='job-meta'>No jobs match — try widening filters.</p>";
   if (countEl) {
     countEl.textContent = `${list.length} safe job${list.length === 1 ? "" : "s"} · updated ${meta.generated}`;
@@ -534,12 +568,39 @@ function forYouScore(j: Job): number {
   return s;
 }
 
-function orderForYou(list: Job[]): Job[] {
-  if (!quizComplete()) return list;
-  return list
-    .map((j, i) => [forYouScore(j), -i, j] as const)
-    .sort((a, b) => b[0] - a[0] || b[1] - a[1])
-    .map((x) => x[2]);
+/** Sort options shown to her above the list. "Newest" is the default. */
+const SORT_MODES: Array<[FilterPrefs["sortBy"], string]> = [
+  ["newest", "Newest"],
+  ["match", "Best match"],
+  ["remote", "Remote first"],
+  ["commute", "Closest"],
+  ["pay", "Pay listed"],
+];
+
+/** Order the visible list by her chosen sort mode (default newest-first). */
+function sortJobs(list: Job[]): Job[] {
+  const mode = getState().filters.sortBy || "newest";
+  const byNewest = (a: Job, b: Job) => (b.posted || "").localeCompare(a.posted || "");
+  const arr = list.slice();
+  if (mode === "match") {
+    // Her quiz answers float matching work up; remote and freshness break ties.
+    return arr
+      .map((j, i) => [forYouScore(j), j.remote ? 1 : 0, -i, j] as const)
+      .sort((a, b) => b[0] - a[0] || b[1] - a[1] || a[2] - b[2])
+      .map((x) => x[3]);
+  }
+  if (mode === "remote") {
+    return arr.sort((a, b) => (Number(b.remote) - Number(a.remote)) || byNewest(a, b));
+  }
+  if (mode === "commute") {
+    const key = (j: Job) => (j.remote ? -1 : j.commuteMin ?? 999);
+    return arr.sort((a, b) => key(a) - key(b) || byNewest(a, b));
+  }
+  if (mode === "pay") {
+    // Opt-in only — never the default, so 'Pay not listed' leads aren't buried.
+    return arr.sort((a, b) => (Number(b.good) - Number(a.good)) || (b.payNum - a.payNum) || byNewest(a, b));
+  }
+  return arr.sort(byNewest);
 }
 
 function authRedirectUrl(): string {
@@ -650,13 +711,19 @@ function renderJobsMain(): void {
   const host = $("#view-host");
   if (!host) return;
   const f = getState().filters;
-  const list = orderForYou(filteredJobs());
+  const list = sortJobs(filteredJobs());
   const cats = jobCategories();
   const activeFilters = activeFilterCount();
   jobsShellReady = true;
   host.innerHTML = `
     <div class="search-row">
       <input class="search" type="search" placeholder="Search jobs…" value="${esc(f.searchQ)}" id="job-search" autocomplete="off" enterkeyhint="search" />
+    </div>
+    <p class="filter-label" style="margin-top:4px">Sort</p>
+    <div class="chip-row sort-row" id="sort-row">
+      ${SORT_MODES.map(([m, label]) =>
+    `<button type="button" class="chip${(f.sortBy || "newest") === m ? " on" : ""}" data-sort="${m}">${esc(label)}</button>`,
+  ).join("")}
     </div>
     <button type="button" class="filter-toggle" id="filter-toggle" aria-expanded="${filtersExpanded ? "true" : "false"}" aria-controls="filter-panel">
       <span>Filters${activeFilters ? ` (${activeFilters})` : ""}</span>
@@ -734,10 +801,12 @@ function renderToday(): void {
     <div class="card card-glitter">
       <h2 class="view-title">Today</h2>
       ${affirmation}
-      <p class="job-meta" style="margin-top:${affirmation ? "8px" : "0"}">Three doable leads — no pressure to apply to all of them.</p>
+      <p class="job-meta" style="margin-top:${affirmation ? "8px" : "0"}">Three leads picked for her — closest fit first. No pressure to apply to all three.</p>
       ${!s.coachOff ? `<button type="button" class="btn btn-ghost" id="coach-off-btn" style="margin-top:8px;font-size:var(--text-xs)">Turn off affirmations</button>` : `<button type="button" class="btn btn-ghost" id="coach-on-btn" style="margin-top:8px;font-size:var(--text-xs)">Turn on affirmations</button>`}
     </div>
-    <div class="jobs-grid">${picks.length ? picks.map(jobCard).join("") : "<p class='job-meta'>You've worked through today's list — genuinely well done. New jobs arrive every morning.</p>"}</div>
+    <div class="jobs-grid">${picks.length
+      ? picks.map((j) => `<div class="pick-wrap"><p class="pick-reason">${esc(pickReason(j))}</p>${jobCard(j)}</div>`).join("")
+      : "<p class='job-meta'>You've worked through today's list — genuinely well done. New jobs arrive every morning.</p>"}</div>
   `;
 }
 
@@ -864,6 +933,68 @@ function renderHelp(): void {
   `;
 }
 
+/** A dialable tel: href from a human-typed phone string ("(515) 244-0198"). */
+function telHref(phone: string): string {
+  const digits = (phone || "").replace(/[^0-9+]/g, "");
+  return digits ? `tel:${digits}` : "";
+}
+
+/** One help resource as a card: what it is, who it's for, a call button + link,
+ * and an optional "what to say" script she can read aloud. */
+function resourceCard(r: Resource): string {
+  const tel = r.phone ? telHref(r.phone) : "";
+  const link = r.url ? safeUrl(r.url) : "";
+  return `<article class="card resource-card">
+    <h3 class="section-title">${esc(r.name)}</h3>
+    <p class="job-meta">${esc(r.what)}</p>
+    ${r.who ? `<p class="field-hint">Who it's for: ${esc(r.who)}</p>` : ""}
+    ${r.time ? `<p class="field-hint">How long: ${esc(r.time)}</p>` : ""}
+    ${r.how ? `<p class="field-hint">${esc(r.how)}</p>` : ""}
+    ${r.whatToSay ? `<details class="script"><summary>What to say</summary><blockquote>&ldquo;${esc(r.whatToSay)}&rdquo;</blockquote></details>` : ""}
+    <div class="job-actions" style="margin-top:8px">
+      ${tel ? `<a class="btn btn-primary btn-sm" href="${esc(tel)}">Call ${esc(r.phone ?? "")}</a>` : ""}
+      ${link ? `<a class="btn btn-ghost btn-sm" href="${esc(link)}" target="_blank" rel="noopener">Open website</a>` : ""}
+    </div>
+  </article>`;
+}
+
+/** "Money & help" tab — verified local survival resources + free upskilling.
+ * Fully usable without an account (no lock); fails soft to the 211 anchor. */
+function renderMoney(): void {
+  const host = $("#view-host");
+  if (!host) return;
+  const h = hub;
+  if (!h) {
+    host.innerHTML = `<div class="card card-glitter">
+      <h2 class="view-title">Money &amp; help</h2>
+      <p class="job-meta">One free call connects to nearly every local program — rent, utilities, food, child care, and more. In Iowa, dial <a href="tel:211"><b>2-1-1</b></a> (free, 24/7) or visit <a href="https://www.211iowa.org" target="_blank" rel="noopener">211iowa.org</a>.</p>
+      <a class="btn btn-primary" href="tel:211" style="margin-top:8px">Call 2-1-1 — free, 24/7</a>
+    </div>`;
+    return;
+  }
+  const start = h.startHere ? `<div class="card card-glitter">
+    <h3 class="section-title">${esc(h.startHere.title)}</h3>
+    <p class="job-meta">${esc(h.startHere.body)}</p>
+    ${h.startHere.phone ? `<a class="btn btn-primary" href="${esc(telHref(h.startHere.phone))}" style="margin-top:8px">Call ${esc(h.startHere.phone)}</a>` : ""}
+  </div>` : "";
+  const sections = h.sections.map((sec) => `<section class="resource-section">
+    <h3 class="section-head">${esc(sec.title)}</h3>
+    ${sec.subtitle ? `<p class="job-meta section-sub">${esc(sec.subtitle)}</p>` : ""}
+    ${sec.resources.map(resourceCard).join("")}
+  </section>`).join("");
+  const skills = h.skills && h.skills.length ? `<section class="resource-section">
+    <h3 class="section-head">Free skills that pay off</h3>
+    ${h.skillsIntro ? `<p class="job-meta section-sub">${esc(h.skillsIntro)}</p>` : ""}
+    ${h.skills.map(resourceCard).join("")}
+  </section>` : "";
+  const safety = h.safetyNote ? `<div class="crisis"><b>Stay safe</b><p class="job-meta">${esc(h.safetyNote)}</p></div>` : "";
+  host.innerHTML = `
+    <div class="card card-glitter"><h2 class="view-title">Money &amp; help</h2><p class="job-meta">${esc(h.intro)}</p></div>
+    ${start}${sections}${skills}${safety}
+    ${h.updated ? `<p class="field-hint" style="margin-top:8px">Resource list reviewed ${esc(h.updated)}. Programs change — calling to confirm is always smart.</p>` : ""}
+  `;
+}
+
 function render(): void {
   switch (view) {
     case "jobs": renderJobsMain(); break;
@@ -871,6 +1002,7 @@ function render(): void {
     case "apps": renderApps(); break;
     case "corner": renderCorner(); break;
     case "help": renderHelp(); break;
+    case "money": renderMoney(); break;
   }
   document.body.classList.toggle("authed", authed);
   renderFollowBadge();
@@ -923,7 +1055,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -977,6 +1109,13 @@ function handleViewClick(e: Event): void {
       autosave();
       refreshJobsView();
     }
+    return;
+  }
+  if (t.hasAttribute("data-sort")) {
+    const m = t.getAttribute("data-sort") as FilterPrefs["sortBy"];
+    patchState((s) => { s.filters.sortBy = m; });
+    autosave();
+    refreshJobsView();
     return;
   }
   if (t.hasAttribute("data-remote")) {
@@ -1995,6 +2134,11 @@ async function loadFeed(): Promise<boolean> {
     }
     jobs = (await jobsR.json()) as Job[];
     meta = (await metaR.json()) as Meta;
+    // Resources hub is optional — a missing/!ok resources.json never breaks jobs.
+    try {
+      const rR = await fetch(`${base}resources.json`);
+      if (rR.ok) hub = (await rR.json()) as ResourceHub;
+    } catch { /* resources optional */ }
     markJobsSeen();
     updateStaleBanner();
     const gen = $("#meta-generated");

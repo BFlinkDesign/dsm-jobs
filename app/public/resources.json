@@ -1,0 +1,218 @@
+{
+  "updated": "June 2026",
+  "intro": "Losing a job is scary, especially with a little one counting on you. You are not alone, and asking for help is the smart, strong move — these programs exist for exactly this moment. Start with one call below. You don't have to do it all today.",
+  "startHere": {
+    "title": "Start here: call 2-1-1",
+    "body": "One free call, any time day or night, connects you to almost everything — rent, utilities, food, child care, and more. A real person helps you figure out what you qualify for. Free, private, no judgment.",
+    "phone": "211"
+  },
+  "sections": [
+    {
+      "id": "home",
+      "title": "Keep your home",
+      "subtitle": "Behind or worried about rent? Ask early — these help most before it's overdue.",
+      "resources": [
+        {
+          "name": "Polk County rent help",
+          "what": "One-time help with rent for Polk County families going through a rough patch.",
+          "who": "Polk County residents with a sudden hardship.",
+          "how": "Call to start — they'll tell you which papers to bring.",
+          "phone": "(515) 286-2088",
+          "url": "https://www.polkcountyiowa.gov/community-family-youth-services/community-and-family/general-assistance-home/rental-assistance/",
+          "whatToSay": "Hi, I'm a Polk County mom who just lost my job. I'm worried about rent this month and I was told you might be able to help."
+        },
+        {
+          "name": "Iowa Legal Aid",
+          "what": "Free lawyers who help if you're facing eviction or having a problem with a landlord.",
+          "who": "Lower-income Iowans. Always free.",
+          "how": "Call Monday–Friday, 9am–4pm, or apply online anytime.",
+          "phone": "1-800-532-1275",
+          "url": "https://www.iowalegalaid.org/",
+          "whatToSay": "Hi, I got an eviction notice and I need free legal help. I'm a single mom."
+        }
+      ]
+    },
+    {
+      "id": "utilities",
+      "title": "Lights, heat & water",
+      "subtitle": "Help paying the power bill — and stopping a shut-off.",
+      "resources": [
+        {
+          "name": "IMPACT energy assistance (LIHEAP)",
+          "what": "Helps pay your heating and electric bills, and can stop your power from being shut off.",
+          "who": "Polk and Warren county households with low income.",
+          "how": "Call to apply. If your power is already off after hours, call 515-681-8472.",
+          "phone": "515-518-4770",
+          "url": "https://www.impactcap.org/utility-assistance",
+          "whatToSay": "Hi, I just lost my job and I need help with my energy bill and to keep my power on."
+        },
+        {
+          "name": "Polk County utility help",
+          "what": "One-time help with a past-due power or water bill.",
+          "who": "Polk County residents with a temporary hardship.",
+          "phone": "(515) 286-2088",
+          "url": "https://www.polkcountyiowa.gov/community-family-youth-services/community-and-family/general-assistance-home/utility-assistance/",
+          "whatToSay": "Hi, I have a past-due power bill and I need a little help catching up."
+        }
+      ]
+    },
+    {
+      "id": "food",
+      "title": "Food for you and your kid",
+      "subtitle": "Free groceries near you, plus food stamps.",
+      "resources": [
+        {
+          "name": "DMARC food pantries",
+          "what": "Free groceries from pantries all over Polk County. You can go once a month, and they deliver too.",
+          "how": "Call or use the website to find your closest pantry and what to bring.",
+          "phone": "1-833-362-7220",
+          "url": "https://dmarcunited.org/get-help/find-a-pantry/",
+          "whatToSay": "Hi, I need help with groceries this week. Can you tell me my closest pantry and what to bring?"
+        },
+        {
+          "name": "Food stamps (SNAP)",
+          "what": "Monthly money on a card to buy food. A lot of families qualify — it's worth applying.",
+          "how": "Apply by phone (about 20 minutes) or online through Iowa HHS.",
+          "phone": "1-855-944-3663",
+          "url": "https://hhs.iowa.gov/assistance-programs/food-assistance/snap",
+          "whatToSay": "Hi, I'd like to apply for food assistance. I just lost my job and I have a 6-year-old."
+        }
+      ]
+    },
+    {
+      "id": "childcare",
+      "title": "Child care help",
+      "subtitle": "So you can work or interview without worrying.",
+      "resources": [
+        {
+          "name": "Iowa Child Care Assistance (CCA)",
+          "what": "Helps pay for child care while you work, look for work, or train.",
+          "who": "Working or job-seeking parents under the income limit.",
+          "how": "Apply online through Iowa HHS, or call the free help line below.",
+          "url": "https://hhs.iowa.gov/assistance-programs/child-care-assistance"
+        },
+        {
+          "name": "Free child care help line (CCR&R)",
+          "what": "Free help finding child care — including before/after school — and applying for help to pay for it.",
+          "how": "Call Monday–Friday, 8am–4:30pm.",
+          "phone": "1-855-244-5301",
+          "url": "https://iowaccrr.org/families/",
+          "whatToSay": "Hi, I'm a single mom job-hunting and I need help finding child care I can afford for my 6-year-old."
+        }
+      ]
+    },
+    {
+      "id": "money",
+      "title": "Cash & income help",
+      "subtitle": "Money coming in while you search.",
+      "resources": [
+        {
+          "name": "Unemployment benefits (IowaWORKS)",
+          "what": "Weekly payments while you look for work, if you lost your job through no fault of your own.",
+          "how": "Make a free account at iowaworks.gov and file. File every single week to keep getting paid.",
+          "url": "https://workforce.iowa.gov/unemployment"
+        },
+        {
+          "name": "Family cash help (FIP)",
+          "what": "Monthly cash help for families with children and very low income.",
+          "how": "Apply through Iowa HHS — the same place as food assistance.",
+          "url": "https://hhs.iowa.gov/assistance-programs/family-investment-program"
+        }
+      ]
+    },
+    {
+      "id": "health",
+      "title": "Health coverage",
+      "subtitle": "Low-cost or free coverage for you and your child.",
+      "resources": [
+        {
+          "name": "Hawki — kids' health coverage",
+          "what": "Low-cost or free health and dental coverage for your child.",
+          "phone": "1-800-257-8563",
+          "url": "https://hhs.iowa.gov/medicaid/plans-programs/hawki",
+          "whatToSay": "Hi, I'd like to sign my child up for Hawki health coverage."
+        },
+        {
+          "name": "Iowa Medicaid — your coverage",
+          "what": "Free or low-cost health coverage for adults with low income.",
+          "how": "Apply online through Iowa HHS, or ask 211 to walk you through it.",
+          "url": "https://hhs.iowa.gov/medicaid"
+        }
+      ]
+    },
+    {
+      "id": "moms",
+      "title": "More help for moms",
+      "subtitle": "Little-known help that makes a real difference.",
+      "resources": [
+        {
+          "name": "Dress for Success Des Moines",
+          "what": "A free professional outfit for job interviews, plus career coaching — all free for women.",
+          "how": "Usually by referral from a nonprofit or job program — ask 211 or a pantry to refer you.",
+          "url": "https://desmoines.dressforsuccess.org/",
+          "whatToSay": "Hi, I have a job interview coming up and I need help with professional clothes."
+        },
+        {
+          "name": "Half-price bus (DART Ride to Thrive)",
+          "what": "Ride the city bus for about half price if you get food, housing, or unemployment help.",
+          "how": "Sign up at DART Central Station, 620 Cherry St, Des Moines. Good for 2 years.",
+          "url": "https://www.ridedart.com/fares/reduced-fare"
+        },
+        {
+          "name": "Diapers & baby supplies",
+          "what": "Many local pantries also give free diapers and wipes — 211 can point you to the closest one.",
+          "phone": "211",
+          "whatToSay": "Hi, I need help with diapers and a few baby supplies. Where's the closest place?"
+        }
+      ]
+    }
+  ],
+  "skillsIntro": "These are 100% free — no cost, no debt. The quick ones can strengthen your resume in a weekend; the bigger ones open the door to remote and office jobs that pay more.",
+  "skills": [
+    {
+      "name": "Free Excel & computer classes",
+      "what": "Short, free lessons in Excel, Word, email, and basics — the exact skills office and remote jobs ask for.",
+      "time": "A few hours each · free · no sign-up",
+      "url": "https://edu.gcfglobal.org/en/subjects/work/"
+    },
+    {
+      "name": "Free typing practice",
+      "what": "Practice typing to get faster and more accurate — data-entry and admin jobs love a quick typist.",
+      "time": "15 minutes a day · free",
+      "url": "https://www.typing.com/"
+    },
+    {
+      "name": "Google Career Certificates",
+      "what": "Real certificates in IT Support, Data Analytics, or Project Management that lead to remote jobs — and they're free if you ask for aid.",
+      "who": "Anyone — Google funds need-based scholarships.",
+      "how": "On the course page, click 'Financial aid available' and fill out the short form.",
+      "time": "3–6 months · a few hours a week",
+      "url": "https://www.coursera.org/google-career-certificates"
+    },
+    {
+      "name": "Free training through IowaWORKS",
+      "what": "The state can pay for short job training and help you find work — in person here in Des Moines.",
+      "how": "Make a free account at iowaworks.gov, or visit 1000 E Grand Ave.",
+      "url": "https://www.iowaworks.gov/"
+    },
+    {
+      "name": "Free college tuition (DMACC Last-Dollar)",
+      "what": "Covers tuition for in-demand short programs at DMACC, like medical office or bookkeeping.",
+      "who": "Iowa residents in eligible programs who file the FAFSA.",
+      "time": "File the FAFSA by June 30, 2026",
+      "url": "https://www.dmacc.edu/financial-aid/last-dollar-scholarship.html"
+    },
+    {
+      "name": "Merit America (free, online)",
+      "what": "A free, part-time online program built for working adults that leads to IT, data, or project jobs you can do from home.",
+      "url": "https://meritamerica.org/"
+    },
+    {
+      "name": "Free classes with a library card",
+      "what": "A free Des Moines Public Library card unlocks online classes and resume help.",
+      "phone": "(515) 283-4259",
+      "url": "https://www.dmpl.org/learning-links"
+    }
+  ],
+  "safetyNote": "Real help is always free. No real program, charity, or job will ever ask you to pay a fee, buy gift cards, or send money to get help or get hired. If anyone asks for that, it's a scam — hang up. When in doubt, call 2-1-1 and ask."
+}
