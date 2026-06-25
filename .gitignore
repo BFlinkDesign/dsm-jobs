@@ -7,6 +7,24 @@ __pycache__/
 .add_secret_status.json
 push_secrets_to_github.py
 web/index.html
+web/_astro/
+web/jobs.json
+web/meta.json
+web/portal.json
+web/.nojekyll
+web/favicon.ico
+web/favicon.svg
+web/rudy.jpg
+app/public/jobs.json
+app/public/meta.json
+app/public/portal.json
+
+# Local agent/editor runtime state. Keep product source, CI config, and checked-in
+# Claude settings separate from per-machine automation scratch files.
+.agent/
+.codex/
+.cursor/
+.omc/
 
 # Supabase CLI local state (keep config.toml + functions/ tracked)
 supabase/.temp/
@@ -15,3 +33,18 @@ supabase/.branches/
 # Camera self-verifier generated artifacts (verify/camera.py is tracked)
 verify/shots/
 verify/report.json
+
+# Dev-only CSS toolchain (verify/css) — node_modules + generated CSS not committed.
+# The lockfile IS committed (deterministic `npm ci` in CI).
+verify/css/node_modules/
+verify/css/app.css
+verify/css/app.min.css
+verify/css/_page.html
+
+# Claude Code local dir + transient agent worktrees — but keep the committed
+# project settings + hooks (the SessionStart hook) tracked.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
+
+local-serve/

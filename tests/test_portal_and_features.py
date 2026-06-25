@@ -227,7 +227,10 @@ def _build_html(tmp_path, portal_cfg=None):
 
 def test_template_unconfigured_has_no_supabase(tmp_path):
     html = _build_html(tmp_path)
-    assert "cdn.jsdelivr.net" not in html
+    # No Supabase CDN script when unconfigured. (The résumé uploader references
+    # pdf.js on jsdelivr too, loaded on demand — that's unrelated to portal config,
+    # so assert specifically that the supabase-js bundle isn't embedded.)
+    assert "supabase-js@" not in html
     assert "const PORTAL = null;" in html
     assert "##PORTAL##" not in html and "##PORTAL_SCRIPT##" not in html
 
@@ -257,6 +260,13 @@ def test_template_features_present(tmp_path):
         "Grimes",
         "tabbar",
         "[hidden]{display:none !important}",
+        "followup",
+        "followalert",
+        "notifybtn",
+        "followcta",
+        "fupaste",
+        "Paste phone or email",
+        "follow-up reminders work",
     ):
         assert marker in html, marker
 

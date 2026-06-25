@@ -17,6 +17,8 @@ name: Daily Job Scan (CD)
 on:
   schedule:
     - cron: "0 12 * * *"   # 12:00 UTC daily (~6-7am Central)
+  push:
+    branches: [main]   # deploy on every merge to main (no manual dispatch needed)
   workflow_dispatch:
 
 permissions:
@@ -25,7 +27,7 @@ permissions:
 
 jobs:
   scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     env:
       ADZUNA_APP_ID: ${{ secrets.ADZUNA_APP_ID }}
@@ -35,18 +37,33 @@ jobs:
       USAJOBS_EMAIL: ${{ secrets.USAJOBS_EMAIL }}
       JOOBLE_API_KEY: ${{ secrets.JOOBLE_API_KEY }}
       CAREERJET_AFFID: ${{ secrets.CAREERJET_AFFID }}
+      PYTHONUNBUFFERED: "1"
       # Portal (all optional; push + sign-in UI self-disable when unset).
       # SUPABASE_SERVICE_KEY never reaches the page; PUBLISHABLE is browser-safe.
+      # The SERVICE_KEY (full RLS bypass over every user's data) is exposed ONLY
+      # on the scheduled/manual runs that actually need to upsert rows. On a
+      # `push` to main (which an auto-merged PR can trigger) it's empty, so a
+      # merged change can't run with the all-powerful key in its environment;
+      # --push-supabase self-disables when the key is unset. The daily cron still
+      # does the upsert.
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_SERVICE_KEY: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && secrets.SUPABASE_SERVICE_KEY || '' }}
       SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+      SUPABASE_POOLER_HOST: ${{ secrets.SUPABASE_POOLER_HOST }}
       # Sentry error monitoring (optional; page self-disables when unset). A
       # Sentry DSN is PUBLIC/embeddable, so it's a repo Variable, not a Secret.
       SENTRY_DSN: ${{ vars.SENTRY_DSN }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      # Read-only checkout: the gh-pages publish step below pushes with an
+      # explicit x-access-token URL in a fresh `git init` repo under web/, so it
+      # never uses these persisted credentials. Drop them (zizmor "artipacked").
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
@@ -80,7 +97,29 @@ jobs:
 
       - name: Build mobile job app
         if: steps.gate.outputs.run == 'true'
-        run: python find_admin_jobs.py --contact "Brady" --push-supabase
+        timeout-minutes: 9
+        shell: bash
+        run: |
+          start=$SECONDS
+          timeout 540s python find_admin_jobs.py --contact "Brady" --push-supabase
+          echo "Build mobile job app completed in $((SECONDS - start))s"
+
+      - name: Set up Node
+        if: steps.gate.outputs.run == 'true'
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.12"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Regenerate Rudy saying pools
+        if: steps.gate.outputs.run == 'true'
+        run: python scripts/generate_rudy_sayings.py
+
+      - name: Build Astro PWA
+        if: steps.gate.outputs.run == 'true'
+        working-directory: app
+        run: npm ci --no-audit --no-fund && npm run build
 
       # Pre-publish safety gate: never serve Lilly a broken or gutted build.
       # The build can exit 0 yet produce a bad page (e.g. a regression that
@@ -94,28 +133,37 @@ jobs:
         run: |
           python - <<'PY'
           import json, pathlib, re, sys
-          p = pathlib.Path("web/index.html")
-          if not p.exists():
+          web = pathlib.Path("web")
+          jp = web / "jobs.json"
+          mp = web / "meta.json"
+          hp = web / "index.html"
+          if not jp.exists():
+              print("GATE FAIL: web/jobs.json was not produced"); sys.exit(1)
+          if not mp.exists():
+              print("GATE FAIL: web/meta.json was not produced"); sys.exit(1)
+          if not hp.exists():
               print("GATE FAIL: web/index.html was not produced"); sys.exit(1)
-          html = p.read_text(encoding="utf-8")
+          jobs = json.loads(jp.read_text(encoding="utf-8"))
+          html = hp.read_text(encoding="utf-8")
           errs = []
-          if len(html) < 100_000:
+          if len(jobs) < 5:
+              errs.append(f"only {len(jobs)} jobs - a healthy scan yields dozens; likely a regression")
+          if len(html) < 3000:
               errs.append(f"page too small ({len(html)} bytes) - likely truncated")
-          if "Job Board" not in html:
-              errs.append("missing 'Job Board' shell")
-          m = re.search(r"const JOBS = (\[.*?\]);", html, re.DOTALL)
-          if not m:
-              errs.append("no embedded JOBS array")
-          else:
-              jobs = json.loads(m.group(1).replace("<\\/", "</"))
-              if len(jobs) < 5:
-                  errs.append(f"only {len(jobs)} jobs - a healthy scan yields dozens; likely a regression")
-          if not re.search(r'"generated": "\d{4}-\d{2}-\d{2}', html):
-              errs.append("no generated date")
+          if "Jobs for you" not in html:
+              errs.append("missing 'Jobs for you' shell")
+          if "view-host" not in html:
+              errs.append("missing Astro app shell (#view-host)")
+          if not re.search(r'"generated":\s*"\d{4}-\d{2}-\d{2}', mp.read_text(encoding="utf-8")):
+              errs.append("no generated date in meta.json")
           if errs:
               print("::error::pre-publish gate FAILED: " + "; ".join(errs)); sys.exit(1)
-          print(f"pre-publish gate OK: {len(html)} bytes, build looks sane")
+          print(f"pre-publish gate OK: {len(jobs)} jobs, {len(html)} bytes")
           PY
+
+      - name: Verify Supabase reachability (pre-publish gate)
+        if: steps.gate.outputs.run == 'true'
+        run: python scripts/verify_supabase_schema.py
 
       # Artifact = the site bundle only. The audit CSV (operator-only scam
       # reasons) is NOT uploaded: on a public repo, artifacts are downloadable
@@ -180,6 +228,8 @@ jobs:
               await github.rest.issues.createComment({ owner: context.repo.owner,
                 repo: context.repo.repo, issue_number: open.data[0].number, body });
             } else {
-              await github.rest.issues.create({ owner: context.repo.owner,
-                repo: context.repo.repo, title, body, labels: ["scan", "automated"] });
+              const created = await github.rest.issues.create({ owner: context.repo.owner,
+                repo: context.repo.repo, title, body, labels: ["scan", "outage", "automated"] });
+              await github.rest.issues.addLabels({ owner: context.repo.owner,
+                repo: context.repo.repo, issue_number: created.data.number, labels: ["auto-fix"] });
             }

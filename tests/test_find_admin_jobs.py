@@ -99,6 +99,23 @@ def test_verdict_below_when_under_floor():
     assert fa.normalize(_job(31200, 33280), "local")["verdict"] == "below"
 
 
+def test_verdict_max_only_never_meets():
+    # "up to $25/hr" has no known LOW end — it must NOT earn the $19+ badge
+    # off its ceiling (invariant #1: never claim a floor we can't see).
+    assert fa.salary_verdict(None, 25.0, stated=True) == "unlisted"
+    assert fa.salary_verdict(None, 12.0, stated=True) == "unlisted"
+    # A real low end still works in both directions.
+    assert fa.salary_verdict(20.0, 25.0, stated=True) == "meets"
+    assert fa.salary_verdict(12.0, 25.0, stated=True) == "below"
+
+
+def test_phone_not_lifted_from_long_digit_run():
+    # An order/ID number must not be sliced into a fake one-tap "Call" contact.
+    assert fa.extract_contact_hints("Order #80012345551234 ships today")["contactPhone"] == ""
+    # A genuine formatted number is still extracted.
+    assert fa.extract_contact_hints("Call 515-244-0198 to apply")["contactPhone"] == "(515) 244-0198"
+
+
 # ── formatting + sorting ──────────────────────────────────────────────
 
 
@@ -159,11 +176,47 @@ def test_warehouse_jobs_removed():
 def test_job_category():
     assert fa.job_category("Administrative Assistant") == "Office"
     assert fa.job_category("Call Center Representative") == "Customer service"
-    assert fa.job_category("Retail Sales Associate") == "Store & retail"
     assert fa.job_category("Caregiver - Evenings") == "Caregiving"
-    assert fa.job_category("Janitor") == "Food & cleaning"
-    assert fa.job_category("General Laborer") == "Production & labor"
     assert fa.job_category("Quantum Engineer") == ""
+
+
+def test_food_labor_and_retail_categories_removed():
+    # Her requests: no food service, labor, OR retail jobs. These no longer
+    # categorize, and (more importantly) the allowlist drops them entirely.
+    for title in ("Janitor", "General Laborer", "Food Service Worker",
+                  "Dishwasher", "Production Associate", "Housekeeper",
+                  "Retail Sales Associate", "Cashier", "Stocker"):
+        assert fa.job_category(title) == "", title
+        assert not fa.is_admin_title(title), title
+
+
+def test_remote_is_exempt_from_day_shift():
+    # In-person evening jobs are dropped, but a remote evening job is kept —
+    # she can fit remote work around her child.
+    night = {"title": "Data Entry", "description": "Shift 3 PM to midnight."}
+    assert not fa.is_day_shift(night)
+    assert fa.is_remote_row({**night, "source": "remote"})       # exempt: kept
+    assert not fa.is_remote_row({**night, "source": "local"})    # in-person: still gated
+
+
+def test_is_day_shift():
+    # Kept (no shift mention, or clearly daytime):
+    assert fa.is_day_shift({"title": "Administrative Assistant", "description": ""})
+    assert fa.is_day_shift({"title": "Receptionist",
+                            "description": "Monday-Friday, 8am-5pm."})
+    assert fa.is_day_shift({"title": "Office Clerk",
+                            "description": "Hours 9 AM to 5 PM."})
+    # Dropped (evening / night / overnight / late-ending):
+    assert not fa.is_day_shift({"title": "Receptionist - 2nd Shift", "description": ""})
+    assert not fa.is_day_shift({"title": "Data Entry (Overnight)", "description": ""})
+    assert not fa.is_day_shift({"title": "Front Desk",
+                                "description": "Shift is 3:00 PM to 12:00 AM."})
+    assert not fa.is_day_shift({"title": "Scheduler",
+                                "description": "Must be available evenings and weekends."})
+    assert not fa.is_day_shift({"title": "Office Assistant",
+                                "description": "11 am to 9 pm, some Saturdays."})
+    assert not fa.is_day_shift({"title": "Front Desk Clerk",
+                                "description": "Hours: 4pm to midnight."})
 
 
 def test_in_polk_or_dallas_counties_only():
@@ -233,6 +286,48 @@ def test_payload_includes_enrichment_fields():
     assert p["category"] == "Office"
     assert p["commute"] == "~20 min drive"  # Des Moines, IA from Grimes
     assert "trustLabel" in p and "about" in p
+    assert "contactPhone" in p and "contactEmail" in p and "contactName" in p
+
+
+def test_extract_contact_hints_from_posting():
+    text = "Questions? Call (515) 244-0198 or email hiring@johnstondental.example. Contact Jane Smith."
+    hints = fa.extract_contact_hints(text)
+    assert hints["contactPhone"] == "(515) 244-0198"
+    assert hints["contactEmail"] == "hiring@johnstondental.example"
+    assert hints["contactName"] == "Jane Smith"
+
+
+def test_extract_contact_hints_ignores_noreply_email():
+    hints = fa.extract_contact_hints("Reach us at noreply@scam.example or call (900) 555-0100")
+    assert hints["contactEmail"] == ""
+    assert hints["contactPhone"] == ""  # premium/fiction ranges never surface
+
+
+def test_extract_contact_hints_empty_when_no_posting_text():
+    assert fa.extract_contact_hints("") == {"contactPhone": "", "contactEmail": "", "contactName": ""}
+    assert fa.extract_contact_hints(None)["contactPhone"] == ""
+
+
+def test_payload_embeds_employer_stated_contact():
+    row = fa.normalize(
+        {
+            "id": "c1",
+            "title": "Receptionist",
+            "company": {"display_name": "Dental Office"},
+            "location": {"display_name": "Johnston, IA"},
+            "salary_min": 39520,
+            "salary_max": 41600,
+            "salary_is_predicted": "0",
+            "created": "2026-06-01T00:00:00Z",
+            "redirect_url": "https://example.com/j",
+            "description": "Call (515) 555-1212 or email hr@dental.example",
+        },
+        "local",
+    )
+    row["scam"] = {"level": "safe", "reasons": []}
+    p = fa._jobs_payload([row])[0]
+    assert p["contactPhone"] == "(515) 555-1212"
+    assert p["contactEmail"] == "hr@dental.example"
 
 
 def test_app_keeps_server_sort_order():
@@ -266,6 +361,18 @@ def test_scam_remote_unknown_employer_is_hidden():
     r = _row(title="Administrative Assistant", company="Unknownish Co", source="remote", desc="")
     out = fa.scam_assessment(r, {})
     assert out["level"] in ("scam", "suspect")  # never 'safe'
+
+
+def test_scam_remote_gmail_apply_link_is_hidden():
+    r = _row(
+        title="Administrative Assistant",
+        company="Unknownish Co",
+        source="remote",
+        desc="",
+    )
+    r["url"] = "https://gmail.com/inbox/apply-here"
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+    assert "apply link" in fa.scam_assessment(r, {})["reasons"][0]
 
 
 def test_scam_remote_too_good_pay_is_scam():
@@ -304,6 +411,38 @@ def test_attainability_keeps_experienced_admin_drops_exec_tiers():
     assert fa.is_attainable("Director of Operations") is False
     assert fa.is_attainable("VP of Finance") is False
     assert fa.is_attainable("Chief of Staff") is False
+
+
+def test_attainability_drops_supervisory_customer_service_leads():
+    # The roles the end user flagged in screenshots: supervisory customer-service
+    # titles that slipped through because the old list only dropped admin seniority.
+    assert fa.is_attainable("Client Services Lead") is False
+    assert fa.is_attainable("Member Services Team Lead") is False
+    assert fa.is_attainable("Senior Client Services Lead") is False
+    assert fa.is_attainable("Customer Service Manager") is False
+    assert fa.is_attainable("Operations Supervisor") is False
+
+
+def test_attainability_keeps_coordinators_regression():
+    # Regression: the bare "coo" drop term used to substring-match "COOrdinator"
+    # and silently drop every coordinator. They are valid admin roles — keep them.
+    for t in ("Administrative Coordinator", "Office Coordinator",
+              "Scheduling Coordinator", "Front Desk Coordinator",
+              "Project Coordinator", "Program Coordinator"):
+        assert fa.is_attainable(t) is True, t
+
+
+def test_scam_sign_on_bonus_in_title_is_hidden():
+    # All-caps promo/sign-on-bonus advertised IN THE TITLE is spam/scam-shaped,
+    # even for an otherwise-recognized employer name. (Screenshot example.)
+    def lvl(title, desc=""):
+        row = {"title": title, "company": "Businessolver", "description": desc,
+               "url": "", "source": "remote", "hourly_min": None, "hourly_max": None}
+        return fa.scam_assessment(row, {})["level"]
+    assert lvl("Customer Service Rep - $10K Sign-On Bonus") == "scam"
+    assert lvl("Receptionist (Signing Bonus!)") == "scam"
+    # A body that merely mentions a bonus must NOT be hidden — title-only signal.
+    assert lvl("Administrative Assistant", desc="benefits and a small bonus") == "safe"
 
 
 # --- transient-5xx retry (scheduled scan failed on a one-off Adzuna 503) ---
@@ -465,6 +604,55 @@ def test_hard_tell_overrides_trusted_employer():
     assert fa.scam_assessment(r, {})["level"] == "scam"
 
 
+def test_trusted_match_is_word_bounded_not_substring():
+    # Audit fix: a hint must match as a WORD, not a substring. Junk names that
+    # merely contain a trusted token ('ups' in 'Startups', 'marsh' in
+    # 'Marshalling', 'target' in 'Targeted') must NOT be trusted, or they get
+    # rescued from scam signals and floated to the top for a scam-targeted user.
+    for bogus in ("Quick Startups Staffing", "Backups Remote Jobs", "Cloud Meetups LLC",
+                  "Marshalling Logistics", "Targeted Leads LLC", "U.S. Bankruptcy Court"):
+        assert not fa.employer_is_trusted(bogus), bogus
+        assert fa.trusted_reason(bogus) == "", bogus
+    # Real employers still match (including punctuated / multi-word names).
+    for legit in ("CVS Health", "UnityPoint Health", "State of Iowa - DOT", "Hy-Vee",
+                  "Robert Half", "U.S. Bank"):
+        assert fa.employer_is_trusted(legit), legit
+        assert fa.trusted_reason(legit) != "", legit
+
+
+def test_substring_lookalike_remote_is_not_rescued():
+    # The lookalike name ('ups' inside 'Meetups') no longer earns the trusted
+    # rescue, so a remote posting from it is hidden, not shown as safe.
+    r = _row(title="Administrative Assistant", company="Cloud Meetups LLC", source="remote")
+    assert fa.scam_assessment(r, {})["level"] in ("scam", "suspect")
+
+
+def test_remote_too_good_pay_scam_even_for_trusted_name():
+    # Audit fix: a $30+/hr REMOTE 'admin' role is bait even when it names a
+    # trusted employer — a trusted name is trivially spoofed, and a real trusted
+    # employer's entry-admin role isn't a $30+/hr remote gig. (Trusted + remote
+    # at ordinary pay stays safe — see below.)
+    r = _row(title="Data Entry", company="UnityPoint Health", source="remote", hmin=35.0, hmax=40.0)
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+    ok = _row(title="Scheduling Assistant", company="UnityPoint Health", source="remote", hmin=20.0, hmax=23.0)
+    assert fa.scam_assessment(ok, {})["level"] == "safe"
+
+
+def test_remote_trusted_name_with_structural_tell_is_not_rescued():
+    # A REMOTE posting that names a trusted brand AND shows a structural tell
+    # (same role spammed across cities) is the spoofed-brand shape — the trusted
+    # rescue must not launder it. A LOCAL trusted posting with the same tell is
+    # still downgraded to safe (a real employer hiring the role in many offices).
+    rows = [_row(title="Administrative Assistant", company="UnityPoint Health",
+                 source="remote", desc="") for _ in range(3)]
+    for i, r in enumerate(rows):
+        r["location"] = f"City{i}, IA"
+    idx = fa.build_spam_index(rows)
+    assert fa.scam_assessment(rows[0], idx)["level"] == "scam"
+    local = {**rows[0], "source": "local"}
+    assert fa.scam_assessment(local, idx)["level"] == "safe"
+
+
 def test_degree_preferred_is_not_required():
     assert (
         fa.requires_degree(
@@ -507,6 +695,101 @@ def test_template_has_no_legacy_theme_leftovers():
     assert "Fraunces" not in t  # serif from the pre-Relume theme
     for warm in ("#fff3e2", "#ecd2a8", "#7a5417", "#9aa39e"):
         assert warm not in t, f"legacy warm color {warm} still in template"
+
+
+def test_native_platform_affordances_preserved():
+    """End-user actions use OS-native handlers — AI owns vetting, not the dialer."""
+    t = fa.APP_TEMPLATE
+    assert "tel:" in t and "mailto:" in t
+    assert "navigator.share" in t
+    assert "Notification" in t
+    assert "beforeinstallprompt" in t
+
+
+def test_ai_automation_first_documented():
+    """Load-bearing: AI replaces human-in-the-loop for operator judgment."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    claude = open(os.path.join(root, "CLAUDE.md"), encoding="utf-8").read().lower()
+    assert "ai replaces human-in-the-loop" in claude
+    assert "auto-fix" in claude or "autonomously" in claude
+    rabbit = open(os.path.join(root, ".coderabbit.yaml"), encoding="utf-8").read().lower()
+    assert "human-in-the-loop" in rabbit
+
+
+def test_resume_tailor_paste_description_field_present():
+    """The tailor flow uses scanner-pulled full text when available; paste is only
+    needed when the listing gave a short preview."""
+    t = fa.APP_TEMPLATE
+    assert 'id="tailorjd"' in t                      # paste fallback when descFull is short
+    assert 'data-act="runtailor"' in t               # manual go when paste is required
+    assert "function runTailor(" in t
+    assert "function tailorJobText(" in t
+    assert "descFull" in t                           # full posting rides in the job payload
+    assert "full.length>=200" in t                   # one-tap tailor when we have enough text
+    assert "pasted.length>=40" in t                  # her paste still wins when she adds more
+    assert "isPlausiblePhone" in t                   # follow-up never dials fiction/premium lines
+
+
+def test_resume_tailor_edge_function_never_invents():
+    """The server-side tailor is load-bearing: critic must flag fabrications."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "supabase/functions/resume-tailor/index.ts"),
+               encoding="utf-8").read()
+    assert "never invent" in src.lower()
+    assert "fabrications" in src
+    assert "CRITIC_SYSTEM" in src
+    assert "MAX_REVISIONS" in src
+
+
+def test_resume_tailor_copy_both_and_download_present():
+    """She can get BOTH the résumé and cover note in one clipboard write, plus a
+    .txt download — without losing her place (per-section copy stays too)."""
+    t = fa.APP_TEMPLATE
+    # "both" joins résumé + a separator + cover note into ONE clipboard write
+    assert 'which==="both"' in t and "=== COVER NOTE ===" in t
+    assert "var both = d.cover_note ? 'both' : 'resume';" in t  # the combined copy/download button
+    assert 'data-act="dltailor"' in t                # download affordance
+    assert "function downloadTailor(" in t
+    # the existing per-section copy buttons are preserved
+    assert 'data-copy="resume"' in t and 'data-copy="cover"' in t
+
+
+def test_account_teaser_gating_present():
+    """No freebies without an account: signed-out users browse jobs but the
+    card actions are CSS-hidden behind .app:not(.authed), a per-card lock CTA
+    replaces them, and a benefits screen (#lockwrap) exists for locked tabs."""
+    t = fa.APP_TEMPLATE
+    assert ".app:not(.authed) .card .apply" in t
+    assert ".app:not(.authed) .card .actions" in t
+    assert '.app.authed .lockcta{display:none}' in t
+    assert 'data-act="signup"' in t          # the create-account CTAs
+    assert 'id="lockwrap"' in t              # the benefits screen
+    assert "LOCKED_VIEWS" in t               # today/apps/corner gate in setView
+    # Crisis lines stay reachable on the locked screen (never gate a hotline).
+    assert "988" in t and "lockcrisis" in t
+
+
+def test_ruby_companion_markup_and_voice_present():
+    """Ruby the emotional-support cow: full-screen overlay, a designed cow
+    avatar, browser-native voice (mic + read-aloud), still signed-in only."""
+    t = fa.APP_TEMPLATE
+    # Identity + full-screen overlay (not a tiny card).
+    assert "Ruby" in t
+    assert "emotional support cow" in t.lower()
+    assert 'id="rubyov"' in t                  # the full-screen overlay container
+    assert 'id="rubyopen"' in t                # the "Talk to Ruby" launcher
+    # Designed mascot, not emoji-only: an SVG cow face with spots.
+    assert "rb-head" in t and "rb-spot" in t and "rb-horn" in t
+    # Voice chat: mic input (Web Speech) + read-aloud (SpeechSynthesis), both
+    # feature-detected via typeof so unsupported browsers hide them cleanly.
+    assert "SpeechRecognition" in t and "webkitSpeechRecognition" in t
+    assert "SpeechSynthesisUtterance" in t and "speechSynthesis" in t
+    assert 'id="rubymic"' in t and 'id="rubyspk"' in t
+    # Still gated to signed-in users; replies still come from the edge function.
+    assert ".app:not(.authed) #chatcard{display:none}" in t
+    assert 'invoke("companion"' in t
+    # De-cheesed: no glassmorphism blur surface on Ruby's overlay.
+    assert "backdrop-filter" not in t[t.index("rubyov"):t.index("rubyov") + 1200]
 
 
 # --- US-only hard guard (no European / foreign trash) ---

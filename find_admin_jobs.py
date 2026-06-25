@@ -38,8 +38,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import domain_screen
 import providers
 
 # Windows-safe console output (avoid cp1252 crashes); keep print() text ASCII.
@@ -66,21 +67,27 @@ RESULTS_PER_PAGE = 50             # Adzuna max per page
 # Search queries (each is one API call per source). Grouped: admin/clerical,
 # experienced admin (Lilly's level), light office-adjacent, general no-degree.
 TITLES = [
-    # admin / clerical
+    # admin / clerical (the heart of what she wants — kept deliberately broad)
     "administrative assistant", "office assistant", "receptionist", "front desk",
     "data entry", "office clerk", "administrative coordinator", "secretary",
-    "clerical", "file clerk",
+    "clerical", "file clerk", "administrative specialist", "office coordinator",
+    "office administrator", "data entry clerk", "data entry specialist",
+    "clerical assistant", "general office clerk", "administrative associate",
+    "department assistant", "program assistant", "office support",
     # experienced admin — years of admin experience, no degree needed
     "executive assistant", "office manager", "administrative manager",
-    "senior administrative assistant", "operations assistant",
-    # light office-adjacent
-    "scheduler", "medical receptionist", "billing clerk", "accounts payable clerk",
-    "medical records clerk", "bank teller", "customer service representative",
-    "call center representative", "mail clerk",
-    # general (no degree)
-    "retail associate", "cashier", "stocker",
-    "food service worker", "caregiver", "housekeeper", "production associate",
-    "general laborer",
+    "senior administrative assistant", "operations assistant", "executive secretary",
+    "administrative officer",
+    # light office-adjacent / clerical specialties
+    "scheduler", "scheduling coordinator", "medical receptionist", "medical secretary",
+    "billing clerk", "accounts payable clerk", "accounting clerk", "accounting assistant",
+    "payroll clerk", "medical records clerk", "patient access representative",
+    "patient service representative", "registration clerk", "intake coordinator",
+    "human resources assistant", "bank teller", "dispatcher", "mail clerk",
+    "customer service representative", "customer service associate",
+    "call center representative",
+    # caregiving (day-friendly, no degree)
+    "caregiver",
 ]
 
 # Subset that genuinely exists as remote work (skip remote calls for in-person roles).
@@ -194,6 +201,20 @@ TRUSTED_EMPLOYER_GROUPS = {
 }
 TRUSTED_EMPLOYER_HINTS = [h for hints in TRUSTED_EMPLOYER_GROUPS.values() for h in hints]
 
+
+def _trusted_rx(hints):
+    """Compile hints into a word-bounded matcher. A substring match (`'ups' in
+    'startups'`) wrongly trusts junk names like 'Quick Startups Staffing' or
+    'Marshalling Logistics' ('marsh'), which then rescues them from scam signals
+    and floats them to the top — a real hole for a scam-targeted user. Word
+    boundaries keep every legitimate hit ('CVS Health', 'State of Iowa') while
+    refusing accidental substrings."""
+    return re.compile("|".join(r"\b" + re.escape(h) + r"\b" for h in hints), re.IGNORECASE)
+
+
+_TRUSTED_EMPLOYER_RX = _trusted_rx(TRUSTED_EMPLOYER_HINTS)
+_TRUSTED_GROUP_RX = {label: _trusted_rx(hints) for label, hints in TRUSTED_EMPLOYER_GROUPS.items()}
+
 # Local jobs must be in Polk or Dallas County. Adzuna locations are city-based,
 # so this is an allowlist of every city/CDP in the two counties; a local posting
 # whose location doesn't name one of these places (or the county itself) is
@@ -291,9 +312,27 @@ COMMUTE_MINUTES_FROM_GRIMES = {
 # so experienced-admin roles (Office Manager, Executive Assistant, Senior Admin,
 # Admin Supervisor) belong in her feed. The is_admin_title() gate still keeps
 # everything to real admin/clerical work, so a "Sales Manager" is dropped there.
+# Executive / supervisory / above-entry words that disqualify a role — UNLESS
+# the title is one of the experienced-ADMIN exceptions below (she has years of
+# admin, so "Office Manager" / "Senior Administrative Assistant" stay). This is
+# what drops "Client Services Lead", "Member Services Team Lead" and "Senior
+# Client Services Lead" — supervisory roles the old (admin-only) seniority list
+# let through. ALL matched on \b word boundaries: critically, the old plain
+# "coo" substring was silently dropping every "COOrdinator" — fixed here.
 SENIORITY_DROP_TERMS = [
-    "director", "head of", "chief", "vp ", "vice president",
-    "ceo", "cfo", "coo", "c.e.o", " president ",
+    "director", "head of", "chief", "vp", "vice president",
+    "ceo", "cfo", "coo", "president",
+    "team lead", "lead", "senior", "sr", "supervisor", "manager",
+    "principal", "foreman", "superintendent",
+]
+_SENIORITY_RX = re.compile(
+    r"\b(" + "|".join(re.escape(t) for t in SENIORITY_DROP_TERMS) + r")\b")
+# Experienced-admin titles that OUTRANK the supervisory drop (kept on purpose).
+ADMIN_SENIORITY_OK = [
+    "office manager", "administrative manager", "admin manager",
+    "senior administrative", "lead administrative", "administrative supervisor",
+    "office supervisor", "executive assistant", "executive administrative",
+    "executive coordinator", "executive secretary",
 ]
 
 # A job is kept only if its TITLE contains one of these admin/clerical terms.
@@ -306,34 +345,36 @@ CATEGORY_TERMS = {
     "Office": [
         "administrative assistant", "admin assistant", "administrative support",
         "administrative coordinator", "administrative specialist", "administrative aide",
+        "administrative associate", "administrative technician", "administrative officer",
         "receptionist", "front desk", "front office", "office assistant",
         "office administrator", "office coordinator", "office clerk", "office support",
-        "data entry", "file clerk", "clerk typist", "clerical", "secretary",
-        "scheduling coordinator", "scheduler", "office associate", "admin coordinator",
-        "billing", "accounts payable", "accounts receivable", "medical records",
-        "mail clerk", "patient access", "records clerk", "data clerk", "intake",
+        "office associate", "office specialist", "general office", "data entry",
+        "data entry clerk", "data clerk", "data processor", "file clerk", "clerk typist",
+        "clerical", "secretary", "medical secretary", "typist", "word processor",
+        "scheduling coordinator", "scheduler", "scheduling", "admin coordinator",
+        "department assistant", "program assistant", "program coordinator",
+        "project coordinator", "project assistant", "staff assistant", "switchboard",
+        "dispatcher", "billing", "accounts payable", "accounts receivable",
+        "accounting clerk", "accounting assistant", "bookkeeper", "bookkeeping",
+        "payroll", "medical records", "records clerk", "mail clerk", "patient access",
+        "patient service", "registration", "registrar", "intake", "insurance verification",
+        "human resources assistant", "hr assistant", "recruiting coordinator",
         # Experienced-admin roles (Lilly's level — years of admin = a master's):
-        "executive assistant", "executive administrative", "office manager",
-        "administrative manager", "admin manager", "administrative supervisor",
-        "office supervisor", "senior administrative", "lead administrative",
-        "administrative officer", "operations assistant", "executive coordinator",
+        "executive assistant", "executive administrative", "executive secretary",
+        "office manager", "administrative manager", "admin manager",
+        "administrative supervisor", "office supervisor", "senior administrative",
+        "lead administrative", "operations assistant", "executive coordinator",
     ],
     "Customer service": [
-        "customer service", "call center", "bank teller", "teller",
-    ],
-    "Store & retail": [
-        "retail associate", "sales associate", "cashier", "stocker",
+        "customer service", "customer support", "client service", "member service",
+        "call center", "bank teller", "teller",
     ],
     "Caregiving": [
         "caregiver", "caretaker", "home care",
     ],
-    "Food & cleaning": [
-        "food service", "dishwasher", "housekeep", "janitor", "custodian",
-    ],
-    "Production & labor": [
-        "production associate", "production worker", "general labor", "laborer",
-        "assembler",
-    ],
+    # NOTE: "Food & cleaning" and "Production & labor" categories were removed on
+    # her request — she's a single mom and those shifts/roles don't fit. Their
+    # terms are gone from the allowlist, so such jobs from any source are dropped.
 }
 ADMIN_TITLE_TERMS = [t for terms in CATEGORY_TERMS.values() for t in terms]
 
@@ -382,10 +423,15 @@ BLOCKLIST = []
 
 
 def load_blocklist(path="scam_blocklist.txt"):
+    """Manual blocklist plus autogen file (WHOIS-young domains from live scans)."""
     items = []
-    if os.path.exists(path):
+    base, _ = os.path.splitext(path)
+    autogen = base + "_autogen.txt"
+    for bl_path in (path, autogen):
+        if not os.path.exists(bl_path):
+            continue
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(bl_path, encoding="utf-8") as fh:
                 for line in fh:
                     line = line.strip()
                     if line and not line.startswith("#"):
@@ -502,6 +548,43 @@ def requires_degree(job):
     return False
 
 
+# Day-shift gate. She's a single mom with no childcare, so evening / night /
+# overnight / late-ending roles don't work. We drop a posting ONLY when it
+# clearly signals a non-day shift — a job that says nothing about hours is kept
+# (those are standard daytime). Phrase hints first, then explicit time ranges
+# that cross midnight or end late in the evening.
+NIGHT_SHIFT_HINTS = (
+    "2nd shift", "second shift", "3rd shift", "third shift", "2nd/3rd shift",
+    "second and third shift", "night shift", "nights shift", "overnight",
+    "over night", "graveyard", "swing shift", "evening shift", "afternoon shift",
+    "closing shift", "pm shift", "p.m. shift", "weekends only", "weekend only",
+    "nights and weekends", "evenings and weekends", "must be available nights",
+    "must work nights", "must be available evenings",
+    "to midnight", "until midnight", "til midnight", "midnight shift",
+)
+# A time range whose END is in the a.m. (e.g. "3 PM to 12 AM" — crosses midnight).
+_OVERNIGHT_RANGE = re.compile(r"(?:-|–|to|until|till|thru)\s*(?:1[0-2]|[1-9])(?::\d\d)?\s*a\.?\s*m", re.I)
+# A time range that ENDS at 8–11 p.m. (too late for evening pickup).
+_LATE_PM_END = re.compile(r"(?:-|–|to|until|till|thru)\s*(?:8|9|10|11)(?::\d\d)?\s*p\.?\s*m", re.I)
+
+
+def is_day_shift(job):
+    """False only when the posting clearly runs evenings/nights/overnight or ends
+    late; True (kept) when it says nothing about shift."""
+    blob = ((job.get("title") or "") + "  " + (job.get("description") or "")).lower()
+    if any(h in blob for h in NIGHT_SHIFT_HINTS):
+        return False
+    if _OVERNIGHT_RANGE.search(blob) or _LATE_PM_END.search(blob):
+        return False
+    return True
+
+
+def is_remote_row(row):
+    """Remote / work-from-home postings are EXEMPT from the day-shift gate — she
+    can fit those around her child. In-person jobs must read as daytime (8–5)."""
+    return row.get("source") == "remote" or title_is_remote(row)
+
+
 def is_admin_title(title):
     """Precision gate: keep only genuine admin/clerical titles."""
     t = (title or "").lower()
@@ -519,9 +602,9 @@ def job_category(title):
 
 def trusted_reason(company):
     """Why an employer is on the trusted list ('Government', ...), or ''."""
-    c = (company or "").lower()
-    for label, hints in TRUSTED_EMPLOYER_GROUPS.items():
-        if any(h in c for h in hints):
+    c = company or ""
+    for label, rx in _TRUSTED_GROUP_RX.items():
+        if rx.search(c):
             return label
     return ""
 
@@ -615,14 +698,19 @@ def title_is_remote(job):
 
 
 def employer_is_trusted(company):
-    c = (company or "").lower()
-    return any(h in c for h in TRUSTED_EMPLOYER_HINTS)
+    return bool(_TRUSTED_EMPLOYER_RX.search(company or ""))
 
 
 def is_attainable(title):
     """Drop senior/competitive roles this user realistically won't be hired into."""
     t = (title or "").lower()
-    return not any(term in t for term in SENIORITY_DROP_TERMS)
+    # Experienced-admin titles (Office Manager, Senior Administrative Assistant)
+    # are kept even though they contain a supervisory word.
+    if any(ok in t for ok in ADMIN_SENIORITY_OK):
+        return True
+    # Otherwise any executive/supervisory word (Director / Lead / Senior /
+    # Manager …) means it's above this user's realistic entry level.
+    return not _SENIORITY_RX.search(t)
 
 
 def _norm_company(company):
@@ -639,7 +727,30 @@ def build_spam_index(rows):
     return index
 
 
-def scam_assessment(row, spam_index):
+# Apply links that point at personal inboxes or off-platform messengers are
+# scam-shaped — especially on remote listings where a spoofed brand is common.
+_SCAM_APPLY_HOST_HINTS = (
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "proton.me",
+    "icloud.com", "aol.com",
+    "bit.ly", "t.co", "tinyurl.com", "goo.gl", "cutt.ly",
+    "telegram.", "whatsapp.", "t.me",
+)
+
+
+def _apply_url_is_suspicious(url):
+    """True when an apply URL routes to a personal inbox or link shortener."""
+    u = (url or "").lower()
+    if not u:
+        return False
+    try:
+        host = urllib.parse.urlparse(u).netloc.lower()
+    except ValueError:
+        return False
+    blob = host + u
+    return any(h in blob for h in _SCAM_APPLY_HOST_HINTS)
+
+
+def scam_assessment(row, spam_index, *, domain_cache=None):
     """
     Return {"level": "safe"|"suspect"|"scam", "reasons": [...]}.
     Designed to be CONSERVATIVE for a user who would fall for a scam: when in
@@ -666,6 +777,13 @@ def scam_assessment(row, spam_index):
     for p in SCAM_TITLE_FLAGS:
         if p in title:
             reasons.append(f"scam-prone title ('{p}')")
+    # A signing/sign-on bonus advertised IN THE TITLE — usually all-caps with a
+    # dollar figure ("NOW OFFERING A $15K SIGN-ON BONUS!") — is promo-spam shaped;
+    # real entry admin postings don't put a bonus in the title. Title-only + a
+    # dollar amount keeps it distinctive, so a body that mentions a bonus is safe.
+    if re.search(r"sign[\s-]?on bonus|signing bonus", title) or \
+       re.search(r"\$\s?\d[\d,]*\s?k?\b[^.]{0,18}\bbonus\b", title):
+        reasons.append("scam-prone title ('sign-on bonus advertised in title')")
     # Financial-duty phrases: ordinary teller/cashier/AP work at a trusted LOCAL
     # employer, scam-shaped anywhere else. A REMOTE posting that merely NAMES a
     # trusted employer is the spoofed-name check-cashing shape, so it does NOT
@@ -684,24 +802,54 @@ def scam_assessment(row, spam_index):
     if not company.strip() or "not listed" in company.lower():
         reasons.append("no employer name")
 
+    # Personal-inbox / shortener apply links (remote spoof shape).
+    if remote and _apply_url_is_suspicious(row.get("url")):
+        reasons.append("apply link goes to a personal inbox or link-shortener")
+
+    # WHOIS domain age — direct employer apply URLs only (ATS hosts skipped).
+    if remote and not trusted:
+        host = row.get("_apply_host") or domain_screen.apply_host(row.get("url") or "")
+        if host and not domain_screen.is_trusted_apply_host(host) and not domain_screen.is_skipped_apply_host(host):
+            cache = domain_cache if domain_cache is not None else {}
+            age = row.get("_domain_age_days")
+            if age is None:
+                age = domain_screen.domain_age_days(host, cache)
+                row["_domain_age_days"] = age
+            if age is not None and age < domain_screen.MIN_DOMAIN_AGE_DAYS:
+                reasons.append(
+                    f"apply domain {host} registered {age} days ago "
+                    f"(under {domain_screen.MIN_DOMAIN_AGE_DAYS}d)"
+                )
+
     if reasons:
-        # Trusted employer can't rescue a hard description tell, but absent those,
-        # a known employer downgrades structural noise to safe.
+        # A trusted employer can't rescue a hard description tell. Absent those, a
+        # known LOCAL employer downgrades structural noise to safe — but a REMOTE
+        # posting never gets the trusted rescue: naming a trusted brand on a
+        # remote listing that ALSO shows a structural tell (cross-city spam, blank
+        # employer, financial-duty language) is the spoofed-brand shape, and a
+        # real trusted employer's entry-admin role is local. A clean remote role
+        # from a trusted name (no tells) still reaches the safe path below.
         hard = any("description mentions" in r or "scam-prone" in r for r in reasons)
         if hard:
             return {"level": "scam", "reasons": reasons}
-        if trusted:
+        if trusted and not remote:
             return {"level": "safe", "reasons": []}
         return {"level": "scam", "reasons": reasons}
 
-    # No explicit flags. Apply extra suspicion to remote + unknown employer.
-    if remote and not trusted:
-        # Unrealistic pay for entry remote admin is bait.
+    # No explicit flags. Remote postings get extra suspicion.
+    if remote:
+        # Unrealistic pay for entry remote admin is bait — even when the posting
+        # NAMES a trusted employer, because a real trusted employer's entry-admin
+        # role isn't a $30+/hr remote gig. A trusted name alone is easy to fake,
+        # so remote doesn't get the trusted rescue here (same spoofed-name logic
+        # as the financial-duty check above).
         if hourly is not None and hourly >= 30:
+            who = "spoofed trusted name" if trusted else "unknown employer"
             return {"level": "scam",
-                    "reasons": [f"remote, unknown employer, pay ${hourly:.0f}/hr is too good for entry admin"]}
-        return {"level": "suspect",
-                "reasons": ["remote role from an employer we couldn't recognize"]}
+                    "reasons": [f"remote, {who}, pay ${hourly:.0f}/hr is too good for entry admin"]}
+        if not trusted:
+            return {"level": "suspect",
+                    "reasons": ["remote role from an employer we couldn't recognize"]}
 
     return {"level": "safe", "reasons": []}
 
@@ -711,10 +859,12 @@ def salary_verdict(hourly_min, hourly_max, *, stated):
     SAFETY: providers *predict* pay when the employer didn't post it (Adzuna
     flags it; Jooble doesn't even say). A non-stated wage NEVER earns a number
     or a $19+ badge. Wage FLOOR test: the LOW end of a stated range must clear
-    $19 ("$16-$23" does not count)."""
-    floor = hourly_min if hourly_min is not None else hourly_max
+    $19 ("$16-$23" does not count). A max-ONLY range ("up to $25") has no known
+    low end, so it can never earn 'meets' — we will not claim a floor we can't
+    see (invariant #1)."""
+    floor = hourly_min                  # the $19+ claim rests on the LOW end only
     if floor is None or not stated:
-        return "unlisted"               # no pay, or only a guess
+        return "unlisted"               # no pay, only a guess, or max-only (no floor)
     if floor >= MIN_HOURLY:
         return "meets"
     return "below"
@@ -758,6 +908,20 @@ def normalize(job, source):
 # Collection
 # --------------------------------------------------------------------------
 
+def _passes_filters(r):
+    """The single keep/drop predicate for a normalized row. Shared by the live
+    (`collect`) and `--mock` (`collect_mock`) paths so the camera — which renders
+    the --mock build — exercises the exact gates that ship, including the
+    night-shift and US-only filters that the mock path used to skip."""
+    return (is_admin_title(r["title"])
+            and is_attainable(r["title"])
+            and not title_excluded(r["title"])
+            and not requires_degree(r)
+            and (is_remote_row(r) or is_day_shift(r))
+            and passes_us_filter(r)
+            and (r["source"] != "local" or commute_minutes(r["location"]) is not None))
+
+
 def collect(verbose=True):
     seen = {}
     def add(jobs, source):
@@ -791,17 +955,11 @@ def collect(verbose=True):
             seen[r["id"]] = r
 
     all_rows = list(seen.values())
-    rows = [r for r in all_rows
-            if is_admin_title(r["title"])
-            and is_attainable(r["title"])
-            and not title_excluded(r["title"])
-            and not requires_degree(r)
-            and passes_us_filter(r)
-            and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
+    rows = [r for r in all_rows if _passes_filters(r)]
     dropped = len(all_rows) - len(rows)
     if verbose and dropped:
         print(f"  (filtered out {dropped} non-admin / senior / skilled / degree / "
-              f"out-of-county postings)")
+              f"night-shift / out-of-county postings)")
     rows, dupes = dedupe_rows(rows)
     if verbose and dupes:
         print(f"  (collapsed {dupes} duplicate postings of the same job)")
@@ -809,15 +967,21 @@ def collect(verbose=True):
 
 
 def dedupe_rows(rows):
-    """Adzuna re-publishes the same posting from multiple boards under different
-    IDs. Collapse rows with the same employer + title + location, keeping the
-    newest. Returns (deduped_rows, number_collapsed)."""
-    best = {}
+    """Collapse duplicate postings: same real apply URL, or same employer+title+location.
+
+    Adzuna re-publishes under different IDs; ATS rows often share one apply URL.
+    Returns (deduped_rows, number_collapsed)."""
+    best: dict[tuple, dict] = {}
     for r in rows:
-        key = (_norm_company(r["company"]), (r["title"] or "").lower().strip(),
-               (r["location"] or "").lower().strip())
+        url_key = domain_screen.normalize_apply_url(r.get("url") or "")
+        host = domain_screen.apply_host(r.get("url") or "")
+        if url_key and not domain_screen.is_skipped_apply_host(host):
+            key = ("url", url_key)
+        else:
+            key = ("cty", (_norm_company(r["company"]), (r["title"] or "").lower().strip(),
+                           (r["location"] or "").lower().strip()))
         cur = best.get(key)
-        if cur is None or (r["created"] or "") > (cur["created"] or ""):
+        if cur is None or (r.get("created") or "") > (cur.get("created") or ""):
             best[key] = r
     return list(best.values()), len(rows) - len(best)
 
@@ -872,12 +1036,15 @@ def write_csv(rows, path):
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["safety", "verdict", "title", "company", "location",
-                    "salary_hourly", "posted", "source", "scam_reasons", "url"])
+                    "salary_hourly", "posted", "source", "apply_host", "domain_age_days",
+                    "scam_reasons", "url"])
         for r in rows:
             sc = r.get("scam", {"level": "safe", "reasons": []})
             w.writerow([sc["level"], VERDICT_LABEL.get(r["verdict"], ("?", ""))[0],
                         r["title"], r["company"], r["location"], salary_text(r),
-                        r["created"], r["source"], "; ".join(sc["reasons"]), r["url"]])
+                        r["created"], r["source"],
+                        r.get("_apply_host") or "", r.get("_domain_age_days") or "",
+                        "; ".join(sc["reasons"]), r["url"]])
 
 
 # "Will train" — employer-stated phrases that mean a candidate without
@@ -899,6 +1066,75 @@ def will_train(description):
     return any(h in d for h in TRAIN_HINTS)
 
 
+# Employer-stated contact lines in a posting — extracted for one-tap follow-up.
+# Never guessed: only text that appears in the job description survives.
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+_PHONE_RE = re.compile(
+    # (?<!\d) stops a 10-digit slice being lifted out of a longer digit run
+    # (order numbers, IDs) and surfaced as a fake one-tap "Call" contact.
+    r"(?<!\d)(?:\+?1[-.\s]?)?(?:\((\d{3})\)|(\d{3}))[-.\s]?(\d{3})[-.\s]?(\d{4})\b"
+)
+_JUNK_EMAIL = re.compile(
+    r"(noreply|no-reply|donotreply|mailer-daemon|example\.com|sentry\.io|wixpress|"
+    r"facebook\.com|twitter\.com|linkedin\.com/feed)",
+    re.I,
+)
+_NAME_RE = re.compile(
+    r"(?:contact|call|ask for|speak with|hr contact|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+    re.I,
+)
+
+
+def _plausible_contact_phone(digits: str) -> bool:
+    """Reject premium/fiction NANP ranges — only employer-stated real lines."""
+    if len(digits) != 10 or not digits.isdigit():
+        return False
+    area, prefix = digits[:3], digits[3:6]
+    if area in ("900", "976"):
+        return False
+    if area in ("211", "311", "411", "511", "611", "711", "811", "911"):
+        return False
+    # 555-01xx is reserved for fiction/examples in North America.
+    if prefix == "555" and digits[6:8] == "01":
+        return False
+    return True
+
+
+def extract_contact_hints(description: str) -> dict[str, str]:
+    """Pull phone/email/name from employer posting text when explicitly present."""
+    text = description or ""
+    phones: list[str] = []
+    seen_phones: set[str] = set()
+    for m in _PHONE_RE.finditer(text):
+        digits = re.sub(r"\D", "", m.group())
+        if len(digits) == 11 and digits.startswith("1"):
+            digits = digits[1:]
+        if len(digits) != 10 or digits in seen_phones or not _plausible_contact_phone(digits):
+            continue
+        seen_phones.add(digits)
+        phones.append(f"({digits[:3]}) {digits[3:6]}-{digits[6:]}")
+
+    emails: list[str] = []
+    seen_emails: set[str] = set()
+    for m in _EMAIL_RE.finditer(text):
+        em = m.group().strip().lower()
+        if _JUNK_EMAIL.search(em) or em in seen_emails:
+            continue
+        seen_emails.add(em)
+        emails.append(m.group().strip())
+
+    name = ""
+    nm = _NAME_RE.search(text)
+    if nm:
+        name = nm.group(1).strip()
+
+    return {
+        "contactPhone": phones[0] if phones else "",
+        "contactEmail": emails[0] if emails else "",
+        "contactName": name,
+    }
+
+
 def _jobs_payload(safe_rows):
     """Build the JSON list the front-end app renders."""
     jobs = []
@@ -913,6 +1149,8 @@ def _jobs_payload(safe_rows):
         # the content tuple as a last-resort distinct key.
         jid = r.get("id") or r.get("url") or "|".join(
             (r.get("title") or "", r.get("company") or "", r.get("location") or ""))
+        hints = extract_contact_hints(r.get("description") or "")
+        full_desc = (r.get("description") or "").strip()
         jobs.append({
             "id": str(jid),
             "title": r["title"],
@@ -931,8 +1169,12 @@ def _jobs_payload(safe_rows):
             "category": job_category(r["title"]),
             "commute": "" if r["source"] == "remote" else commute_text(r["location"]),
             "commuteMin": None if r["source"] == "remote" else commute_minutes(r["location"]),
-            "about": snippet(r.get("description")),
-            "trains": will_train(r.get("description")),
+            "about": snippet(full_desc),
+            "descFull": full_desc[:6000],
+            "trains": will_train(full_desc),
+            "contactPhone": hints["contactPhone"],
+            "contactEmail": hints["contactEmail"],
+            "contactName": hints["contactName"],
         })
     return jobs
 
@@ -1092,6 +1334,33 @@ def _sentry_head(sentry_cfg):
     return SENTRY_CDN_TAG + "\n" + _SENTRY_INIT_TMPL.replace("__DSN__", dsn_js)
 
 
+def write_jobs_bundle(safe_rows, hidden_count, total_checked, web_dir, generated,
+                      contact="me", contact_phone="", portal_cfg=None):
+    """Emit static JSON the Astro front-end consumes (jobs + meta + public portal config)."""
+    os.makedirs(web_dir, exist_ok=True)
+    jobs_path = os.path.join(web_dir, "jobs.json")
+    meta_path = os.path.join(web_dir, "meta.json")
+    portal_path = os.path.join(web_dir, "portal.json")
+    jobs = _jobs_payload(safe_rows)
+    meta = {
+        "contact": contact,
+        "phone": contact_phone,
+        "generated": generated,
+        "hidden": hidden_count,
+        "total": total_checked,
+        "safe": len(safe_rows),
+    }
+    with open(jobs_path, "w", encoding="utf-8") as fh:
+        json.dump(jobs, fh, ensure_ascii=False)
+        fh.write("\n")
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False)
+        fh.write("\n")
+    with open(portal_path, "w", encoding="utf-8") as fh:
+        json.dump(portal_cfg or {}, fh, ensure_ascii=False)
+        fh.write("\n")
+
+
 def write_html(safe_rows, hidden_count, total_checked, path, generated,
                contact="me", contact_phone="", portal_cfg=None, sentry_cfg=None):
     jobs = _jobs_payload(safe_rows)
@@ -1137,12 +1406,18 @@ APP_TEMPLATE = r"""<!doctype html>
 ##PORTAL_SCRIPT##
 <style>
 :root{
- /* Goth violet system. Variable names kept from the light theme so every
-    component re-skins in one place: --green IS the primary (violet) now. */
- --paper:#0e0a16; --card:#171022; --surface:#1e1530; --ink:#f1eaff; --ink2:#b8a8da; --line:#2e2347;
- --green:#9333ea; --green-d:#c9a8ff; --green-soft:rgba(147,51,234,.16);
- --gold:#e9d5ff; --red:#ff7b72; --shadow:0 10px 28px rgba(0,0,0,.35);
- --glow:0 0 16px rgba(168,85,247,.45);
+ /* Premium goth-violet system. Deep ink-black with a violet undertone, a single
+    refined accent, and a LAYERED elevation scale — no neon, no glassmorphism.
+    Variable names kept from the old theme so every component re-skins here. */
+ --paper:#0b0712; --card:#15101f; --surface:#1d1630; --ink:#f3eeff; --ink2:#a99bc9; --line:#291f40;
+ --green:#a855f7; --green-d:#d2b8ff; --green-soft:color-mix(in oklab,#a855f7 18%,transparent);
+ --gold:#e9d5ff; --red:#ff8a80;
+ --accent:linear-gradient(135deg,#a855f7 0%,#7c3aed 58%,#6d28d9 100%);
+ /* Soft, layered, premium — replaces the old neon 0 0 16px glow everywhere. */
+ --shadow:0 1px 2px rgba(0,0,0,.40),0 14px 32px -10px rgba(0,0,0,.55);
+ --shadow-lg:0 2px 6px rgba(0,0,0,.42),0 28px 64px -14px rgba(0,0,0,.62);
+ --glow:0 12px 30px -10px color-mix(in oklab,#a855f7 60%,transparent);
+ --ring:0 0 0 3px color-mix(in oklab,#a855f7 26%,transparent);
 }
 *{box-sizing:border-box}
 [hidden]{display:none !important}   /* beat component display rules (flex etc.) */
@@ -1165,23 +1440,86 @@ body::before{content:"";position:fixed;inset:0;z-index:-1;pointer-events:none;
 @keyframes twinkle{from{opacity:.55}to{opacity:1}}
 .app{max-width:640px;margin:0 auto;padding:0 16px 120px}
 svg{display:inline-block;vertical-align:-2px}
-/* App bar */
-header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
- backdrop-filter:saturate(1.2) blur(12px);margin:0 -16px;padding:16px;
+/* App bar — solid (no glassmorphism), hairline rule + faint violet wash. */
+header.bar{position:sticky;top:0;z-index:20;
+ background:linear-gradient(180deg,#120c1d,var(--paper));margin:0 -16px;padding:16px;
  border-bottom:1px solid var(--line)}
 .brandrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
-.eyebrow{font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2);font-weight:700}
-.word{font-family:inherit;font-weight:700;font-size:26px;line-height:1.05;letter-spacing:-.01em;
- background:linear-gradient(100deg,#f1eaff 20%,#c084fc 50%,#e9d5ff 80%);
- -webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;
- position:relative;display:inline-block;padding-right:20px}
-.word::after{content:"\2726";position:absolute;right:0;top:-4px;font-size:14px;
- -webkit-text-fill-color:#c084fc;animation:spark 2.6s ease-in-out infinite}
-@keyframes spark{0%,100%{opacity:.35;transform:scale(.8) rotate(0deg)}50%{opacity:1;transform:scale(1.15) rotate(18deg)}}
+.eyebrow{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink2);font-weight:700}
+/* Solid premium wordmark — no gradient-text, no spinning glyph. The accent
+   lives on one word (.word b) for a clean, intentional two-tone. */
+.word{font-family:inherit;font-weight:800;font-size:27px;line-height:1.04;letter-spacing:-.015em;
+ color:var(--ink);display:inline-block}
+.word b{font-weight:800;color:var(--green-d)}
 .safebadge{display:inline-flex;align-items:center;gap:6px;background:var(--green-soft);color:var(--green-d);
  font-size:12px;font-weight:700;padding:6px 10px;border-radius:999px;white-space:nowrap;
  border:1px solid rgba(192,132,252,.35)}
 .summary{color:var(--ink2);font-size:14px;margin-top:6px}
+/* Account control (compact, top-right, expand/collapse) */
+.acctbtn{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;width:42px;height:42px;
+ border-radius:50%;background:var(--card);border:1.5px solid var(--line);color:var(--ink2);cursor:pointer;transition:.15s}
+.acctbtn:active{transform:scale(.94)}
+.acctbtn.in{background:var(--green);border-color:var(--green);color:#fff}
+.acctinitial{font:inherit;font-weight:800;font-size:17px;line-height:1}
+.subrow{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
+.subrow .summary{margin-top:0;flex:1;min-width:120px}
+.acctpop{position:absolute;top:60px;right:16px;z-index:30;width:min(290px,84vw);background:var(--card);
+ border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow);padding:14px;animation:pop .14s ease both}
+@keyframes pop{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:none}}
+.acctcopy{color:var(--ink2);font-size:14px;line-height:1.5;margin-bottom:10px}
+.acctemail{font-weight:700;font-size:15px;color:var(--ink);margin-bottom:10px;word-break:break-all}
+.acctprimary{width:100%;background:var(--green);color:#fff;border:0;border-radius:11px;font:inherit;
+ font-weight:700;font-size:15px;padding:12px;min-height:46px;cursor:pointer}
+.acctitem{width:100%;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:11px;
+ font:inherit;font-weight:700;font-size:15px;padding:11px;min-height:46px;cursor:pointer}
+/* Collapsible filter panel */
+.filtertoggle{display:flex;align-items:center;gap:9px;width:100%;background:var(--card);
+ border:1.5px solid var(--line);border-radius:12px;padding:12px 14px;font:inherit;font-weight:700;
+ font-size:15px;color:var(--ink);min-height:50px;cursor:pointer}
+.filtertoggle .ftlabel{flex:1;text-align:left}
+.filtertoggle .ftchev{transition:transform .2s;color:var(--ink2)}
+.filtertoggle[aria-expanded="true"] .ftchev{transform:rotate(180deg)}
+.filtcount{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;
+ padding:0 6px;border-radius:999px;background:var(--green);color:#fff;font-size:12px;font-weight:800}
+.filterpanel{padding-top:4px;animation:pop .16s ease both}
+.uploadbtn{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:10px}
+/* Premium (AI) features stay hidden until signed in — no dead-end buttons that
+   only say "sign in" when tapped. The .authed class is toggled by showIn/showOut. */
+.app:not(.authed) [data-act="tailor"]{display:none}
+.app:not(.authed) #resumecard{display:none}
+.app:not(.authed) #chatcard{display:none}
+/* No freebies without an account. Signed-out users can BROWSE the scam-checked
+   jobs (proof of value), but every action — Apply / Save / track / notes /
+   share — is swapped for one "create a free account" CTA per card, and the
+   Today / My apps / My corner tabs show the benefits screen instead. */
+.app:not(.authed) .card .apply,
+.app:not(.authed) .card .actions,
+.app:not(.authed) .card .notes{display:none}
+.app.authed .lockcta{display:none}
+.lockcta{display:flex;align-items:center;justify-content:center;gap:9px;width:100%;margin-top:14px;
+ padding:15px;border:0;border-radius:13px;font:inherit;font-weight:800;font-size:16px;min-height:54px;
+ color:#fff;cursor:pointer;letter-spacing:.01em;
+ background:linear-gradient(135deg,color-mix(in oklab,var(--green) 92%,#fff) 0%,#7e22ce 60%,#6b21a8 100%);
+ box-shadow:0 8px 22px color-mix(in oklab,var(--green) 45%,transparent),inset 0 1px 0 rgba(255,255,255,.22)}
+.lockcta:active{transform:translateY(1px) scale(.99)}
+.lockcta svg{flex:0 0 auto}
+/* Account-benefits "what you unlock" screen (shown when a locked tab is tapped) */
+.lockview{padding:14px 2px 6px;text-align:center;animation:rise .3s cubic-bezier(.2,.7,.3,1) both}
+.lockhero{font-family:inherit;font-weight:800;font-size:clamp(24px,7vw,30px);line-height:1.12;margin:8px 0 6px;color:var(--ink)}
+.lockhero .hl{color:var(--green-d)}
+.locksub{color:var(--ink2);font-size:16px;line-height:1.5;max-width:30ch;margin:0 auto 18px}
+.lockperks{list-style:none;margin:0 auto 20px;padding:0;max-width:24rem;text-align:left}
+.lockperks li{display:flex;align-items:flex-start;gap:11px;padding:11px 13px;margin:9px 0;border-radius:13px;
+ background:var(--card);border:1px solid var(--line);font-size:15.5px;line-height:1.4;color:var(--ink)}
+.lockperks li svg{flex:0 0 auto;margin-top:2px;color:var(--green-d)}
+.lockperks li b{font-weight:800}
+.lockperks li span{color:var(--ink2);font-weight:500}
+.lockbtns{display:flex;flex-direction:column;gap:10px;max-width:24rem;margin:0 auto}
+.lockbtns .lockcta{margin-top:0}
+.locksecondary{width:100%;background:var(--surface);color:var(--ink);border:1px solid var(--line);
+ border-radius:13px;font:inherit;font-weight:700;font-size:15px;padding:13px;min-height:50px;cursor:pointer}
+.lockcrisis{margin-top:20px;font-size:13px;color:var(--ink2);line-height:1.5}
+.lockcrisis a{color:var(--green-d);font-weight:700}
 /* Safety */
 .safety{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--red);
  border-radius:14px;padding:14px 16px;margin:18px 0;box-shadow:var(--shadow)}
@@ -1195,7 +1533,7 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
  background:var(--card);border:2px solid var(--red);color:var(--red);text-decoration:none;font-weight:700;
  padding:13px;border-radius:11px;font-size:16px;min-height:52px}
 /* Controls */
-.controls{position:sticky;top:62px;z-index:15;background:var(--paper);padding:10px 0 2px}
+.controls{padding:10px 0 2px}
 .searchwrap{position:relative}
 .searchwrap svg{position:absolute;left:14px;top:50%;transform:translateY(-50%);color:var(--ink2)}
 .search{width:100%;font:inherit;font-size:17px;padding:14px 16px 14px 44px;border:1.5px solid var(--line);
@@ -1211,8 +1549,14 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 /* Lists */
 .progress{display:flex;align-items:center;gap:7px;color:var(--green-d);font-weight:700;font-size:14px;margin:8px 2px 0}
 .count{color:var(--ink2);font-size:13px;letter-spacing:.04em;text-transform:uppercase;font-weight:700;margin:14px 2px 4px}
-.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px 16px 14px;margin:12px 0;
+.card{position:relative;background:
+  linear-gradient(180deg,color-mix(in oklab,var(--card) 88%,var(--green-soft)),var(--card));
+ border:1px solid var(--line);border-radius:18px;padding:17px 16px 15px;margin:13px 0;
  box-shadow:var(--shadow);animation:rise .3s cubic-bezier(.2,.7,.3,1) both}
+/* Hairline gradient edge-light along the top for a premium, lit feel. */
+.card::before{content:"";position:absolute;inset:0 0 auto;height:1px;border-radius:18px 18px 0 0;
+ background:linear-gradient(90deg,transparent,color-mix(in oklab,var(--green) 55%,transparent),transparent);
+ pointer-events:none}
 .cardtop{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
 .pill{display:inline-flex;align-items:center;font-size:13px;font-weight:700;padding:5px 11px;border-radius:8px}
 .pill.good{background:var(--green);color:#fff}
@@ -1223,8 +1567,9 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .meta{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--ink2);font-size:14px;margin-top:9px}
 .meta span{display:inline-flex;align-items:center;gap:6px}
 .apply{display:flex;align-items:center;justify-content:center;gap:8px;margin-top:14px;
- background:linear-gradient(135deg,#9333ea,#7e22ce);color:#fff;box-shadow:var(--glow);
- text-decoration:none;font-weight:700;padding:15px;border-radius:11px;font-size:17px;min-height:54px;transition:.12s}
+ background:var(--accent);color:#fff;box-shadow:var(--glow),inset 0 1px 0 rgba(255,255,255,.22);
+ text-decoration:none;font-weight:800;padding:15px;border-radius:13px;font-size:17px;min-height:54px;
+ letter-spacing:.01em;transition:transform .12s ease,box-shadow .12s ease}
 .apply:active{transform:scale(.985);background:#6b21a8}
 .actions{display:flex;gap:8px;margin-top:9px}
 .act{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:var(--card);
@@ -1316,18 +1661,18 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
 .authnote{margin-top:14px;font-size:12px;color:var(--ink2);line-height:1.5;text-align:center}
 /* Bottom tab bar */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:space-around;
- background:rgba(14,10,22,.92);backdrop-filter:blur(14px);border-top:1px solid var(--line);
+ background:#0d0917;border-top:1px solid var(--line);box-shadow:0 -8px 24px -12px rgba(0,0,0,.7);
  padding:6px 4px calc(8px + env(safe-area-inset-bottom))}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:0;
  color:var(--ink2);font:inherit;font-size:11px;font-weight:700;padding:7px 2px;min-height:52px;cursor:pointer;
  border-radius:10px;transition:.15s}
-.tab[aria-current="true"]{color:#c084fc;text-shadow:0 0 14px rgba(192,132,252,.6)}
+.tab[aria-current="true"]{color:var(--green-d)}
 .tab:active{transform:scale(.94)}
 /* Section intros, encouragement, cards */
 .picksintro h2{margin:18px 0 4px;font-size:22px;font-weight:700}
 .picksintro p{margin:0 0 6px;color:var(--ink2);font-size:15px;line-height:1.5}
 .weekline{font-weight:700;color:var(--green-d)}
-.sparkle{color:#c084fc;animation:spark 2.6s ease-in-out infinite;display:inline-block}
+.sparkle{color:var(--green-d);display:inline-block;opacity:.7;font-size:.82em;vertical-align:.06em}
 .enc{margin:18px 2px 0;color:var(--green-d);font-size:15px;font-weight:700;text-align:center}
 .logbtns{display:flex;gap:8px;margin:6px 0 8px}
 .logbtns .act{flex:1}
@@ -1349,29 +1694,187 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
  font:inherit;font-size:14px;font-weight:700;padding:10px 14px;min-height:44px;cursor:pointer;transition:.12s}
 .qopt[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#fff;box-shadow:var(--glow)}
 .qdone{color:var(--green-d);font-weight:700;font-size:14px;margin-top:8px}
-/* Companion chat (signed-in only) */
-.chatlog{display:flex;flex-direction:column;gap:8px;margin:10px 0;max-height:50vh;overflow-y:auto}
-.bub{max-width:85%;padding:10px 14px;border-radius:16px;font-size:15px;line-height:1.5;white-space:pre-wrap}
-.bub.me{align-self:flex-end;background:var(--green);color:#fff;border-bottom-right-radius:6px}
-.bub.ai{align-self:flex-start;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-bottom-left-radius:6px}
-.chatrow{display:flex;gap:8px;margin-top:8px}
-.chatrow .search{flex:1;min-height:48px}
-.chatrow .syncbtn{min-width:74px}
+/* ── Ruby the emotional-support cow (signed-in only) ───────────────────────
+   A designed mascot, not a sticker. Black-and-white cow face with purple
+   accents so she sits inside the goth palette. NO glassmorphism. */
+.rubyface{display:block;width:54px;height:54px;flex:0 0 auto;
+ filter:drop-shadow(0 6px 14px rgba(168,85,247,.30))}
+.rubyface--sm{width:48px;height:48px}
+.rubyface--bar{width:40px;height:40px}
+.rb-head{fill:#0e0a16;stroke:#cdbdf0;stroke-width:1.4}
+.rb-muz{fill:#241a38;stroke:#cdbdf0;stroke-width:1.2}
+.rb-spot{fill:#1c1430;stroke:#a855f7;stroke-width:1.1;opacity:.92}
+.rb-horn{fill:#3a2c5e;stroke:#cdbdf0;stroke-width:1}
+.rb-eye{fill:#e9defb}
+.rb-nos{fill:#7c3aed;opacity:.9}
+.rubyintro{display:flex;align-items:center;gap:14px;margin-bottom:2px}
+.rubyintro h3{margin:0;font-size:19px;display:flex;align-items:center;gap:7px}
+.rubycow{font-size:16px;filter:saturate(.85)}
+.rubytag{margin:2px 0 0;color:var(--green-d);font-size:13px;font-weight:700;letter-spacing:.01em}
+.rubyopen{display:inline-flex;align-items:center;justify-content:center;gap:9px;width:100%;margin-top:12px;
+ background:var(--green);color:#fff;border:0;border-radius:13px;font:inherit;font-weight:700;font-size:16px;
+ padding:14px;min-height:52px;cursor:pointer;box-shadow:var(--glow)}
+.rubyopen:active{transform:scale(.985);background:var(--green-d)}
+
+/* Full-screen overlay — solid surfaces, a soft purple halo behind Ruby. */
+.rubyov{position:fixed;inset:0;z-index:70;background:var(--paper);
+ display:flex;align-items:stretch;justify-content:center;
+ animation:rubyrise .26s cubic-bezier(.2,.7,.2,1) both}
+@keyframes rubyrise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.rubyshell{position:relative;display:flex;flex-direction:column;width:100%;max-width:620px;
+ padding:0 14px env(safe-area-inset-bottom);
+ background:radial-gradient(120% 60% at 50% -8%, rgba(168,85,247,.16), transparent 62%)}
+.rubybar{display:flex;align-items:center;gap:11px;padding:14px 2px 12px;
+ padding-top:calc(14px + env(safe-area-inset-top));border-bottom:1px solid var(--line)}
+.rubybarname{display:flex;flex-direction:column;line-height:1.18;margin-right:auto}
+.rubybarname b{font-size:17px;font-weight:800}
+.rubybarname span{font-size:12.5px;color:var(--ink2)}
+.rubyspk,.rubyclose{flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+ width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card);
+ color:var(--ink2);cursor:pointer;transition:.14s}
+.rubyspk:active,.rubyclose:active{transform:scale(.94)}
+.rubyclose{font-size:28px;line-height:1;color:var(--ink2)}
+.rubyspk .ic-off{display:none}
+.rubyspk[aria-pressed="false"]{color:var(--ink2)}
+.rubyspk[aria-pressed="false"] .ic-on{display:none}
+.rubyspk[aria-pressed="false"] .ic-off{display:block}
+.rubyspk[aria-pressed="true"]{color:var(--green-d);border-color:var(--green-soft)}
+.rubylog{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:10px;
+ padding:16px 2px;scroll-behavior:smooth}
+.bub{max-width:86%;padding:11px 15px;border-radius:18px;font-size:15.5px;line-height:1.5;white-space:pre-wrap;
+ animation:bubin .2s ease both}
+@keyframes bubin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.bub.me{align-self:flex-end;background:var(--green);color:#fff;border-bottom-right-radius:7px}
+.bub.ai{align-self:flex-start;background:var(--surface);color:var(--ink);border:1px solid var(--line);border-bottom-left-radius:7px}
+.bub.think{color:var(--ink2)}
+.bub.think i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--green-d);margin:0 2px;
+ animation:rubythink 1.1s infinite ease-in-out}
+.bub.think i:nth-child(2){animation-delay:.18s}
+.bub.think i:nth-child(3){animation-delay:.36s}
+@keyframes rubythink{0%,80%,100%{opacity:.3;transform:translateY(0)}40%{opacity:1;transform:translateY(-3px)}}
+.rubylisten{display:flex;align-items:center;gap:10px;justify-content:center;padding:8px 0 2px;
+ color:var(--green-d);font-size:14px;font-weight:700}
+.rubywave{display:inline-flex;align-items:center;gap:3px;height:20px}
+.rubywave i{width:3px;height:100%;border-radius:2px;background:var(--green-d);
+ animation:rubywave 1s infinite ease-in-out}
+.rubywave i:nth-child(1){animation-delay:0s}
+.rubywave i:nth-child(2){animation-delay:.12s}
+.rubywave i:nth-child(3){animation-delay:.24s}
+.rubywave i:nth-child(4){animation-delay:.36s}
+.rubywave i:nth-child(5){animation-delay:.48s}
+@keyframes rubywave{0%,100%{transform:scaleY(.35)}50%{transform:scaleY(1)}}
+.rubydock{display:flex;align-items:center;gap:9px;padding:8px 0 14px}
+.rubymic,.rubysend{flex:0 0 auto;display:flex;align-items:center;justify-content:center;
+ width:52px;height:52px;border-radius:14px;border:0;cursor:pointer;transition:.14s}
+.rubymic{background:var(--card);border:1.5px solid var(--line);color:var(--ink)}
+.rubymic:active{transform:scale(.95)}
+.rubymic.on{background:var(--green);border-color:var(--green);color:#fff;box-shadow:var(--glow);
+ animation:rubypulse 1.4s infinite}
+@keyframes rubypulse{0%,100%{box-shadow:0 0 0 0 var(--green-soft)}50%{box-shadow:0 0 0 12px transparent}}
+.rubyinput{flex:1;min-width:0;font:inherit;font-size:16px;padding:14px 15px;
+ border:1.5px solid var(--line);border-radius:14px;background:var(--surface);color:var(--ink);min-height:52px}
+.rubyinput:focus{outline:none;border-color:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+.rubysend{background:var(--green);color:#fff;box-shadow:var(--glow)}
+.rubysend:active{transform:scale(.95);background:var(--green-d)}
+.rubyfine{margin:0 0 12px;font-size:12px;color:var(--ink2);line-height:1.5;text-align:center}
+@media (prefers-reduced-motion:reduce){
+ .rubyov,.bub,.rubymic.on,.rubywave i,.bub.think i{animation:none}
+}
+#tailormodal .authcard{max-height:88vh;overflow-y:auto;text-align:left}
+/* Spooky résumé-summoning loader — drifting bats + a glowing moon over a
+   calibrated progress bar. Goth on purpose: she loves black + purple. */
+.spookload{padding:6px 2px 2px}
+.spooksky{position:relative;height:64px;margin:4px 0 16px;border-radius:14px;overflow:hidden;
+ background:radial-gradient(ellipse 120% 90% at 82% 12%, rgba(147,51,234,.24), transparent 60%),
+            linear-gradient(180deg,#130d20,#0e0a16);border:1px solid var(--line)}
+.spookmoon{position:absolute;right:16px;top:10px;width:28px;height:28px;border-radius:50%;
+ background:radial-gradient(circle at 36% 34%, #f3ecff, #c9a8ff 60%, #7e22ce);
+ box-shadow:0 0 22px rgba(201,168,255,.6)}
+.bat{position:absolute;left:-30px;line-height:1;filter:drop-shadow(0 0 5px rgba(168,85,247,.55));
+ will-change:left,transform;animation:batfly linear infinite}
+.bat.b1{top:8%;font-size:20px;animation-duration:3.4s;animation-delay:-.2s}
+.bat.b2{top:44%;font-size:14px;opacity:.85;animation-duration:4.6s;animation-delay:-1.6s}
+.bat.b3{top:62%;font-size:16px;opacity:.9;animation-duration:2.9s;animation-delay:-2.4s}
+@keyframes batfly{
+ 0%{left:-30px;transform:translateY(0) rotate(-5deg)}
+ 25%{transform:translateY(-9px) rotate(5deg)}
+ 50%{transform:translateY(5px) rotate(-5deg)}
+ 75%{transform:translateY(-7px) rotate(5deg)}
+ 100%{left:calc(100% + 30px);transform:translateY(0) rotate(-5deg)}}
+.spookbar{height:11px;border-radius:999px;background:var(--surface);border:1px solid var(--line);overflow:hidden}
+.spookbar i{display:block;height:100%;width:0;border-radius:999px;
+ background:linear-gradient(90deg,#6b21a8,#9333ea,#c084fc);
+ box-shadow:0 0 14px rgba(168,85,247,.7);transition:width .35s cubic-bezier(.3,.7,.3,1)}
+.spookmsg{margin-top:11px;text-align:center;color:var(--green-d);font-size:14px;font-weight:700}
+@media(prefers-reduced-motion:reduce){.bat{display:none}}
+.tailorsec{margin:14px 0}
+.tailorsec h3{margin:0 0 6px;font-size:15px}
+.tailorta{width:100%;min-height:150px;resize:vertical;font-size:14px;line-height:1.5;white-space:pre-wrap}
+.tailorsec .syncbtn{margin-top:8px}
+.reslist{margin:6px 0 0;padding-left:18px;color:var(--ink2);font-size:14px;line-height:1.5}
+.reslist li{margin:3px 0}
+.tailorpaste{width:100%;min-height:120px;resize:vertical;font-size:14px;line-height:1.5}
+.tailorhint{font-size:12.5px;color:var(--ink2);margin:8px 0 2px;line-height:1.45}
+/* The copy/download row under the result — wraps on a narrow phone. */
+.tailorgrab{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0 2px}
+.tailorgrab .syncbtn{flex:1 1 calc(50% - 4px);min-width:130px}
+.tailorgrab .syncbtn.alt{background:var(--card);color:var(--ink);border:1.5px solid var(--line)}
 .chatnote{font-size:12px;color:var(--ink2);margin-top:8px;line-height:1.45}
 /* FAQ */
 .faq{background:var(--card);border:1px solid var(--line);border-radius:13px;padding:12px 16px;margin:10px 0}
 .faq summary{font-weight:700;cursor:pointer;font-size:16px;color:var(--ink)}
 .faq p{color:var(--ink2);font-size:15px;line-height:1.55;margin:8px 0 2px}
 /* Toast + applied celebration */
-.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(86px + env(safe-area-inset-bottom));
- z-index:40;display:flex;align-items:center;gap:10px;background:#241738;border:1px solid rgba(192,132,252,.5);
- color:var(--ink);font-size:15px;font-weight:700;padding:12px 18px;border-radius:999px;box-shadow:var(--glow);
- max-width:92vw;animation:rise .25s ease both}
-.toast button{background:none;border:0;color:#c084fc;font:inherit;font-weight:700;cursor:pointer;padding:4px}
+/* Celebration splash — centered, clean, professional. (Big visual overhaul of
+   the whole site is being handled as its own design pass; this is just legible.) */
+.toast{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%) scale(.96);
+ z-index:60;display:flex;align-items:center;justify-content:center;gap:14px;text-align:center;
+ background:#1b1230;color:#f3ecff;font-size:18px;font-weight:700;line-height:1.45;
+ padding:22px 28px;border-radius:16px;max-width:84vw;border:1px solid #3a2a5c;
+ box-shadow:0 24px 60px rgba(0,0,0,.55);
+ opacity:0;animation:splashin .4s cubic-bezier(.16,1,.3,1) forwards}
+@keyframes splashin{to{opacity:1;transform:translate(-50%,-50%) scale(1)}}
+.toast button{background:#2a1d44;border:1px solid #4a3870;color:#f3ecff;font:inherit;font-weight:700;
+ cursor:pointer;padding:9px 16px;border-radius:10px}
+@media(prefers-reduced-motion:reduce){.toast{animation:none;opacity:1;transform:translate(-50%,-50%)}}
 .burst{position:fixed;z-index:50;pointer-events:none;color:#c084fc;font-size:16px;animation:burst 1s ease-out forwards}
 @keyframes burst{0%{opacity:1;transform:translate(0,0) scale(.6) rotate(0)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(1.3) rotate(120deg)}}
 /* Snooze (Not today) */
 .act.snz.on{background:var(--surface);color:var(--green-d);border-color:rgba(192,132,252,.4)}
+/* Follow-up contact + alerts — action-first: one-tap call/email, typing optional */
+.followup{margin-top:10px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.followup h4{margin:0 0 10px;font-size:15px;font-weight:700;color:var(--green-d);line-height:1.35}
+.followwho{margin:0 0 10px;font-size:14px;color:var(--ink2);line-height:1.4}
+.followhero{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px}
+.followcta{flex:1 1 calc(50% - 4px);display:inline-flex;align-items:center;justify-content:center;gap:8px;
+ min-height:52px;padding:12px 14px;border-radius:12px;font:inherit;font-size:16px;font-weight:800;
+ text-decoration:none;border:0;cursor:pointer;transition:.12s}
+.followcta.call{background:var(--green);color:#fff;box-shadow:var(--glow)}
+.followcta.mail{background:var(--card);color:var(--green-d);border:1.5px solid rgba(192,132,252,.45)}
+.followcta.paste{background:var(--card);color:var(--ink);border:1.5px dashed var(--line);flex:1 1 100%}
+.followcta:active{transform:scale(.97)}
+.followwhen{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px}
+.followwhenlbl{font-size:13px;font-weight:700;color:var(--ink2);margin-right:2px}
+.followchip{background:var(--card);border:1.5px solid var(--line);border-radius:999px;color:var(--ink2);
+ font:inherit;font-size:13px;font-weight:700;padding:8px 12px;min-height:40px;cursor:pointer}
+.followchip.on{background:var(--green-soft);border-color:var(--green);color:var(--green-d)}
+.followedit{margin-top:6px}
+.followedit summary{cursor:pointer;font-weight:700;font-size:14px;color:var(--green-d);list-style-position:inside}
+.followfld{width:100%;margin:8px 0 0;font:inherit;font-size:16px;padding:12px;border-radius:10px;
+ border:1.5px solid var(--line);background:var(--card);color:var(--ink)}
+.followfld:focus{outline:none;border-color:var(--green)}
+.followrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.followrow .act{flex:1 1 auto;min-width:120px}
+.followduecard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:8px 0}
+.followduecard .title{font-size:16px;margin:0 0 2px}
+.followduecard .co{font-size:14px;color:var(--ink2);margin:0 0 8px}
+.followalert,.followbanner{background:rgba(192,132,252,.12);border:1px solid rgba(192,132,252,.35);
+ color:var(--green-d);border-radius:12px;padding:12px 14px;margin:10px 0;font-size:15px;line-height:1.45}
+.followalert b,.followbanner b{color:#f3ecff}
+.followbanner{cursor:pointer}
+.tab{position:relative}
+.tab .badge{position:absolute;top:4px;left:58%;min-width:17px;height:17px;padding:0 5px;border-radius:999px;
+ background:var(--green);color:#fff;font-size:10px;font-weight:800;line-height:17px;text-align:center}
 /* Call script */
 .script{margin-top:9px}
 .script summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
@@ -1398,26 +1901,33 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
     <div class="brandrow">
       <div>
         <div class="eyebrow">Grimes &middot; Des Moines metro</div>
-        <div class="word">Job Board</div>
+        <div class="word">Job <b>Board</b></div>
       </div>
-      <span class="safebadge"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Scam-checked</span>
+      <button class="acctbtn" id="acctbtn" aria-label="Your account" aria-expanded="false" aria-haspopup="true">
+        <svg class="accticon" id="accticon" viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 19.2a6.5 6.5 0 0 1 13 0"/></svg>
+        <span class="acctinitial" id="acctinitial" hidden></span>
+      </button>
     </div>
-    <div class="summary" id="summary"></div>
+    <div class="subrow">
+      <span class="safebadge"><svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3l7 3v6c0 4.4-3 7.6-7 9-4-1.4-7-4.6-7-9V6z"/><path d="M9 12l2 2 4-4"/></svg>Scam-checked</span>
+      <span class="summary" id="summary"></span>
+    </div>
+    <!-- Account popover (collapsed by default; the account button toggles it) -->
+    <div class="acctpop" id="acctpop" hidden>
+      <div id="acctpop-out">
+        <div class="acctcopy">New phone or tablet? Sign in and your Applied, Saved, notes &amp; chats follow you everywhere.</div>
+        <button class="acctprimary" id="acctsignin">Sign in</button>
+      </div>
+      <div id="acctpop-in" hidden>
+        <div class="acctemail" id="acctemail"></div>
+        <button class="acctitem" id="acctsignout">Sign out</button>
+      </div>
+    </div>
   </header>
 
   <div class="stale" id="stale" hidden></div>
-
-  <section class="sync" id="syncbar" hidden>
-    <div class="syncrow" id="syncrow-out" hidden>
-      <div class="synccopy"><span class="who">Got a new phone, or use a tablet too?</span><br>
-        Sign in and your Applied, Saved, notes &amp; chats follow you everywhere.</div>
-      <button class="syncbtn" id="syncopen">Sign in</button>
-    </div>
-    <div class="syncrow" id="syncrow-in" hidden>
-      <div class="synccopy" id="syncwho"></div>
-      <button class="act syncout" id="syncout">Sign out</button>
-    </div>
-  </section>
+  <div class="followbanner" id="followbanner" hidden role="button" tabindex="0"
+    aria-label="Open follow-up reminders"></div>
 
   <!-- Full-screen auth modal (all modern sign-in methods) -->
   <div class="authov" id="authmodal" hidden>
@@ -1429,18 +1939,20 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
         <h2 id="authtitle">Welcome back <span class="sparkle">&#10022;</span></h2>
         <p class="sub" id="authsub">Sign in so your jobs, notes and chats follow you to any device.</p>
 
-        <button class="pkbtn" id="authpasskey">
-          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.6-3 3-4.5 5.5-4.5"/><path d="M14 10.5c2 0 3.5 1.5 3.5 3.5 0 1.2-.6 2.2-1.4 2.9V21l-1.3-1-1.3 1v-4.1a3.5 3.5 0 01-1-2.4c0-2 1.5-3.5 3.5-3.5z"/></svg>
-          Sign in with Face ID / fingerprint
-        </button>
-
-        <div class="authdiv">or</div>
-
-        <input class="authfield" id="authemail" type="email" inputmode="email" autocomplete="email"
-          placeholder="Your email address" aria-label="Email">
-        <input class="authfield" id="authpass" type="password" autocomplete="current-password"
-          placeholder="Password" aria-label="Password" hidden>
-        <button class="authprimary" id="authprimarybtn">Continue</button>
+        <!-- Real <form> so phone password managers (Google / Apple) reliably
+             offer to SAVE and autofill the password. Its default submit is
+             neutralized in JS; sign-in still runs through the existing button. -->
+        <form id="authform">
+          <input class="authfield" id="authlegal" type="text" autocomplete="name"
+            placeholder="Your legal name (for your work-search log)" aria-label="Legal name" hidden>
+          <input class="authfield" id="authpref" type="text" autocomplete="given-name"
+            placeholder="What should we call you? (preferred name)" aria-label="Preferred name" hidden>
+          <input class="authfield" id="authemail" type="email" inputmode="email" autocomplete="username"
+            placeholder="Your email address" aria-label="Email">
+          <input class="authfield" id="authpass" type="password" autocomplete="current-password"
+            placeholder="Password" aria-label="Password" hidden>
+          <button type="submit" class="authprimary" id="authprimarybtn">Continue</button>
+        </form>
         <button class="authsecondary" id="authmagic">Email me a sign-in link instead</button>
         <button class="authsecondary" id="authgoogle" hidden>
           <svg viewBox="0 0 24 24" width="17" height="17"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.5h6.5a5.6 5.6 0 01-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.9z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3a7.2 7.2 0 01-10.8-3.8H1.2v3.1A12 12 0 0012 24z"/><path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 010-4.6V6.6H1.2a12 12 0 000 10.8z"/><path fill="#EA4335" d="M12 4.8c1.8 0 3.4.6 4.6 1.8l3.4-3.4A12 12 0 001.2 6.6l4.1 3.1A7.2 7.2 0 0112 4.8z"/></svg>
@@ -1452,8 +1964,16 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
           <button class="authlink" id="authforgot" hidden>Forgot password?</button>
         </div>
         <div class="authmsg" id="authmsg" role="status"></div>
-        <p class="authnote">Passkeys use your phone&rsquo;s Face ID or fingerprint &mdash; nothing to remember,
-        nothing to steal. Your info is private and never shared.</p>
+
+        <!-- Optional, secondary: Face ID / fingerprint. De-emphasized so the
+             password manager flow is the obvious default. -->
+        <div class="authdiv" id="authpkdiv">or, if you like</div>
+        <button class="pkbtn" id="authpasskey">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><circle cx="9" cy="9" r="3.2"/><path d="M3.5 19c.6-3 3-4.5 5.5-4.5"/><path d="M14 10.5c2 0 3.5 1.5 3.5 3.5 0 1.2-.6 2.2-1.4 2.9V21l-1.3-1-1.3 1v-4.1a3.5 3.5 0 01-1-2.4c0-2 1.5-3.5 3.5-3.5z"/></svg>
+          Use Face ID / fingerprint instead (optional)
+        </button>
+        <p class="authnote">Your info is private and never shared. Face ID / fingerprint is
+        optional &mdash; an email and password is all you need.</p>
       </div>
 
       <!-- set-new-password panel (shown after a reset link) -->
@@ -1465,6 +1985,15 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
         <button class="authprimary" id="authsetpass">Save new password</button>
         <div class="authmsg" id="authrecmsg" role="status"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- Résumé tailoring result -->
+  <div class="authov" id="tailormodal" hidden>
+    <div class="authcard" style="position:relative">
+      <button class="authx" data-act="closetailor" aria-label="Close">&times;</button>
+      <h2>Tailor your r&eacute;sum&eacute; <span class="sparkle">&#10022;</span></h2>
+      <div id="tailorbody"></div>
     </div>
   </div>
 
@@ -1485,6 +2014,8 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
       <h2>My applications</h2>
       <p class="weekline" id="weekline"></p>
     </div>
+    <div class="followalert" id="followalert" hidden></div>
+    <button class="act" id="notifybtn" type="button" hidden>Turn on phone reminders for follow-ups</button>
     <div class="logbtns">
       <button class="act" id="printlog">Print my work-search log</button>
       <button class="act" id="copylog">Copy as text</button>
@@ -1500,6 +2031,34 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
     <div class="picksintro">
       <h2 id="cornerhi">My corner <span class="sparkle">&#10022;</span></h2>
       <p id="cornergreet"></p>
+    </div>
+
+    <div class="quizcard" id="namecard">
+      <h3>Your name <span class="sparkle">&#10022;</span></h3>
+      <p>In the app we call you by your <b>preferred name</b>. Your <b>legal name</b> is
+      used only on your printable work-search log (for unemployment or court).</p>
+      <input class="authfield" id="nm-pref" type="text" autocomplete="given-name"
+        placeholder="Preferred name (what we call you)" aria-label="Preferred name">
+      <input class="authfield" id="nm-legal" type="text" autocomplete="name"
+        placeholder="Legal name (for your work-search log)" aria-label="Legal name">
+      <button class="authprimary" data-act="saveprofile">Save my name</button>
+    </div>
+
+    <div class="quizcard" id="resumecard">
+      <h3>My r&eacute;sum&eacute; <span class="sparkle">&#10022;</span></h3>
+      <p>Upload your r&eacute;sum&eacute; (or paste it). Then on any job you can tap
+      <b>&#10022; Tailor</b> and I&rsquo;ll re-organize <i>your own</i> experience to fit
+      that posting &mdash; never adding anything you didn&rsquo;t write. You can paste the
+      full job description there too, for a sharper match. Saved on this phone.</p>
+      <input type="file" id="resumefile" accept=".docx,.pdf,.md,.markdown,.txt,text/plain,text/markdown,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+      <button class="authsecondary uploadbtn" data-act="uploadresume">
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 16V4"/><path d="M8 8l4-4 4 4"/><path d="M4 16v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
+        Upload a file (.docx, .pdf, .md, .txt)
+      </button>
+      <textarea class="authfield" id="resumebox" rows="6" style="min-height:120px;resize:vertical"
+        placeholder="&hellip;or paste your r&eacute;sum&eacute; text here" aria-label="Your r&eacute;sum&eacute;"></textarea>
+      <button class="authprimary" data-act="saveresume">Save my r&eacute;sum&eacute;</button>
+      <div class="authmsg" id="resumemsg" role="status"></div>
     </div>
 
     <div class="rescard">
@@ -1522,10 +2081,100 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
     </div>
 
     <div class="chatcard" id="chatcard">
-      <h3>Your companion</h3>
-      <p id="chatstate">A friendly check-in chat that gets to know you and helps with
-      the search &mdash; it turns on once sign-in is set up. Your quiz answers above
-      already make the app smarter today.</p>
+      <div class="rubyintro">
+        <span class="rubyface rubyface--sm" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="100%" height="100%">
+            <path class="rb-horn" d="M14 22c-5-3-8-9-7-13 4 1 8 5 9 11z"/>
+            <path class="rb-horn" d="M50 22c5-3 8-9 7-13-4 1-8 5-9 11z"/>
+            <ellipse class="rb-head" cx="32" cy="34" rx="22" ry="21"/>
+            <path class="rb-spot" d="M16 24c-3 4-3 10 1 12 4-2 5-9 2-13-1-1-2-1-3 1z"/>
+            <path class="rb-spot" d="M47 21c4 1 7 6 5 10-4 0-8-4-7-9 0-1 1-1 2-1z"/>
+            <ellipse class="rb-muz" cx="32" cy="44" rx="13" ry="10"/>
+            <circle class="rb-nos" cx="26" cy="44" r="2.3"/>
+            <circle class="rb-nos" cx="38" cy="44" r="2.3"/>
+            <circle class="rb-eye" cx="24" cy="30" r="2.6"/>
+            <circle class="rb-eye" cx="40" cy="30" r="2.6"/>
+          </svg>
+        </span>
+        <div>
+          <h3>Ruby <span class="rubycow" aria-hidden="true">&#x1F404;</span></h3>
+          <p class="rubytag">Your emotional support cow</p>
+        </div>
+      </div>
+      <p id="chatstate">Ruby is a calm, kind check-in &mdash; she remembers you and helps
+      with the search. You can type to her or just talk out loud. She turns on once
+      sign-in is set up; your quiz answers above already make the app smarter today.</p>
+      <button class="rubyopen" id="rubyopen" type="button" hidden>
+        <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.4 8.4 0 01-9 8.4L3 21l1.1-9A8.4 8.4 0 1121 11.5z"/></svg>
+        Talk to Ruby
+      </button>
+    </div>
+  </section>
+
+  <!-- RUBY full-screen companion overlay (signed-in only; mounted/opened from JS).
+       Premium goth, NOT glassmorphism — solid surfaces. Voice via Web Speech API. -->
+  <div class="rubyov" id="rubyov" hidden role="dialog" aria-modal="true" aria-label="Ruby, your emotional support cow">
+    <div class="rubyshell">
+      <header class="rubybar">
+        <span class="rubyface rubyface--bar" aria-hidden="true">
+          <svg viewBox="0 0 64 64" width="100%" height="100%">
+            <path class="rb-horn" d="M14 22c-5-3-8-9-7-13 4 1 8 5 9 11z"/>
+            <path class="rb-horn" d="M50 22c5-3 8-9 7-13-4 1-8 5-9 11z"/>
+            <ellipse class="rb-head" cx="32" cy="34" rx="22" ry="21"/>
+            <path class="rb-spot" d="M16 24c-3 4-3 10 1 12 4-2 5-9 2-13-1-1-2-1-3 1z"/>
+            <path class="rb-spot" d="M47 21c4 1 7 6 5 10-4 0-8-4-7-9 0-1 1-1 2-1z"/>
+            <ellipse class="rb-muz" cx="32" cy="44" rx="13" ry="10"/>
+            <circle class="rb-nos" cx="26" cy="44" r="2.3"/>
+            <circle class="rb-nos" cx="38" cy="44" r="2.3"/>
+            <circle class="rb-eye" cx="24" cy="30" r="2.6"/>
+            <circle class="rb-eye" cx="40" cy="30" r="2.6"/>
+          </svg>
+        </span>
+        <div class="rubybarname"><b>Ruby</b><span>Emotional support cow &#x1F404;</span></div>
+        <button class="rubyspk" id="rubyspk" type="button" hidden aria-pressed="true" aria-label="Read Ruby's replies aloud">
+          <svg class="ic-on" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 010 7M18.5 5.5a9 9 0 010 13"/></svg>
+          <svg class="ic-off" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M22 9l-6 6M16 9l6 6"/></svg>
+        </button>
+        <button class="rubyclose" id="rubyclose" type="button" aria-label="Close Ruby">&times;</button>
+      </header>
+      <div class="rubylog" id="rubylog" aria-live="polite"></div>
+      <div class="rubylisten" id="rubylisten" hidden aria-hidden="true">
+        <span class="rubywave"><i></i><i></i><i></i><i></i><i></i></span>
+        Listening&hellip;
+      </div>
+      <div class="rubydock">
+        <button class="rubymic" id="rubymic" type="button" hidden aria-label="Talk to Ruby with your voice">
+          <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v4"/></svg>
+        </button>
+        <input class="rubyinput" id="rubyinput" type="text" maxlength="4000" autocomplete="off"
+          placeholder="Tell Ruby how you're doing&hellip;" aria-label="Message Ruby">
+        <button class="rubysend" id="rubysend" type="button" aria-label="Send">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+        </button>
+      </div>
+      <p class="rubyfine" id="rubyfine">Ruby's a kind helper, not a therapist &mdash; if things feel heavy, tap the
+      crisis card above for real people, 24/7. Your chats are saved privately to your account so she remembers you.</p>
+    </div>
+  </div>
+
+  <!-- ACCOUNT-BENEFITS screen: shown when a signed-out user taps a locked tab
+       (Today / My apps / My corner). "No freebies without an account." -->
+  <section id="lockwrap" hidden>
+    <div class="lockview">
+      <div class="lockhero">Your free account <span class="hl">unlocks all of it</span></div>
+      <p class="locksub" id="locksub">Browsing is free. Make a free account to actually use the app — it takes 10 seconds and saves everything to you.</p>
+      <ul class="lockperks">
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Save &amp; track every application</b> <span>— one tap, and your jobs, “applied” dates and notes follow you to any phone.</span></div></li>
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>AI résumé tailoring</b> <span>— rewrites your real experience to fit each job, in your words, never made up.</span></div></li>
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Ruby, your support cow 🐄</b> <span>— a kind check-in you can type or talk to; she remembers you and helps with the search.</span></div></li>
+        <li><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4 4 10-10"/></svg><div><b>Printable work-search log</b> <span>— your weekly Iowa unemployment list, filled in automatically.</span></div></li>
+      </ul>
+      <div class="lockbtns">
+        <button class="lockcta" data-act="signup"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2l1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6z"/></svg>Create my free account</button>
+        <button class="locksecondary" data-act="signin">I already have one — sign in</button>
+      </div>
+      <p class="lockcrisis">Need help right now? <b>988</b> (call/text, free, 24/7) ·
+        Your Life Iowa <a href="tel:8555818111">855-581-8111</a>. Always free, no account.</p>
     </div>
   </section>
 
@@ -1572,6 +2221,10 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
     <details class="faq"><summary>How does the work-search log work?</summary>
       <p>When you mark a job Applied, it's saved with the date automatically. The
       <b>My apps</b> tab can print or copy your weekly list for your Iowa unemployment claim.</p></details>
+    <details class="faq"><summary>How do follow-up reminders work?</summary>
+      <p>When you apply, we pull any phone or email from the job posting automatically.
+      You get big <b>Call</b> and <b>Email</b> buttons — or tap <b>Paste</b> if they texted you
+      a number. <b>My apps</b> badges you when it&rsquo;s time to follow up.</p></details>
     <details class="faq"><summary>Is my information private?</summary>
       <p>Everything stays on your phone unless you choose to sign in. Signing in saves your
       jobs, notes and chats to a private account so a new phone doesn&rsquo;t lose them. It&rsquo;s
@@ -1580,17 +2233,25 @@ header.bar{position:sticky;top:0;z-index:20;background:rgba(14,10,22,.82);
   </div>
 
   <div class="controls">
-    <div class="searchwrap">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
-      <input class="search" id="search" type="search" inputmode="search"
-        placeholder="Search job or employer" aria-label="Search jobs">
+    <button class="filtertoggle" id="filtertoggle" aria-expanded="false" aria-controls="filterpanel">
+      <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
+      <span class="ftlabel">Search &amp; filter</span>
+      <span class="filtcount" id="filtcount" hidden></span>
+      <svg class="ftchev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+    <div class="filterpanel" id="filterpanel" hidden>
+      <div class="searchwrap">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-3.5-3.5"/></svg>
+        <input class="search" id="search" type="search" inputmode="search"
+          placeholder="Search job or employer" aria-label="Search jobs">
+      </div>
+      <div class="chiplabel">Filter</div>
+      <div class="chips" id="chips"></div>
+      <div class="chiplabel" id="catlabel">Job type</div>
+      <div class="chips" id="catchips"></div>
+      <div class="chiplabel">How far you'll drive from Grimes</div>
+      <div class="chips" id="commutechips" aria-label="How far you will drive"></div>
     </div>
-    <div class="chiplabel">Filter</div>
-    <div class="chips" id="chips"></div>
-    <div class="chiplabel" id="catlabel">Job type</div>
-    <div class="chips" id="catchips"></div>
-    <div class="chiplabel">How far you'll drive from Grimes</div>
-    <div class="chips" id="commutechips" aria-label="How far you will drive"></div>
   </div>
 
   <div class="progress" id="progress"></div>
@@ -1629,6 +2290,195 @@ function daysSince(d){ const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
 function ago(d){ const n=daysSince(d); if(n==null) return "";
   if(n===0) return "today"; if(n===1) return "yesterday";
   if(n<14) return n+" days ago"; return Math.round(n/7)+" weeks ago"; }
+function addDaysISO(d, n){
+  const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
+  if(isNaN(t)) return today();
+  return new Date(t+n*864e5).toISOString().slice(0,10);
+}
+function daysUntil(d){
+  const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
+  if(isNaN(t)) return null;
+  return Math.ceil((t-Date.now())/864e5);
+}
+function safeTel(u){ return String(u||"").replace(/[^0-9+]/g,""); }
+function notifPerm(){ return typeof Notification!=="undefined" ? Notification.permission : "denied"; }
+function fmtPhone(d){
+  var t=safeTel(d).replace(/^\+?1/,"").slice(-10);
+  if(t.length!==10) return String(d||"").trim();
+  return "("+t.slice(0,3)+") "+t.slice(3,6)+"-"+t.slice(6);
+}
+function isPlausiblePhone(d){
+  var t=safeTel(d).replace(/^\+?1/,"").slice(-10);
+  if(t.length!==10) return false;
+  var area=t.slice(0,3), prefix=t.slice(3,6);
+  if(area==="900"||area==="976") return false;
+  if(prefix==="555"&&t.slice(6,8)==="01") return false;
+  return true;
+}
+function safeMail(u){
+  const m=String(u||"").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m) ? m : "";
+}
+function parseContactPaste(text){
+  var out={name:"",phone:"",email:""};
+  if(!text) return out;
+  var mail=text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  if(mail && !/noreply|no-reply|donotreply/i.test(mail[0])) out.email=mail[0];
+  var ph=text.match(/(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}/);
+  if(ph && isPlausiblePhone(ph[0])) out.phone=fmtPhone(ph[0]);
+  var nm=text.match(/(?:contact|call|ask for|speak with|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+  if(nm) out.name=nm[1];
+  return out;
+}
+function jobContactHints(j){
+  if(!j) return {name:"",phone:"",email:""};
+  return {name:j.contactName||"", phone:j.contactPhone||"", email:j.contactEmail||""};
+}
+function effectiveContact(id, j){
+  var fu=state.followUps[id]||{}, hints=jobContactHints(j);
+  return {
+    name:(fu.name||"").trim()||hints.name,
+    phone:(fu.phone||"").trim()||hints.phone,
+    email:(fu.email||"").trim()||hints.email,
+  };
+}
+function ensureFollowUp(id){
+  if(!state.followUps[id]){
+    const appliedOn=state.applied[id]||today();
+    state.followUps[id]={name:"",phone:"",email:"",on:addDaysISO(appliedOn,5),done:false};
+  }
+  return state.followUps[id];
+}
+function seedFollowUpFromJob(id, j){
+  var fu=ensureFollowUp(id), hints=jobContactHints(j);
+  if(!fu.phone && hints.phone) fu.phone=hints.phone;
+  if(!fu.email && hints.email) fu.email=hints.email;
+  if(!fu.name && hints.name) fu.name=hints.name;
+  return fu;
+}
+function followActionHTML(id, c, opts){
+  opts=opts||{};
+  var tel=isPlausiblePhone(c.phone)?safeTel(c.phone):"", mail=safeMail(c.email), parts=[];
+  if(tel){
+    parts.push('<a class="followcta call" href="tel:'+esc(tel)+'"'+
+      (opts.track?' data-act="fuopen" data-kind="call" data-id="'+esc(id)+'"':'')+'>'+
+      IC.phone+'Call '+esc(c.name||fmtPhone(c.phone))+'</a>');
+  }
+  if(mail){
+    var subj=opts.title?("Follow-up: "+opts.title):"Job application follow-up";
+    parts.push('<a class="followcta mail" href="mailto:'+esc(mail)+'?subject='+encodeURIComponent(subj)+'"'+
+      (opts.track?' data-act="fuopen" data-kind="mail" data-id="'+esc(id)+'"':'')+'>'+
+      IC.mail+'Email'+(c.name?(" "+esc(c.name)):"")+'</a>');
+  }
+  if(!parts.length){
+    parts.push('<button type="button" class="followcta paste" data-act="fupaste" data-id="'+esc(id)+'">'+
+      IC.paste+'Paste phone or email</button>');
+  }
+  return parts.join("");
+}
+function followWhenHTML(id){
+  var fu=ensureFollowUp(id), base=state.applied[id]||today();
+  var chips=[[3,"3 days"],[5,"5 days"],[7,"1 week"]];
+  return '<div class="followwhen"><span class="followwhenlbl">Remind me</span>'+
+    chips.map(function(ch){
+      var on=addDaysISO(base, ch[0]);
+      return '<button type="button" class="followchip'+(fu.on===on?" on":"")+'" data-act="fuwhen" data-id="'+
+        esc(id)+'" data-days="'+ch[0]+'">'+ch[1]+'</button>';
+    }).join("")+
+    '<input class="followfld" style="flex:1 1 140px;max-width:170px;margin:0" data-fu-on="'+esc(id)+'" type="date" aria-label="Follow-up date" value="'+esc(fu.on||"")+'">'+
+    '</div>';
+}
+function followUpBlockHTML(id, j){
+  if(!(id in state.applied)) return "";
+  seedFollowUpFromJob(id, j);
+  const fu=ensureFollowUp(id), c=effectiveContact(id, j);
+  const due=fu.on && !fu.done && fu.on<=today();
+  const soon=fu.on && !fu.done && fu.on>today() && daysUntil(fu.on)!=null && daysUntil(fu.on)<=3;
+  const who=c.name ? esc(c.name)+(j&&j.company?" at "+esc(j.company):"") :
+    (j&&j.company ? esc(j.company)+" HR" : "Who to contact");
+  return '<div class="followup">'+
+    '<h4>'+(due?'&#9888; Follow up today':(soon?'Follow up '+esc(ago(fu.on)||fu.on):'Follow-up'))+'</h4>'+
+    (c.phone||c.email?'<p class="followwho">'+who+'</p>':'')+
+    '<div class="followhero">'+followActionHTML(id, c, {track:true, title:j&&j.title})+'</div>'+
+    followWhenHTML(id)+
+    '<details class="followedit"'+(openFollowEdit.has(id)?' open':'')+'>'+
+      '<summary>Add or change contact</summary>'+
+      '<input class="followfld" data-fu-name="'+esc(id)+'" placeholder="Name (recruiter, HR…)" value="'+esc(fu.name)+'">'+
+      '<input class="followfld" data-fu-phone="'+esc(id)+'" type="tel" inputmode="tel" autocomplete="tel" placeholder="Phone" value="'+esc(fu.phone)+'">'+
+      '<input class="followfld" data-fu-email="'+esc(id)+'" type="email" inputmode="email" autocomplete="email" placeholder="Email" value="'+esc(fu.email)+'">'+
+      '<button type="button" class="followcta paste" data-act="fupaste" data-id="'+esc(id)+'">'+IC.paste+'Paste from clipboard</button>'+
+    '</details>'+
+    '<div class="followrow">'+
+      (j?callScriptHTML(j, state.applied[id]||fu.on):'')+
+      (fu.done
+        ?'<button class="act" data-act="fuedit" data-id="'+esc(id)+'">'+IC.pen+'Edit follow-up</button>'
+        :'<button class="act applied on" data-act="fudone" data-id="'+esc(id)+'">'+IC.check+'I followed up</button>')+
+    '</div></div>';
+}
+function followUpsDue(){
+  return appliedEntries().filter(function(r){
+    const fu=state.followUps[r.id];
+    return fu && !fu.done && fu.on && fu.on<=today();
+  });
+}
+function renderFollowAlerts(){
+  const due=followUpsDue();
+  const n=due.length;
+  const alertEl=document.getElementById("followalert");
+  const banner=document.getElementById("followbanner");
+  const notifyBtn=document.getElementById("notifybtn");
+  if(alertEl){
+    if(n){
+      alertEl.hidden=false;
+      alertEl.innerHTML='<b>'+n+(n===1?" follow-up is":" follow-ups are")+' due</b> — tap to call or email.'+
+        due.slice(0,3).map(function(r){
+          var j=jobById.get(r.id), c=effectiveContact(r.id, j);
+          return '<div class="followduecard">'+
+            '<div class="title">'+esc(r.title)+'</div>'+
+            '<div class="co">'+esc(r.company)+'</div>'+
+            '<div class="followhero">'+followActionHTML(r.id, c, {title:r.title})+'</div>'+
+            '</div>';
+        }).join("");
+    } else { alertEl.hidden=true; alertEl.innerHTML=""; }
+  }
+  if(banner){
+    if(n){
+      banner.hidden=false;
+      banner.innerHTML='<b>'+n+(n===1?" follow-up":" follow-ups")+' ready</b> — tap to see who to contact.';
+    } else { banner.hidden=true; banner.innerHTML=""; }
+  }
+  if(notifyBtn){
+    const canNotify=(typeof Notification!=="undefined");
+    notifyBtn.hidden=!canNotify || notifPerm()==="granted" || !Object.keys(state.applied).length;
+    if(!notifyBtn.hidden) notifyBtn.textContent=
+      notifPerm()==="denied" ? "Reminders blocked — enable in phone settings"
+      : "Turn on phone reminders for follow-ups";
+    notifyBtn.disabled=canNotify && notifPerm()==="denied";
+  }
+  const tab=document.getElementById("nav-apps");
+  if(tab){
+    let badge=tab.querySelector(".badge");
+    if(n){
+      if(!badge){ badge=document.createElement("span"); badge.className="badge"; tab.appendChild(badge); }
+      badge.textContent=n>9?"9+":String(n); badge.hidden=false;
+    } else if(badge) badge.hidden=true;
+  }
+}
+function maybeNotifyFollowUps(){
+  if(typeof Notification==="undefined" || notifPerm()!=="granted") return;
+  const due=followUpsDue();
+  if(!due.length || state.followAlertDay===today()) return;
+  state.followAlertDay=today(); persist();
+  due.slice(0,3).forEach(function(r, i){
+    const fu=state.followUps[r.id]||{};
+    setTimeout(function(){
+      try{
+        new Notification("Time to follow up",{body:r.title+(fu.name?" — "+fu.name:""),
+          tag:"followup-"+r.id, icon:"./icon-192.png"});
+      }catch(e){}
+    }, i*400);
+  });
+}
 
 let state = load();
 // applied used to be an array of ids; it's now a map id -> date applied.
@@ -1639,15 +2489,20 @@ state.hidden  = new Set(state.hidden||[]);
 state.notes   = state.notes || {};
 state.coachOff = !!state.coachOff;
 state.snooze  = state.snooze || {};          // id -> "come back on" date (gentler than Hide)
+state.savedAt = state.savedAt || {};         // id -> date saved (for gentle "still want this?" nudges)
+state.resume  = state.resume  || "";         // her base résumé text (this device only; fed to the tailor)
 state.appliedLog = state.appliedLog || {};   // id -> {t,c,d,u} captured at apply time, so the
                                              // work-search log survives jobs leaving the feed
+state.followUps = state.followUps || {};     // id -> {name,phone,email,on,done} follow-up tracker
+state.followAlertDay = state.followAlertDay || "";  // last day we fired daily follow-up alerts
 state.profile = state.profile || {};         // quiz answers -> "For you" feed boost
 state.maxCommute = state.maxCommute || "";   // "" = any distance; else a minutes cap ("20"/"30"/"45")
 const prevSeen = new Set(state.seen||[]);
 function persist(){ save({applied:state.applied, saved:[...state.saved], hidden:[...state.hidden],
   notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff,
-  snooze:state.snooze, appliedLog:state.appliedLog, profile:state.profile,
-  maxCommute:state.maxCommute}); }
+  snooze:state.snooze, savedAt:state.savedAt, appliedLog:state.appliedLog, followUps:state.followUps,
+  followAlertDay:state.followAlertDay, profile:state.profile,
+  resume:state.resume, maxCommute:state.maxCommute}); }
 // Ledger backfill: any applied job still in today's feed gets its details kept.
 JOBS.forEach(j=>{ if(state.applied[j.id] && !state.appliedLog[j.id])
   state.appliedLog[j.id]={t:j.title,c:j.company,d:state.applied[j.id],u:j.url}; });
@@ -1661,6 +2516,8 @@ const newCount = Object.keys(isNew).length;
 persist();
 
 const openNotes = new Set();
+const openFollowEdit = new Set();
+let portalSync = null;   // set by the portal IIFE when sign-in is configured; null otherwise
 let filters = { q:"", cat:"", pay:false, inperson:false, remote:false, known:false,
                 saved:false, applied:false, showHidden:false, trains:false,
                 maxCommute: state.maxCommute || "" };
@@ -1689,6 +2546,11 @@ const IC = {
   car:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M5 11l1.5-4.5A2 2 0 018.4 5h7.2a2 2 0 011.9 1.5L19 11"/><rect x="3" y="11" width="18" height="6" rx="2"/><circle cx="7.5" cy="17" r="1.5"/><circle cx="16.5" cy="17" r="1.5"/></svg>',
   pen:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 013 3L8 19z"/></svg>',
   share:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v8h14v-8"/></svg>',
+  lock:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>',
+  spark:'<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2l1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6z"/></svg>',
+  phone:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6.5 4h3l1.5 4-2 1.5a11 11 0 005 5L17 12.5l4 1.5v3A2 2 0 0119 19a15 15 0 01-6-2 15 15 0 01-4-4 15 15 0 01-2-6 2 2 0 012-3z"/></svg>',
+  mail:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
+  paste:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="8" y="2" width="12" height="16" rx="2"/><path d="M4 6a2 2 0 012-2h8v16H6a2 2 0 01-2-2z"/></svg>',
 };
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"'`]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c];});}
@@ -1722,9 +2584,9 @@ function forYouScore(j){
   const p = state.profile; let s = 0;
   if(p.kind){
     const k = j.category||"";
-    if(p.kind==="people" && (k==="Customer service"||k==="Store & retail")) s+=2;
-    if(p.kind==="quiet"  && (k==="Office"||k==="Production & labor")) s+=2;
-    if(p.kind==="hands"  && (k==="Production & labor"||k==="Food & cleaning")) s+=2;
+    if(p.kind==="people" && k==="Customer service") s+=2;
+    if(p.kind==="quiet"  && k==="Office") s+=2;
+    if(p.kind==="hands"  && k==="Caregiving") s+=2;
     if(p.kind==="care"   && k==="Caregiving") s+=2;
   }
   if(p.where==="home" && j.remote) s+=2;
@@ -1763,11 +2625,33 @@ function render(){
   wrap.innerHTML = "";
   const empty = document.getElementById("empty");
   empty.hidden = list.length>0;
-  if(!list.length){ empty.innerHTML = IC.eye + "<div>No jobs match. Turn off a filter to see more.</div>"; }
+  if(!list.length){ empty.innerHTML = IC.eye + "<div>Nothing matches those filters right now — that&rsquo;s the filters, not you. Tap one off above to see more, or check back tomorrow; fresh jobs arrive every morning.</div>"; }
 
   list.forEach(function(j,i){ wrap.appendChild(cardEl(j,i)); });
+  updateFilterCount();
   renderPicks(); renderApps(); renderCorner();
+  renderFollowAlerts();
+  maybeNotifyFollowUps();
 }
+
+// Collapsible filter panel: collapsed by default so jobs are visible immediately;
+// the count badge shows how many filters are active while it's closed.
+function updateFilterCount(){
+  var n = document.querySelectorAll('#chips .chip[aria-pressed="true"], #catchips .chip[aria-pressed="true"]').length;
+  if((filters.q||"").trim()) n++;
+  if(state.maxCommute) n++;
+  var el = document.getElementById("filtcount");
+  if(el){ el.hidden = n===0; if(n) el.textContent = n; }
+}
+(function(){
+  var tog=document.getElementById("filtertoggle"), panel=document.getElementById("filterpanel");
+  if(!tog||!panel) return;
+  tog.addEventListener("click", function(){
+    var willOpen = panel.hidden;
+    panel.hidden = !willOpen;
+    tog.setAttribute("aria-expanded", willOpen ? "true" : "false");
+  });
+})();
 
 function callScriptHTML(j, appliedOn){
   // A word-for-word script takes the fear out of the follow-up call.
@@ -1784,6 +2668,7 @@ function cardEl(j, i){
   const appliedOn = state.applied[j.id], applied = !!appliedOn, saved = state.saved.has(j.id);
   const note = state.notes[j.id] || "";
   const appliedDays = applied ? daysSince(appliedOn) : null;
+  const savedDays = saved ? daysSince(state.savedAt[j.id]) : null;   // null for pre-timestamp saves
   const payCls = j.good ? "good" : "none";
   const verified = j.trusted
     ? '<span class="verified">'+IC.check+'Verified'+(j.trustLabel?' — '+esc(j.trustLabel):' employer')+'</span>'
@@ -1810,6 +2695,10 @@ function cardEl(j, i){
     (applied&&appliedDays!=null&&appliedDays>=5
       ?'<div class="nudge">You applied '+esc(ago(appliedOn))+' — it\'s okay to call and ask about your application.'+
         callScriptHTML(j, appliedOn)+'</div>':'')+
+    (!applied&&saved&&savedDays!=null&&savedDays>=3
+      ?'<div class="nudge">You saved this '+esc(ago(state.savedAt[j.id]))+' — want to apply today? No pressure; I\'m proud of you either way. &#10022;</div>':'')+
+    (postedDays!=null&&postedDays>=30
+      ?'<div class="nudge">This one&rsquo;s been posted a while — worth a quick check that it&rsquo;s still open before you spend time on it.</div>':'')+
     '<a class="apply" href="'+esc(safeUrl(j.url))+'" target="_blank" rel="noopener" data-act="open" data-id="'+esc(j.id)+'">Apply'+IC.arrow+'</a>'+
     '<div class="actions">'+
       '<button class="act applied'+(applied?' on':'')+'" data-act="applied" data-id="'+esc(j.id)+'">'+IC.check+(applied?'Applied':'I applied')+'</button>'+
@@ -1819,11 +2708,16 @@ function cardEl(j, i){
     '</div>'+
     '<div class="actions">'+
       '<button class="act'+(note?' on':'')+'" data-act="notes" data-id="'+esc(j.id)+'">'+IC.pen+(note?'My notes':'Add note')+'</button>'+
-      (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Send to '+esc(META.contact||"a friend")+'</button>':'')+
+      '<button class="act" data-act="tailor" data-id="'+esc(j.id)+'">&#10022; Tailor résumé</button>'+
+      (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Share</button>':'')+
     '</div>'+
     '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
-      '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — who you talked to, when to follow up">'+esc(note)+'</textarea>'+
-    '</div>';
+      '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — interview times, what they said">'+esc(note)+'</textarea>'+
+    '</div>'+
+    (applied ? followUpBlockHTML(j.id, j) : '')+
+    // Signed-out: the actions above are hidden by CSS and THIS is the only
+    // button — one tap opens the free sign-up. No freebies without an account.
+    '<button class="lockcta" data-act="signup">'+IC.lock+'Create a free account to apply &amp; save</button>';
   return el;
 }
 
@@ -1875,8 +2769,297 @@ function markApplied(id, el){
     (jobById.get(id) ? {t:jobById.get(id).title, c:jobById.get(id).company,
                         d:today(), u:jobById.get(id).url} : {t:"(job)", c:"", d:today(), u:""});
   state.appliedLog[id].d = state.applied[id];
+  seedFollowUpFromJob(id, jobById.get(id));
+  // Full date+time stamp captured the moment she logs it — for unemployment/court
+  // documentation. (It records when the activity was logged in the app.)
+  state.appliedLog[id].ts = new Date().toISOString();
   celebrate(el);
 }
+
+/* ── Résumé tailoring ─────────────────────────────────────────────────────
+   The tailor button is on every card; the actual call is JWT-gated to a signed-
+   in user via the portal's window.__tailorInvoke bridge (set when signed in).
+   Her résumé never leaves this device except in that one authenticated call. */
+function openTailorModal(){ var m=document.getElementById("tailormodal"); if(m) m.hidden=false; }
+function closeTailorModal(){ stopSpook(); var m=document.getElementById("tailormodal"); if(m) m.hidden=true; }
+function setTailorBody(html){ var b=document.getElementById("tailorbody"); if(b) b.innerHTML=html; }
+/* Build the plain text for one part, or both joined with a clear separator so
+   she can paste them into one document without losing her place. */
+function tailorText(which){
+  var d=window.__tailorData; if(!d) return "";
+  var r=(d.resume||""), c=(d.cover_note||"");
+  if(which==="cover") return c;
+  if(which==="both"){
+    return c ? (r+"\n\n\n=== COVER NOTE ===\n\n"+c) : r;
+  }
+  return r;
+}
+/* One clipboard write covers it — "both" puts résumé + a separator + cover note
+   in a single copy, so she never has to copy twice or lose her spot. */
+function copyTailor(which){
+  var text=tailorText(which);
+  if(!text){ showToast("Nothing to copy yet."); return; }
+  var label = which==="both" ? "Copied both ✦" : "Copied ✦";
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ showToast(label); })
+      .catch(function(){ showToast("Couldn't copy — select the text and copy it."); });
+  } else { showToast("Select the text and copy it."); }
+}
+/* Offline-safe download fallback — saves a .txt she can keep or attach. */
+function downloadTailor(which){
+  var text=tailorText(which);
+  if(!text){ showToast("Nothing to save yet."); return; }
+  var name = which==="cover" ? "cover-note.txt" : which==="both" ? "resume-and-cover-note.txt" : "tailored-resume.txt";
+  try{
+    var blob=new Blob([text],{type:"text/plain"});
+    var url=URL.createObjectURL(blob);
+    var a=document.createElement("a");
+    a.href=url; a.download=name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+    showToast("Saved "+name+" ✦");
+  }catch(e){ showToast("Couldn't save — copy the text instead."); }
+}
+function renderTailorResult(j, d){
+  window.__tailorData = d;
+  var changes = (d.changes||[]).map(function(c){ return '<li>'+esc(c)+'</li>'; }).join("");
+  var both = d.cover_note ? 'both' : 'resume';
+  setTailorBody(
+    '<p class="sub">For <b>'+esc(j.title)+'</b> at '+esc(j.company)+
+      ' — built only from what you wrote. Read it over; it&rsquo;s yours to edit.</p>'+
+    (changes?'<div class="tailorsec"><h3>What I emphasized</h3><ul class="reslist">'+changes+'</ul></div>':'')+
+    /* Copy/download the whole thing at once — no second clipboard trip needed. */
+    '<div class="tailorgrab">'+
+      '<button class="syncbtn" data-act="copytailor" data-copy="'+both+'">'+
+        (d.cover_note?'Copy both':'Copy résumé')+'</button>'+
+      '<button class="syncbtn alt" data-act="dltailor" data-copy="'+both+'">'+
+        (d.cover_note?'Download both':'Download .txt')+'</button>'+
+    '</div>'+
+    '<div class="tailorsec"><h3>Your tailored résumé</h3>'+
+      '<textarea class="authfield tailorta" readonly aria-label="Tailored résumé">'+esc(d.resume)+'</textarea>'+
+      '<div class="tailorgrab">'+
+        '<button class="syncbtn" data-act="copytailor" data-copy="resume">Copy résumé</button>'+
+        '<button class="syncbtn alt" data-act="dltailor" data-copy="resume">Download</button>'+
+      '</div></div>'+
+    (d.cover_note?'<div class="tailorsec"><h3>A short note to send with it</h3>'+
+      '<textarea class="authfield tailorta" readonly aria-label="Cover note">'+esc(d.cover_note)+'</textarea>'+
+      '<div class="tailorgrab">'+
+        '<button class="syncbtn" data-act="copytailor" data-copy="cover">Copy note</button>'+
+        '<button class="syncbtn alt" data-act="dltailor" data-copy="cover">Download</button>'+
+      '</div></div>':'')+
+    '<p class="authnote">Always read it before you send — every line should be true to your real experience.</p>'
+  );
+}
+/* Spooky "time left" loader for the AI wait. The real finish time is the API's
+   to decide, so we calibrate: ease the bar toward ~94% over ~9s (a typical
+   Sonnet tailoring), cycling stage messages, then snap to done when it lands. */
+var _spookTimer = null;
+function spookLoaderHTML(jobTitle){
+  return '<div class="spookload">'+
+    '<div class="spooksky"><span class="spookmoon"></span>'+
+      '<span class="bat b1">&#129415;</span><span class="bat b2">&#129415;</span><span class="bat b3">&#129415;</span></div>'+
+    '<div class="spookbar"><i id="spookfill"></i></div>'+
+    '<div class="spookmsg" id="spookmsg">Summoning your r&eacute;sum&eacute; for '+esc(jobTitle)+'&hellip;</div>'+
+  '</div>';
+}
+function startSpook(jobTitle){
+  setTailorBody(spookLoaderHTML(jobTitle));
+  var fill=document.getElementById("spookfill"), msg=document.getElementById("spookmsg");
+  var stages=["Reading your real experience…","Matching it to this job…",
+              "Choosing what to lead with…","Polishing the wording…","Almost there…"];
+  var t0=Date.now(), DUR=9000;
+  if(_spookTimer) clearInterval(_spookTimer);
+  _spookTimer=setInterval(function(){
+    var el=Date.now()-t0;
+    if(fill) fill.style.width=Math.min(94,(el/DUR)*94).toFixed(1)+"%";
+    if(msg){ var i=Math.min(stages.length-1, Math.floor(el/(DUR/stages.length))); msg.textContent=stages[i]; }
+  },180);
+}
+function stopSpook(){
+  if(_spookTimer){ clearInterval(_spookTimer); _spookTimer=null; }
+  var fill=document.getElementById("spookfill"); if(fill) fill.style.width="100%";  // snap to done
+}
+
+/* Résumé tailoring — uses the fullest posting text we have (scanner-pulled
+   descFull beats snippet; her paste beats both when she adds more). */
+function tailorJobText(j, pasted){
+  var full=String((j&&j.descFull)||"").trim();
+  var snip=(((j&&j.about)||"")+" "+((j&&j.title)||"")).trim();
+  if(pasted && pasted.length>=40) return pasted;
+  if(full.length>=200) return full;
+  return snip;
+}
+function tailorJob(id){
+  var j=jobById.get(id); if(!j) return;
+  var resume=(state.resume||"").trim();
+  if(resume.length<40){
+    showToast("Add your résumé in My corner first ✦", "My corner", function(){
+      setView("corner"); var b=document.getElementById("resumebox"); if(b) b.focus();
+    });
+    return;
+  }
+  if(!window.__tailorInvoke){
+    showToast("Sign in (in My corner) to tailor your résumé — it keeps it private.", "My corner",
+      function(){ setView("corner"); });
+    return;
+  }
+  window.__tailorJobId = id;
+  var full=(j.descFull||"").trim();
+  if(full.length>=200){
+    openTailorModal();
+    setTailorBody('<p class="sub">Using the full posting for <b>'+esc(j.title)+'</b> at '+esc(j.company)+'&hellip;</p>');
+    runTailor("");
+    return;
+  }
+  openTailorModal();
+  setTailorBody(
+    '<p class="sub">For <b>'+esc(j.title)+'</b> at '+esc(j.company)+'.</p>'+
+    '<div class="tailorsec">'+
+      '<h3>Paste the full job description</h3>'+
+      '<p class="tailorhint">This listing only gave us a short preview. Open the apply page, '+
+        'copy the whole description, and paste it here for a much sharper match.</p>'+
+      '<textarea class="authfield tailorpaste" id="tailorjd" aria-label="Full job description" '+
+        'placeholder="Paste the full job description here&hellip;"></textarea>'+
+    '</div>'+
+    '<button class="authprimary" data-act="runtailor">Tailor my résumé <span class="sparkle">&#10022;</span></button>'+
+    '<p class="authnote">Built only from what you wrote — never adds anything you didn&rsquo;t.</p>'
+  );
+  var ta=document.getElementById("tailorjd"); if(ta) ta.focus();
+}
+function runTailor(pastedOverride){
+  var id=window.__tailorJobId;
+  var j=jobById.get(id); if(!j) return;
+  var resume=(state.resume||"").trim();
+  var ta=document.getElementById("tailorjd");
+  var pasted=(typeof pastedOverride==="string") ? pastedOverride
+    : (ta ? (ta.value||"").trim() : "");
+  var jobText=tailorJobText(j, pasted);
+  startSpook(j.title);
+  Promise.resolve().then(function(){
+    return window.__tailorInvoke({ resume:resume, jobTitle:j.title, company:j.company, jobText:jobText });
+  })
+    .then(function(r){
+      var d=r&&r.data;
+      if(!d || d.error || !d.resume){
+        setTailorBody('<p class="sub">'+esc((d&&d.error)||"I couldn't put that together just now — try again in a minute.")+'</p>');
+        return;
+      }
+      renderTailorResult(j, d);
+    })
+    .catch(function(){ setTailorBody('<p class="sub">No connection right now — try again when you&rsquo;re back online.</p>'); })
+    .finally(function(){ stopSpook(); });
+}
+// Backdrop tap + Escape close the tailor modal.
+(function(){
+  var m=document.getElementById("tailormodal"); if(!m) return;
+  m.addEventListener("click", function(e){ if(e.target===m) closeTailorModal(); });
+  m.addEventListener("keydown", function(e){ if(e.key==="Escape") closeTailorModal(); });
+})();
+
+/* ── Résumé file upload: .docx / .pdf / .md / .txt -> text ─────────────────
+   docx is parsed in-page with no dependencies (ZIP + DecompressionStream),
+   pdf uses pdf.js loaded on demand, md/txt are read directly. The docx path
+   and a real .pdf were verified against her actual résumé files. */
+async function _inflateRaw(bytes){
+  const ds = new DecompressionStream("deflate-raw");
+  const s = new Response(bytes).body.pipeThrough(ds);
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+function _docxXmlToText(xml){
+  var s = xml.replace(/<w:tab\b[^>]*\/?>/g, "\t").replace(/<\/w:p>/g, "\n")
+    .replace(/<w:p\b[^>]*\/>/g, "\n").replace(/<w:br\b[^>]*\/?>/g, "\n").replace(/<[^>]+>/g, "");
+  s = s.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"')
+       .replace(/&apos;/g,"'").replace(/&#(\d+);/g, function(_,n){ return String.fromCharCode(+n); });
+  return s.replace(/[ \t]+\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
+}
+async function _docxToText(buf){
+  var u8 = new Uint8Array(buf), dv = new DataView(buf), eocd = -1;
+  for(var i=u8.length-22; i>=0; i--){ if(dv.getUint32(i,true)===0x06054b50){ eocd=i; break; } }
+  if(eocd<0) throw new Error("That doesn't look like a .docx file.");
+  var cdOff=dv.getUint32(eocd+16,true), cnt=dv.getUint16(eocd+10,true), p=cdOff, t=null;
+  for(var n=0; n<cnt; n++){
+    if(dv.getUint32(p,true)!==0x02014b50) break;
+    var method=dv.getUint16(p+10,true), compSize=dv.getUint32(p+20,true);
+    var nameLen=dv.getUint16(p+28,true), extraLen=dv.getUint16(p+30,true), cmtLen=dv.getUint16(p+32,true);
+    var localOff=dv.getUint32(p+42,true);
+    var name=new TextDecoder().decode(u8.subarray(p+46, p+46+nameLen));
+    if(name==="word/document.xml"){ t={method:method, compSize:compSize, localOff:localOff}; break; }
+    p += 46 + nameLen + extraLen + cmtLen;
+  }
+  if(!t) throw new Error("Couldn't read the text in that .docx.");
+  var lh=t.localOff;
+  if(dv.getUint32(lh,true)!==0x04034b50) throw new Error("That .docx looks damaged.");
+  var dstart = lh + 30 + dv.getUint16(lh+26,true) + dv.getUint16(lh+28,true);
+  var comp = u8.subarray(dstart, dstart + t.compSize), xmlBytes;
+  if(t.method===0) xmlBytes = comp;
+  else if(t.method===8) xmlBytes = await _inflateRaw(comp);
+  else throw new Error("Unsupported compression in that .docx.");
+  return _docxXmlToText(new TextDecoder().decode(xmlBytes));
+}
+var _pdfjs = null;
+// pdf.js is the one CDN dependency loaded by dynamic import(), which (unlike a
+// <script integrity>) can't carry an SRI attribute. We pin it anyway: fetch the
+// bytes with the native integrity option (browser verifies SHA-384 and rejects
+// a tampered bundle), then import / run from a same-origin blob URL. Mirrors how
+// supabase-js and Sentry are SRI-pinned. Hashes are verified by verify/pdfjs_sri.py.
+var PDFJS_VER = "4.7.76";
+var PDFJS_SRI = "sha384-qgyx6GmMWoI003drRr62DU41/67b3n7M2G0EXu2WhaOsBqONtHyay9Vw4aIivyOX";
+var PDFJS_WORKER_SRI = "sha384-ATeT9bCTw1LFxZRSxFHBli/+35MHo/faKiXDlvCvxK2ENYquq3OIA9RkrOW44G/L";
+async function _verifiedBlobUrl(url, sri){
+  var resp = await fetch(url, { integrity: sri, mode: "cors", credentials: "omit" });
+  if(!resp.ok) throw new Error("Couldn't load the PDF reader.");
+  return URL.createObjectURL(await resp.blob());  // throws if the SHA-384 doesn't match
+}
+async function _loadPdfjs(){
+  if(_pdfjs) return _pdfjs;
+  var base = "https://cdn.jsdelivr.net/npm/pdfjs-dist@" + PDFJS_VER + "/build/";
+  var lib = await import(await _verifiedBlobUrl(base + "pdf.min.mjs", PDFJS_SRI));
+  lib.GlobalWorkerOptions.workerSrc = await _verifiedBlobUrl(base + "pdf.worker.min.mjs", PDFJS_WORKER_SRI);
+  _pdfjs = lib; return lib;
+}
+async function _pdfToText(buf){
+  var lib = await _loadPdfjs();
+  var pdf = await lib.getDocument({ data: buf }).promise, out = [];
+  for(var i=1; i<=pdf.numPages; i++){
+    var page = await pdf.getPage(i), tc = await page.getTextContent();
+    out.push(tc.items.map(function(it){ return it.str; }).join(" "));
+  }
+  return out.join("\n\n").replace(/[ \t]+\n/g,"\n").replace(/\n{3,}/g,"\n\n").trim();
+}
+async function extractResumeFile(file){
+  var name = (file.name||"").toLowerCase();
+  if(name.endsWith(".txt") || name.endsWith(".md") || name.endsWith(".markdown") ||
+     file.type==="text/plain" || file.type==="text/markdown")
+    return (await file.text()).trim();
+  if(name.endsWith(".docx")) return _docxToText(await file.arrayBuffer());
+  if(name.endsWith(".pdf") || file.type==="application/pdf") return _pdfToText(await file.arrayBuffer());
+  if(name.endsWith(".doc")) throw new Error("Old .doc files aren't supported — save it as .docx, or paste the text.");
+  throw new Error("Use a .docx, .pdf, .md, or .txt file — or paste the text below.");
+}
+(function(){
+  var fi = document.getElementById("resumefile"); if(!fi) return;
+  fi.addEventListener("change", function(){
+    var file = fi.files && fi.files[0]; if(!file) return;
+    var msgEl = document.getElementById("resumemsg");
+    if(file.size > 8*1024*1024){ if(msgEl) msgEl.textContent = "That file's quite large — try a smaller one, or paste the text."; fi.value=""; return; }
+    if(msgEl) msgEl.textContent = "Reading " + file.name + "…";
+    extractResumeFile(file).then(function(text){
+      text = (text||"").trim();
+      if(text.length < 40){
+        if(msgEl) msgEl.textContent = "I couldn't find readable text in that (a scanned PDF, maybe?). Paste your résumé below instead.";
+        fi.value=""; return;
+      }
+      var box = document.getElementById("resumebox"); if(box) box.value = text;
+      state.resume = text; persist();
+      if(msgEl) msgEl.textContent = "Loaded from " + file.name + " ✦ — look it over, then Save.";
+      showToast("Résumé loaded ✦");
+      fi.value="";
+    }).catch(function(err){
+      if(msgEl) msgEl.textContent = (err && err.message) || "I couldn't read that file — try paste instead.";
+      fi.value="";
+    });
+  });
+})();
 
 // Delegated on the app container so Jobs, Today's picks and My-apps cards
 // all share one set of handlers.
@@ -1889,10 +3072,11 @@ document.querySelector(".app").addEventListener("click",(e)=>{
   }
   e.preventDefault();
   if(act==="applied"){
-    if(state.applied[id]){ delete state.applied[id]; }
+    if(state.applied[id]){ delete state.applied[id]; delete state.followUps[id]; }
     else { state.applied[id]=today(); markApplied(id, t); }
   }
-  if(act==="saved"){ state.saved.has(id)?state.saved.delete(id):state.saved.add(id); }
+  if(act==="saved"){ if(state.saved.has(id)){ state.saved.delete(id); delete state.savedAt[id]; }
+    else { state.saved.add(id); state.savedAt[id]=today(); haptic(8); } }
   if(act==="hide"){ state.hidden.has(id)?state.hidden.delete(id):state.hidden.add(id); }
   if(act==="snooze"){
     if(snoozedNow(id)){ delete state.snooze[id]; }
@@ -1910,25 +3094,122 @@ document.querySelector(".app").addEventListener("click",(e)=>{
     if(open) box.querySelector("textarea").focus();
     return;                       // no re-render; keep the textarea focused
   }
+  if(act==="fudone"){
+    ensureFollowUp(id).done=true; persist();
+    if(portalSync) portalSync.followUps();
+    render(); return;
+  }
+  if(act==="fuedit"){
+    ensureFollowUp(id).done=false; openFollowEdit.add(id); persist();
+    if(portalSync) portalSync.followUps();
+    render(); return;
+  }
+  if(act==="fupaste"){
+    pasteFollowContact(id); return;
+  }
+  if(act==="fuwhen"){
+    var days=+(t.getAttribute("data-days")||5);
+    var fu=ensureFollowUp(id);
+    fu.on=addDaysISO(state.applied[id]||today(), days);
+    persist();
+    if(portalSync) portalSync.followUps();
+    render(); return;
+  }
+  if(act==="fuopen"){
+    openFollowEdit.add(id); persist(); return;
+  }
   if(act==="share"){
     const j=jobById.get(id);
     if(j && navigator.share){ navigator.share({title:j.title+" at "+j.company, url:safeUrl(j.url)}).catch(()=>{}); }
     return;
   }
   if(act==="qopt"){ quizPick(t); return; }
+  if(act==="signup"){ openAuth("signup"); return; }
+  if(act==="signin"){ openAuth("signin"); return; }
+  if(act==="tailor"){ tailorJob(id); return; }
+  if(act==="uploadresume"){ var fin=document.getElementById("resumefile"); if(fin) fin.click(); return; }
+  if(act==="closetailor"){ closeTailorModal(); return; }
+  if(act==="runtailor"){ runTailor(); return; }
+  if(act==="copytailor"){ copyTailor(t.getAttribute("data-copy")); return; }
+  if(act==="dltailor"){ downloadTailor(t.getAttribute("data-copy")); return; }
+  if(act==="saveresume"){
+    var rbox=document.getElementById("resumebox");
+    if(rbox){
+      state.resume = rbox.value.trim(); persist();
+      var rmsg=document.getElementById("resumemsg");
+      if(rmsg) rmsg.textContent = state.resume ? "Saved on this phone ✦" : "Cleared.";
+      showToast(state.resume ? "Résumé saved — tap ✦ Tailor on any job ✦" : "Résumé cleared.");
+    }
+    return;
+  }
+  if(act==="saveprofile"){
+    var L=document.getElementById("nm-legal"), P=document.getElementById("nm-pref");
+    if(P) state.profile.preferredName = P.value.trim();
+    if(L) state.profile.legalName = L.value.trim();
+    persist(); renderCorner();
+    if(portalSync) portalSync.profile();
+    showToast("Saved. We'll call you " + (state.profile.preferredName || "by your name") + " here. ✦");
+    return;
+  }
   persist(); render();
 });
 
+function pasteFollowContact(id){
+  function apply(text){
+    var parsed=parseContactPaste(text||"");
+    var fu=ensureFollowUp(id), got=false;
+    if(parsed.phone){ fu.phone=parsed.phone; got=true; }
+    if(parsed.email){ fu.email=parsed.email; got=true; }
+    if(parsed.name){ fu.name=parsed.name; got=true; }
+    if(!got){ showToast("Couldn't find a phone or email — try typing it in."); openFollowEdit.add(id); render(); return; }
+    openFollowEdit.add(id); persist();
+    if(portalSync) portalSync.followUps();
+    showToast("Got it — tap Call or Email above ✦");
+    render();
+  }
+  if(navigator.clipboard && navigator.clipboard.readText){
+    navigator.clipboard.readText().then(apply).catch(function(){
+      showToast("Paste didn't work — tap Add or change contact and type it in.");
+      openFollowEdit.add(id); render();
+    });
+  } else {
+    var typed=window.prompt("Paste the phone number or email they gave you:", "");
+    if(typed) apply(typed);
+  }
+}
+
 // Auto-save notes as they type (no re-render, so the keyboard stays up).
+const followTimers = {};
 document.querySelector(".app").addEventListener("input",(e)=>{
-  const t=e.target.closest("[data-note]"); if(!t) return;
-  const id=t.getAttribute("data-note");
+  const t=e.target;
+  const fuId=t.getAttribute("data-fu-name")||t.getAttribute("data-fu-phone")||
+             t.getAttribute("data-fu-email")||t.getAttribute("data-fu-on");
+  if(fuId){
+    const fu=ensureFollowUp(fuId);
+    if(t.hasAttribute("data-fu-name")) fu.name=t.value;
+    if(t.hasAttribute("data-fu-phone")) fu.phone=t.value;
+    if(t.hasAttribute("data-fu-email")) fu.email=t.value;
+    if(t.hasAttribute("data-fu-on")) fu.on=t.value;
+    persist();
+    clearTimeout(followTimers[fuId]);
+    followTimers[fuId]=setTimeout(function(){
+      if(portalSync) portalSync.followUps();
+      renderFollowAlerts();
+    }, 700);
+    return;
+  }
+  const id=t.getAttribute("data-note"); if(!id) return;
   const v=t.value;
   if(v.trim()) state.notes[id]=v; else delete state.notes[id];
   persist();
 });
 
-document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.target.value; render(); });
+let _searchTimer = null;
+document.getElementById("search").addEventListener("input",(e)=>{
+  filters.q=e.target.value;                          // keep the field responsive
+  clearTimeout(_searchTimer);                         // but debounce the heavy re-render
+  _searchTimer=setTimeout(render, 150);               // so typing stays smooth on a phone
+});
 
 (function callBtn(){
   const b=document.getElementById("callbtn");
@@ -1936,6 +3217,31 @@ document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.ta
   if(META.phone){ b.href="tel:"+META.phone.replace(/[^0-9+]/g,""); b.textContent="Something feels wrong? Call "+who; }
   else { b.removeAttribute("href"); b.style.cursor="default"; b.textContent="Something feels wrong? Ask "+who+" before you reply"; }
 })();
+
+(function followBanner(){
+  const b=document.getElementById("followbanner"); if(!b) return;
+  function go(){ setView("apps"); }
+  b.addEventListener("click", go);
+  b.addEventListener("keydown", function(e){
+    if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); }
+  });
+})();
+
+(function followNotifyBtn(){
+  const btn=document.getElementById("notifybtn"); if(!btn) return;
+  btn.addEventListener("click", function(){
+    if(typeof Notification==="undefined") return;
+    Notification.requestPermission().then(function(p){
+      if(p==="granted") showToast("Reminders on — we'll nudge you when it's time to follow up ✦");
+      else if(p==="denied") showToast("Blocked in phone settings — you can still see alerts in My apps.");
+      renderFollowAlerts(); maybeNotifyFollowUps();
+    });
+  });
+})();
+
+document.addEventListener("visibilitychange", function(){
+  if(document.visibilityState==="visible"){ renderFollowAlerts(); maybeNotifyFollowUps(); }
+});
 
 // Warn when the list itself is old (offline, or the daily scan stopped).
 (function staleBanner(){
@@ -1957,25 +3263,75 @@ document.getElementById("search").addEventListener("input",(e)=>{ filters.q=e.ta
 
 document.getElementById("foot").innerHTML =
   "<div>We checked "+META.total+" postings and hid <b>"+META.hidden+"</b> that looked like scams.</div>"+
-  "<div>Tip: tap Share, then <b>Add to Home Screen</b> to keep this on your phone.</div>";
+  "<div>Tip: tap Share, then <b>Add to Home Screen</b> to keep this on your phone.</div>"+
+  "<button id='installbtn' hidden style='margin-top:8px;background:var(--card);border:1px solid var(--line);"+
+  "color:var(--green-d);font:inherit;font-weight:700;font-size:14px;padding:10px 18px;border-radius:999px;"+
+  "min-height:44px;cursor:pointer'>Add this app to your phone</button>";
+// Real one-tap install when the browser offers it (Chrome/Android). On iOS Safari
+// the event never fires, so the Share -> Add to Home Screen tip above remains.
+var deferredInstall = null;
+window.addEventListener("beforeinstallprompt", function(e){
+  e.preventDefault(); deferredInstall = e;
+  var b = document.getElementById("installbtn"); if(b) b.hidden = false;
+});
+(function(){
+  var b = document.getElementById("installbtn"); if(!b) return;
+  b.onclick = function(){
+    if(!deferredInstall) return;
+    deferredInstall.prompt();
+    deferredInstall.userChoice.finally(function(){ deferredInstall = null; b.hidden = true; });
+  };
+})();
+window.addEventListener("appinstalled", function(){
+  var b = document.getElementById("installbtn"); if(b) b.hidden = true;
+});
 
 /* ── Gentle engine: encouragement, celebration, toast ─────────────────── */
+// Deterministic per-day hash — used by todaysPicks() to rotate which jobs lead
+// the Today view (stable for a given day so the list doesn't shuffle on every tap).
 function dayHash(){ const d=today(); let h=0; for(let i=0;i<d.length;i++) h=(h*31+d.charCodeAt(i))>>>0; return h; }
+// Words of affirmation. pickEnc() draws from a
+// shuffled "bag" so every line shows once before any repeats (then reshuffles),
+// and the footer + greeting + each visit get a fresh one — never the same phrase
+// sitting there all day.
 const ENC_LINES = [
-  "Job ads are wish lists. If you can do half of it, apply — you're more qualified than you let yourself believe. — Daddy",
-  "You showed up today. That's the whole battle, and you won it. — Daddy",
-  "All that admin experience? You basically have your master's degree. Go show them. — Daddy",
-  "One application beats five you never send. Small is enough. I'm proud of you. — Daddy",
-  "“Pay not listed” isn't a no — it's just a question you get to ask. — Daddy",
-  "Rough day? The jobs will keep. Be as kind to yourself as I am to you. — Daddy",
-  "You are not behind. You're exactly where the next right step starts. — Daddy",
+  "Job ads are wish lists. If you match the core work, it is worth applying.",
+  "One focused application is progress. Small steps still count.",
+  "Pay not listed is a question to ask, not a reason to count yourself out.",
+  "Start with the clearest match. Momentum is easier after the first step.",
+  "A saved job is not a commitment. It is just a useful option to revisit.",
+  "If a posting feels confusing, slow down and use the checklist.",
+  "You can take this one task at a time. The app will keep track.",
+  "The goal is not a perfect search. The goal is a steady one.",
+  "A no from one employer is information, not a verdict.",
+  "Apply before doubt turns a good match into extra work.",
+  "A short, honest note is better than waiting for perfect wording.",
+  "Trust the scam checks, then make the next practical move.",
+  "Your experience does not need to match every bullet to matter.",
+  "Send the application that is ready enough. Improve the next one.",
+  "If today is busy, choose one job and save the rest.",
+  "A calm pace is still a real pace.",
+  "Every reviewed posting narrows the search.",
+  "The best next step is usually the smallest clear one.",
+  "You are allowed to ask about pay, hours, and training.",
+  "Keep the search simple: review, save, apply, follow up.",
 ];
+let _encBag = [];
+function pickEnc(){
+  if(!_encBag.length) _encBag = ENC_LINES.map(function(_, i){ return i; });
+  var k = Math.floor(Math.random() * _encBag.length);
+  var i = _encBag.splice(k, 1)[0];        // pull it OUT so it can't recur this cycle
+  return ENC_LINES[i];
+}
 const KIND_LINES = [
-  "That took real effort. Proud of you. ✦ — Daddy",
-  "Applied! That's a genuine step forward. ✦ — Daddy",
-  "Look at you go. One more out the door. ✦ — Daddy",
-  "Done — and it's in your weekly log too. ✦ — Daddy",
-  "That's my girl. Keep that momentum. ✦ — Daddy",
+  "Applied. That is a real step forward.",
+  "Sent and logged.",
+  "Good progress. One more application is out the door.",
+  "That application is now in your weekly log.",
+  "Momentum counts. Keep the next step simple.",
+  "Saved. You can come back to it later.",
+  "Follow-up noted.",
+  "Done. The search is more organized than it was a minute ago.",
 ];
 let toastTimer = null;
 function showToast(text, label, fn){
@@ -1987,9 +3343,12 @@ function showToast(text, label, fn){
   clearTimeout(toastTimer); toastTimer=setTimeout(function(){ t.hidden=true; }, 6000);
 }
 const REDUCED = window.matchMedia && matchMedia("(prefers-reduced-motion: reduce)").matches;
+// Subtle haptic on positive actions — the kind of thing a phone user feels as
+// quality. Silently no-ops where unsupported (iOS Safari) or reduced-motion is on.
+function haptic(pattern){ if(!REDUCED && navigator.vibrate){ try{ navigator.vibrate(pattern); }catch(e){} } }
 function celebrate(el){
-  const n = Object.keys(state.applied).length;
-  showToast(KIND_LINES[n % KIND_LINES.length]);
+  haptic(12);
+  showToast(KIND_LINES[Math.floor(Math.random() * KIND_LINES.length)]);
   if(REDUCED || !el || !el.getBoundingClientRect) return;
   const r = el.getBoundingClientRect();
   for(let i=0;i<8;i++){
@@ -2015,8 +3374,10 @@ function appsThisWeek(){
 
 /* ── Today's 3 picks: deterministic per day, trusted/will-train first ──── */
 function todaysPicks(){
+  // Keep applied jobs in the pool so the day's picks stay put — she can just
+  // tap "Applied" again to undo a mistake (they don't vanish from Today).
   const pool = JOBS.filter(function(j){
-    return !state.applied[j.id] && !state.hidden.has(j.id) && !snoozedNow(j.id);
+    return !state.hidden.has(j.id) && !snoozedNow(j.id);
   });
   const ranked = orderForYou(pool).map(function(j,i){
     return [ (j.trusted?2:0)+(j.trains?1:0), -i, j ];
@@ -2033,7 +3394,7 @@ function renderPicks(){
   const wrap=document.getElementById("picks"); if(!wrap) return;
   wrap.innerHTML="";
   const picks=todaysPicks();
-  document.getElementById("todayenc").textContent = ENC_LINES[dayHash()%ENC_LINES.length];
+  document.getElementById("todayenc").textContent = pickEnc();
   if(!picks.length){
     wrap.innerHTML='<div class="empty">'+IC.check+"<div>You've worked through today's list — genuinely well done. New jobs arrive every morning.</div></div>";
     return;
@@ -2046,11 +3407,19 @@ function appliedEntries(){
   return Object.keys(state.applied).map(function(id){
     const lg = state.appliedLog[id] || {};
     const j = jobById.get(id);
-    return { id:id, date: state.applied[id] || lg.d || "",
+    return { id:id, date: state.applied[id] || lg.d || "", ts: lg.ts || "",
              title: lg.t || (j&&j.title) || "(job no longer listed)",
              company: lg.c || (j&&j.company) || "",
              url: lg.u || (j&&j.url) || "" };
   }).sort(function(a,b){ return a.date<b.date?1:-1; });
+}
+// A human date+time stamp for the work-search log. Falls back to the date alone
+// for entries logged before timestamps existed.
+function fmtStamp(ts, date){
+  if(ts){ var dt=new Date(ts);
+    if(!isNaN(dt.getTime())) return dt.toLocaleString([],
+      {year:"numeric",month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}); }
+  return date || "";
 }
 function renderApps(){
   const wrap=document.getElementById("applist"); if(!wrap) return;
@@ -2068,13 +3437,18 @@ function renderApps(){
   rows.forEach(function(r){
     const j=jobById.get(r.id);
     const days=daysSince(r.date);
+    const fu=state.followUps[r.id]||{};
     const el=document.createElement("div");
     el.className="card";
     el.innerHTML =
       '<div class="title">'+esc(r.title)+'</div>'+
       '<div class="co">'+esc(r.company)+'</div>'+
-      '<div class="meta"><span>'+IC.check+'applied '+esc(ago(r.date)||r.date)+'</span></div>'+
-      (days!=null&&days>=5&&j?'<div class="nudge">It\'s been a bit — a quick call shows you\'re serious.'+callScriptHTML(j,r.date)+'</div>':'')+
+      '<div class="meta"><span>'+IC.check+'applied '+esc(ago(r.date)||r.date)+'</span>'+
+        (fu.name?'<span>'+IC.pen+esc(fu.name)+'</span>':'')+
+        (fu.on&&!fu.done?'<span>'+IC.pen+(fu.on<=today()?'follow up today':'follow up '+esc(ago(fu.on)||fu.on))+'</span>':'')+
+      '</div>'+
+      followUpBlockHTML(r.id, j)+
+      (days!=null&&days>=5&&j&&!fu.done?'<div class="nudge">It\'s been a bit — a quick call shows you\'re serious.'+callScriptHTML(j,r.date)+'</div>':'')+
       (r.url?'<div class="actions"><a class="act" style="text-decoration:none" href="'+esc(safeUrl(r.url))+'" target="_blank" rel="noopener">'+IC.arrow+'View job</a>'+
       '<button class="act" data-act="applied" data-id="'+esc(r.id)+'">'+IC.eye+'Un-mark</button></div>':'');
     wrap.appendChild(el);
@@ -2082,19 +3456,30 @@ function renderApps(){
 }
 function logRowsText(){
   return appliedEntries().map(function(r){
-    return r.date+"  —  "+r.title+(r.company?", "+r.company:"")+"  —  applied online";
+    return fmtStamp(r.ts, r.date)+"  —  "+r.title+(r.company?", "+r.company:"")+"  —  applied online";
   });
 }
 document.getElementById("printlog").onclick = function(){
+  // The log is a legal/unemployment document, so it carries her LEGAL name.
+  // Autofill it; if we don't have it yet, ask once (and remember it).
+  var legal = (state.profile.legalName||"").trim();
+  if(!legal){
+    var entered = window.prompt("Your legal name for the work-search log "+
+      "(used for unemployment or court — you can change it later in My corner):", "");
+    if(entered && entered.trim()){
+      legal = entered.trim(); state.profile.legalName = legal; persist();
+      renderCorner(); if(portalSync) portalSync.profile();
+    }
+  }
   const rows=appliedEntries();
   const wl=document.getElementById("worklog");
   wl.innerHTML =
     "<h1>Work-Search Log</h1>"+
-    "<p>Name: ______________________   Week of "+esc(weekStart())+" (Sunday–Saturday)   "+
+    "<p>Name: "+(legal?esc(legal):"______________________")+"   Week of "+esc(weekStart())+" (Sunday–Saturday)   "+
     "Iowa asks for 4 reemployment activities per week; at least 3 must be job applications.</p>"+
-    "<table><tr><th>Date</th><th>Position</th><th>Employer</th><th>How</th><th>Result / notes</th></tr>"+
+    "<table><tr><th>Logged (date &amp; time)</th><th>Position</th><th>Employer</th><th>How</th><th>Result / notes</th></tr>"+
     rows.map(function(r){
-      return "<tr><td>"+esc(r.date)+"</td><td>"+esc(r.title)+"</td><td>"+esc(r.company)+
+      return "<tr><td>"+esc(fmtStamp(r.ts, r.date))+"</td><td>"+esc(r.title)+"</td><td>"+esc(r.company)+
              "</td><td>Online application</td><td>"+esc((state.notes[r.id]||"").slice(0,80))+"</td></tr>";
     }).join("")+
     (rows.length?"":"<tr><td colspan=5>(no applications logged yet)</td></tr>")+
@@ -2103,7 +3488,8 @@ document.getElementById("printlog").onclick = function(){
   window.print();
 };
 document.getElementById("copylog").onclick = function(){
-  const text="My work-search log\n"+logRowsText().join("\n");
+  var legal=(state.profile.legalName||"").trim();
+  const text=(legal?legal+" — work-search log":"My work-search log")+"\n"+logRowsText().join("\n");
   (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject())
     .then(function(){ showToast("Copied — paste it into your weekly claim or a text."); })
     .catch(function(){ showToast("Couldn't copy automatically — use Print instead."); });
@@ -2127,8 +3513,14 @@ function renderCorner(){
   const body=document.getElementById("quizbody"); if(!body) return;
   const h=new Date().getHours();
   const part = h<5?"You're up late":(h<12?"Good morning":(h<17?"Good afternoon":"Good evening"));
+  const pref = (state.profile.preferredName||"").trim();   // in-app we use the PREFERRED name only
   document.getElementById("cornergreet").textContent =
-    part+". This page is just for you — no job list, no pressure. "+ENC_LINES[(dayHash()+3)%ENC_LINES.length];
+    part+(pref?", "+pref:"")+". This page is just for you — no job list, no pressure. "+pickEnc();
+  // Name editor reflects whatever's saved (preferred shown in app; legal used on the log).
+  var nmP=document.getElementById("nm-pref"), nmL=document.getElementById("nm-legal");
+  if(nmP) nmP.value = state.profile.preferredName || "";
+  if(nmL) nmL.value = state.profile.legalName || "";
+  var rbx=document.getElementById("resumebox"); if(rbx && document.activeElement!==rbx) rbx.value = state.resume || "";
   body.innerHTML = QUIZ.map(function(q){
     return '<div class="qq">'+esc(q[1])+'</div><div class="qopts">'+
       q[2].map(function(o){
@@ -2144,6 +3536,7 @@ function quizPick(t){
   state.profile[q] = (state.profile[q]===v) ? undefined : v;
   if(state.profile[q]===undefined) delete state.profile[q];
   persist(); render();
+  if(portalSync) portalSync.profile();
 }
 
 /* ── Bottom-nav views ───────────────────────────────────────────────────── */
@@ -2154,29 +3547,54 @@ const VIEWS = {
   corner: ["#cornerwrap"],
   help:   [".safety","#coach","#faqwrap"],
 };
+// Tabs that need an account. Signed-out, tapping one shows the benefits screen
+// (#lockwrap) instead of its content. Jobs (browse/teaser) and Help (safety +
+// crisis lines) stay open — gating a crisis hotline would be harmful.
+const LOCKED_VIEWS = { today:1, apps:1, corner:1 };
+function isAuthed(){ var a=document.querySelector(".app"); return !!(a && a.classList.contains("authed")); }
 function setView(name){
+  var locked = !!LOCKED_VIEWS[name] && !isAuthed();
   Object.keys(VIEWS).forEach(function(v){
     VIEWS[v].forEach(function(sel){
       const el=document.querySelector(sel);
-      if(el) el.hidden = (v!==name) || (sel==="#coach" && state.coachOff) ||
+      if(el) el.hidden = locked || (v!==name) || (sel==="#coach" && state.coachOff) ||
                          (sel==="#empty" && el.hidden && v===name && name==="jobs");
     });
     const btn=document.getElementById("nav-"+v);
     if(btn) btn.setAttribute("aria-current", String(v===name));
   });
+  var lw=document.getElementById("lockwrap"); if(lw) lw.hidden = !locked;
+  if(locked){ tuneLockView(name); window.scrollTo({top:0}); return; }
   if(name==="jobs") render(); else { renderPicks(); renderApps(); renderCorner(); }
+  // Fresh words of affirmation on every tab entry (and on reload) — never the
+  // same phrase twice in a row that the eye can notice. Today/corner refresh
+  // their own enc inside renderPicks()/renderCorner(); the Jobs footer is here.
+  if(name==="jobs"){ var fe=document.getElementById("footenc"); if(fe) fe.textContent=pickEnc(); }
   window.scrollTo({top:0});
 }
 ["jobs","today","apps","corner","help"].forEach(function(v){
   const b=document.getElementById("nav-"+v);
   if(b) b.onclick=function(){ setView(v); };
 });
-
-document.getElementById("footenc").textContent = ENC_LINES[dayHash()%ENC_LINES.length];
+// Tailor the benefits-screen subcopy to whichever locked tab was tapped.
+function tuneLockView(name){
+  var sub=document.getElementById("locksub"); if(!sub) return;
+  var msg={
+    today:"“Today’s 3 picks” is a free-account feature — a tiny, doable shortlist each morning so the search never feels like too much.",
+    apps: "Tracking what you’ve applied to (and your printable Iowa work-search log) saves to your free account so a new phone never loses it.",
+    corner:"Your corner — résumé tailoring, Ruby (your support cow 🐄), and your saved details — lives in your free account so it follows you everywhere."
+  }[name];
+  sub.textContent = msg || "Browsing is free. Make a free account to actually use the app — it takes 10 seconds and saves everything to you.";
+}
+// Bridge to the sign-in/up modal (defined in the portal block when configured).
+function openAuth(which){
+  if(window.__openAuth){ window.__openAuth(which); return; }
+  showToast("Sign-in isn’t set up on this device yet — your browsing still works.");
+}
 
 buildChips();
 render();
-setView("jobs");
+setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
 
 /* ── Portal: optional sign-in so saves follow the user across devices. ──────
    The page is fully usable without it: not configured -> this whole block is
@@ -2198,14 +3616,19 @@ setView("jobs");
     var sb = window.supabase.createClient(PORTAL.url, PORTAL.key,
       { auth: { experimental: { passkey: true } } });
     var PAGE = location.origin + location.pathname;
-    var bar = document.getElementById("syncbar"),
-        rowOut = document.getElementById("syncrow-out"),
-        rowIn = document.getElementById("syncrow-in"),
-        whoEl = document.getElementById("syncwho"),
+    var acctBtn = document.getElementById("acctbtn"),
+        acctPop = document.getElementById("acctpop"),
+        acctOut = document.getElementById("acctpop-out"),
+        acctIn = document.getElementById("acctpop-in"),
+        acctEmail = document.getElementById("acctemail"),
+        acctInitial = document.getElementById("acctinitial"),
+        acctIcon = document.getElementById("accticon"),
         modal = document.getElementById("authmodal"),
         msg = document.getElementById("authmsg");
     var emailEl = document.getElementById("authemail"),
         passEl = document.getElementById("authpass"),
+        legalEl = document.getElementById("authlegal"),
+        prefEl = document.getElementById("authpref"),
         primaryBtn = document.getElementById("authprimarybtn"),
         toggleBtn = document.getElementById("authtoggle"),
         forgotBtn = document.getElementById("authforgot"),
@@ -2213,10 +3636,25 @@ setView("jobs");
         subEl = document.getElementById("authsub");
     var user = null, mode = "signin";  // "signin" | "signup"
     var noteRowId = {}, noteTimers = {};
-    bar.hidden = false;
+
+    // Account popover: a small top-right control that expands/collapses, instead
+    // of the old full-width band that pushed the job list down.
+    function closeAcct(){ acctPop.hidden = true; acctBtn.setAttribute("aria-expanded", "false"); }
+    acctBtn.onclick = function(e){
+      e.stopPropagation();
+      var willOpen = acctPop.hidden;
+      acctPop.hidden = !willOpen;
+      acctBtn.setAttribute("aria-expanded", willOpen ? "true" : "false");
+    };
+    document.addEventListener("click", function(e){
+      if(!acctPop.hidden && !acctBtn.contains(e.target) && !acctPop.contains(e.target)) closeAcct();
+    });
 
     var supportsPasskey = !!(window.PublicKeyCredential) && typeof sb.auth.signInWithPasskey === "function";
-    if(!supportsPasskey){ var pk = document.getElementById("authpasskey"); if(pk) pk.hidden = true; }
+    if(!supportsPasskey){
+      var pk = document.getElementById("authpasskey"); if(pk) pk.hidden = true;
+      var pkd = document.getElementById("authpkdiv"); if(pkd) pkd.hidden = true;
+    }
     // Social sign-in buttons appear ONLY for providers the project actually
     // enables — so a not-yet-configured Google button is never a dead end. If
     // Google OAuth is turned on later, the button shows up on its own.
@@ -2227,11 +3665,32 @@ setView("jobs");
       .catch(function(){});
 
     function setMsg(t, isErr){ msg.textContent = t || ""; msg.className = "authmsg" + (isErr ? " err" : ""); }
-    function showOut(){ rowOut.hidden = false; rowIn.hidden = true; }
+    function reflectView(){
+      // Re-run the active tab so the lock screen ↔ real content swaps the moment
+      // auth state changes (sign in from a locked tab → its content appears).
+      var cur="jobs"; ["jobs","today","apps","corner","help"].forEach(function(v){
+        var b=document.getElementById("nav-"+v);
+        if(b && b.getAttribute("aria-current")==="true") cur=v; });
+      if(typeof setView==="function") setView(cur);
+    }
+    function showOut(){
+      acctOut.hidden = false; acctIn.hidden = true;
+      acctBtn.classList.remove("in"); acctIcon.hidden = false; acctInitial.hidden = true;
+      acctBtn.setAttribute("aria-label", "Sign in");
+      var app = document.querySelector(".app"); if(app) app.classList.remove("authed");
+      reflectView();
+    }
     function showIn(extra){
-      rowOut.hidden = true; rowIn.hidden = false;
-      whoEl.innerHTML = IC.check + ' <span class="who">' +
-        (extra ? esc(extra) : 'Synced across your devices') + '</span> — ' + esc(user && user.email || 'signed in');
+      acctOut.hidden = true; acctIn.hidden = false;
+      var email = (user && user.email) || "signed in";
+      acctEmail.textContent = email;
+      var nm = ((state.profile && state.profile.preferredName) || "").trim();
+      acctInitial.textContent = (nm || email || "?").charAt(0).toUpperCase();
+      acctInitial.hidden = false; acctIcon.hidden = true;
+      acctBtn.classList.add("in");
+      acctBtn.setAttribute("aria-label", "Your account — signed in as " + email);
+      var app = document.querySelector(".app"); if(app) app.classList.add("authed");
+      reflectView();
     }
     function openModal(){ modal.hidden = false; setMsg(""); document.getElementById("authrecover").hidden = true;
       document.getElementById("authmain").hidden = false; setTimeout(function(){ emailEl.focus(); }, 60); }
@@ -2258,15 +3717,23 @@ setView("jobs");
       passEl.hidden = false;
       passEl.setAttribute("autocomplete", up ? "new-password" : "current-password");
       passEl.placeholder = up ? "Choose a password (8+ characters)" : "Password";
+      legalEl.hidden = !up; prefEl.hidden = !up;   // names asked only when creating an account
       primaryBtn.textContent = up ? "Create account" : "Sign in";
       toggleBtn.textContent = up ? "Already have an account? Sign in" : "New here? Create an account";
       forgotBtn.hidden = up;
       setMsg("");
     }
 
-    document.getElementById("syncopen").onclick = function(){ setMode("signin"); openModal(); };
+    document.getElementById("acctsignin").onclick = function(){ closeAcct(); setMode("signin"); openModal(); };
     document.getElementById("authclose").onclick = closeModal;
     modal.addEventListener("click", function(e){ if(e.target === modal) closeModal(); });
+    // Expected keyboard behavior: Enter submits the form, Escape closes the modal.
+    modal.addEventListener("keydown", function(e){
+      if(e.key === "Escape"){ closeModal(); return; }
+      if(e.key === "Enter" && !document.getElementById("authmain").hidden){
+        e.preventDefault(); primaryBtn.click();
+      }
+    });
     toggleBtn.onclick = function(){ setMode(mode === "signin" ? "signup" : "signin"); emailEl.focus(); };
 
     // Passkey — Face ID / fingerprint, no password.
@@ -2282,17 +3749,34 @@ setView("jobs");
       var em = emailEl.value.trim(), pw = passEl.value;
       if(!/.+@.+\..+/.test(em)){ setMsg("That doesn't look like an email address.", true); return; }
       if(pw.length < 8){ setMsg("Password needs at least 8 characters.", true); return; }
+      var legal = legalEl.value.trim(), pref = prefEl.value.trim();
+      if(mode === "signup" && !legal){
+        setMsg("Please add your legal name — it goes on your work-search log.", true); return; }
       setMsg(mode === "signup" ? "Creating your account…" : "Signing you in…");
       var p = mode === "signup"
-        ? sb.auth.signUp({ email: em, password: pw, options: { emailRedirectTo: PAGE } })
+        ? sb.auth.signUp({ email: em, password: pw, options: { emailRedirectTo: PAGE,
+            data: { legal_name: legal, preferred_name: pref || legal.split(" ")[0] } } })
         : sb.auth.signInWithPassword({ email: em, password: pw });
       p.then(function(r){
         if(r.error){ setMsg(friendly(r.error), true); return; }
+        if(mode === "signup"){
+          // Keep names locally now; syncAll pushes them once the session is live.
+          state.profile.legalName = legal;
+          state.profile.preferredName = pref || legal.split(" ")[0];
+          persist(); renderCorner();
+        }
         if(mode === "signup" && r.data && r.data.user && !r.data.session)
           setMsg("Account made! Check your email and tap the confirm link, then come back and sign in.");
-        // session present -> onAuthStateChange closes the modal + syncs.
+        // session present -> onAuthStateChange closes the modal + syncs (incl. profile).
       });
     };
+
+    // Neutralize the form's default submit (no page reload). The submit EVENT
+    // still fires on click / Enter — that's the signal phone password managers
+    // (Google / Apple) use to offer to SAVE the password. The actual sign-in
+    // keeps running through primaryBtn.onclick above, unchanged.
+    var authForm = document.getElementById("authform");
+    if(authForm) authForm.addEventListener("submit", function(e){ e.preventDefault(); });
 
     // Magic link — passwordless.
     document.getElementById("authmagic").onclick = function(){
@@ -2332,7 +3816,8 @@ setView("jobs");
       });
     };
 
-    document.getElementById("syncout").onclick = function(){
+    document.getElementById("acctsignout").onclick = function(){
+      closeAcct();
       sb.auth.signOut().catch(function(){});  // onAuthStateChange flips UI; local saves stay
     };
 
@@ -2343,7 +3828,7 @@ setView("jobs");
       localStorage.setItem("pk_offered:" + user.id, "1");
       showToast("Add Face ID for instant sign-in next time?", "Add", function(){
         sb.auth.registerPasskey().then(function(r){
-          showToast(r.error ? "Couldn't add it — that's okay, you're still signed in." : "Face ID ready ✦ — Daddy");
+          showToast(r.error ? "Couldn't add it — that's okay, you're still signed in." : "Face ID ready");
         }).catch(function(){ showToast("Couldn't add it this time — no worries."); });
       });
     }
@@ -2358,13 +3843,26 @@ setView("jobs");
       var u = session && session.user || null;
       var justIn = !!u && !user;
       user = u;
-      if(user){ showIn(); closeModal(); if(justIn){ syncAll(); setTimeout(offerPasskey, 1500); } }
+      setTailorBridge();
+      if(user){ showIn(); closeModal(); if(justIn){ syncAll(); } }  // no auto passkey nudge
       else { showOut(); }
     });
     sb.auth.getSession().then(function(r){
       user = r.data && r.data.session && r.data.session.user || null;
+      setTailorBridge();
       if(user){ showIn(); syncAll(); } else { showOut(); }
     }).catch(function(){ showOut(); });
+
+    // Bridge so the (out-of-scope) card handler can call the JWT-gated tailor
+    // function only while signed in; cleared on sign-out.
+    function setTailorBridge(){
+      window.__tailorInvoke = user
+        ? function(payload){ return sb.functions.invoke("resume-tailor", { body: payload }); }
+        : null;
+    }
+    // Bridge so the lock CTAs (card "Create a free account", benefits screen)
+    // open the real auth modal. Only exists when the portal is configured.
+    window.__openAuth = function(which){ closeAcct(); setMode(which==="signin"?"signin":"signup"); openModal(); };
 
     /* Pull server state, merge (a flag set anywhere stays set; newest note
        wins), then push back anything only this device knew about — which IS
@@ -2373,9 +3871,11 @@ setView("jobs");
       Promise.all([
         sb.from("user_job_status").select("job_id,applied,applied_on,saved,hidden"),
         sb.from("job_notes").select("id,job_id,body,created_at").order("created_at", { ascending: false }),
+        sb.from("user_profile").select("profile").maybeSingle(),
       ]).then(function(res){
         if(res[0].error) throw res[0].error;
         if(res[1].error) throw res[1].error;
+        // res[2] (profile) is null for a brand-new user — that's not an error.
         var localIds = {};
         Object.keys(state.applied).forEach(function(id){ localIds[id] = 1; });
         state.saved.forEach(function(id){ localIds[id] = 1; });
@@ -2393,7 +3893,26 @@ setView("jobs");
           sawNote[r.job_id] = 1; noteRowId[r.job_id] = r.id;
           state.notes[r.job_id] = r.body;
         });
-        persist(); render();
+        // Profile (quiz answers + legal/preferred name): server is a backup, local
+        // wins. Fill only keys we don't already have, then push the merged result.
+        var sp = (res[2] && res[2].data && res[2].data.profile) || {};
+        Object.keys(sp).forEach(function(k){
+          if(k==="followUps") return;
+          if(state.profile[k] === undefined || state.profile[k] === "") state.profile[k] = sp[k];
+        });
+        var sfu = sp.followUps || {};
+        Object.keys(sfu).forEach(function(id){
+          if(!state.followUps[id]) state.followUps[id] = sfu[id];
+          else {
+            var l=state.followUps[id], r=sfu[id]||{};
+            l.name = l.name || r.name || "";
+            l.phone = l.phone || r.phone || "";
+            l.email = l.email || r.email || "";
+            if(!l.on) l.on = r.on || "";
+            l.done = !!(l.done || r.done);
+          }
+        });
+        persist(); render(); renderCorner();
         var toPush = Object.keys(localIds).filter(function(id){
           var s = server[id] || {};
           return (!!state.applied[id]) !== !!s.applied ||
@@ -2402,6 +3921,7 @@ setView("jobs");
         });
         pushStatus(toPush);
         Object.keys(state.notes).forEach(function(id){ if(!sawNote[id]) pushNote(id); });
+        pushProfile();
         showIn();
       }).catch(function(e){
         console.log("[portal] sync failed:", e && e.message || e);
@@ -2440,6 +3960,14 @@ setView("jobs");
           });
       }
     }
+    function pushProfile(){
+      if(!user) return;
+      state.profile.followUps = state.followUps;
+      sb.from("user_profile").upsert({ profile: state.profile }, { onConflict: "user_id" })
+        .then(function(r){ if(r.error) console.log("[portal] profile push:", r.error.message); });
+    }
+    // Let the (non-portal) main script trigger a profile sync after name/quiz/follow-up edits.
+    portalSync = { profile: pushProfile, followUps: pushProfile };
 
     // Live mutations: these delegated listeners run AFTER the main handlers
     // above (same container, registered later), so state is already updated.
@@ -2457,48 +3985,159 @@ setView("jobs");
     });
     window.addEventListener("online", function(){ if(user) syncAll(); });
 
-    /* Companion chat: appears only signed-in. Calls the 'companion' Edge
-       Function (Anthropic key lives server-side; this page never sees it). */
-    function mountChat(){
+    /* Ruby the emotional-support cow: a full-screen companion, signed-in only.
+       Replies come from the 'companion' Edge Function (the Anthropic key lives
+       server-side; this page never sees it). Voice is 100% browser-native and
+       free: Web Speech mic input + SpeechSynthesis read-aloud, both feature-
+       detected so nothing dead ever shows on an unsupported browser. */
+    function mountRuby(){
       const card=document.getElementById("chatcard"); if(!card) return;
       if(!user){ return; }
       if(card.dataset.live){ return; }
       card.dataset.live="1";
-      document.getElementById("chatstate").hidden=true;
-      const log=document.createElement("div"); log.className="chatlog"; log.id="chatlog";
-      const row=document.createElement("div"); row.className="chatrow";
-      row.innerHTML='<input class="search" id="chatinput" type="text" maxlength="4000" '+
-        'placeholder="Say hi — it remembers you" aria-label="Message your companion">'+
-        '<button class="syncbtn" id="chatsend">Send</button>';
-      const note=document.createElement("div"); note.className="chatnote";
-      note.textContent="A friendly helper, not a therapist — if things feel heavy, the card above has real humans 24/7. Chats are saved privately to your account so it remembers you; they're never sold or shared (only the person who set this up could ever see them).";
-      card.appendChild(log); card.appendChild(row); card.appendChild(note);
-      sb.from("chat_messages").select("role,body").order("created_at",{ascending:false}).limit(12)
-        .then(function(r){ ((r.data||[]).reverse()).forEach(function(m){ addBub(m.role==="user"?"me":"ai", m.body); }); });
+      const openBtn=document.getElementById("rubyopen");
+      const ov=document.getElementById("rubyov");
+      const log=document.getElementById("rubylog");
+      if(!openBtn||!ov||!log) return;
+      openBtn.hidden=false;
+
+      const inp=document.getElementById("rubyinput");
+      const sendBtn=document.getElementById("rubysend");
+      const closeBtn=document.getElementById("rubyclose");
+      const micBtn=document.getElementById("rubymic");
+      const spkBtn=document.getElementById("rubyspk");
+      const listen=document.getElementById("rubylisten");
+
+      /* ── Read-aloud (SpeechSynthesis) — opt-in toggle, calm voice if any. ── */
+      const speechOK = ("speechSynthesis" in window) &&
+        (typeof window.SpeechSynthesisUtterance !== "undefined");
+      let speakOn = speechOK && localStorage.getItem("rubySpeak")!=="0";
+      let voice=null;
+      function pickVoice(){
+        try{
+          const vs=window.speechSynthesis.getVoices()||[];
+          const pref=["Samantha","Google US English","Microsoft Aria","Microsoft Jenny","Victoria","Karen","Moira"];
+          for(const name of pref){ const v=vs.find(function(x){return x.name===name;}); if(v){voice=v;return;} }
+          voice=vs.find(function(x){return /en[-_]US/i.test(x.lang)&&/female|woman/i.test(x.name);})
+               ||vs.find(function(x){return /^en/i.test(x.lang);})||vs[0]||null;
+        }catch(e){}
+      }
+      if(speechOK){
+        spkBtn.hidden=false;
+        spkBtn.setAttribute("aria-pressed", speakOn?"true":"false");
+        pickVoice();
+        try{ window.speechSynthesis.onvoiceschanged=pickVoice; }catch(e){}
+        spkBtn.onclick=function(){
+          speakOn=!speakOn; spkBtn.setAttribute("aria-pressed", speakOn?"true":"false");
+          localStorage.setItem("rubySpeak", speakOn?"1":"0");
+          if(!speakOn){ try{ window.speechSynthesis.cancel(); }catch(e){} }
+        };
+      }
+      function speak(text){
+        if(!speakOn||!speechOK||!text) return;
+        try{
+          window.speechSynthesis.cancel();
+          const u=new window.SpeechSynthesisUtterance(text);
+          if(voice) u.voice=voice;
+          u.rate=0.96; u.pitch=1.0; u.volume=1.0;
+          window.speechSynthesis.speak(u);
+        }catch(e){}
+      }
+
       function addBub(cls, text){
         const b=document.createElement("div"); b.className="bub "+cls; b.textContent=text;
         log.appendChild(b); log.scrollTop=log.scrollHeight; return b;
       }
+      let historyLoaded=false;
+      function loadHistory(){
+        if(historyLoaded) return; historyLoaded=true;
+        sb.from("chat_messages").select("role,body").order("created_at",{ascending:false}).limit(14)
+          .then(function(r){
+            const rows=(r&&r.data||[]).reverse();
+            if(!rows.length){
+              addBub("ai","Hi, sweet thing — I'm Ruby. 🐄 No pressure today; just tell me how you're doing, or tap a job and I'll help you with it. Moo means I'm in your corner.");
+            } else {
+              rows.forEach(function(m){ addBub(m.role==="user"?"me":"ai", m.body); });
+            }
+          })
+          .catch(function(){ addBub("ai","Hi, I'm Ruby. 🐄 Tell me how you're doing whenever you're ready."); });
+      }
+
+      let sending=false;
       function send(){
-        const inp=document.getElementById("chatinput");
-        const msg=inp.value.trim(); if(!msg) return;
-        inp.value=""; addBub("me", msg);
-        const wait=addBub("ai", "…");
+        if(sending) return;
+        const msg=(inp.value||"").trim(); if(!msg) return;
+        sending=true; inp.value=""; addBub("me", msg);
+        const wait=document.createElement("div");
+        wait.className="bub ai think"; wait.innerHTML="<i></i><i></i><i></i>";
+        log.appendChild(wait); log.scrollTop=log.scrollHeight;
         sb.functions.invoke("companion", { body: { message: msg } })
           .then(function(r){
-            wait.textContent = (r.data && r.data.reply) ? r.data.reply
-              : "I'm having trouble right now — your message is saved, try me again in a minute.";
+            const reply=(r&&r.data&&r.data.reply) ? r.data.reply
+              : "I'm having a little trouble right now — your message is saved, try me again in a minute. 💜";
+            wait.className="bub ai"; wait.textContent=reply; log.scrollTop=log.scrollHeight;
+            speak(reply);
           })
-          .catch(function(){ wait.textContent="No connection right now — I'll be here when you're back online."; });
+          .catch(function(){
+            wait.className="bub ai";
+            wait.textContent="No connection right now — I'll be right here when you're back online. 💜";
+          })
+          .finally(function(){ sending=false; });
       }
-      document.getElementById("chatsend").onclick=send;
-      document.getElementById("chatinput").addEventListener("keydown",function(e){
+      sendBtn.onclick=send;
+      inp.addEventListener("keydown",function(e){
         if(e.key==="Enter"){ e.preventDefault(); send(); }
+      });
+
+      /* ── Mic input (SpeechRecognition) — fills the box + auto-sends. ── */
+      const SR = (typeof window.SpeechRecognition!=="undefined") ? window.SpeechRecognition
+               : (typeof window.webkitSpeechRecognition!=="undefined") ? window.webkitSpeechRecognition
+               : null;
+      let rec=null, listening=false;
+      function setListening(on){
+        listening=on;
+        if(micBtn) micBtn.classList.toggle("on", on);
+        if(listen){ listen.hidden=!on; }
+      }
+      if(SR && micBtn){
+        micBtn.hidden=false;
+        micBtn.onclick=function(){
+          if(listening){ try{ rec.stop(); }catch(e){} return; }
+          try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(e){}
+          try{
+            rec=new SR();
+            rec.lang="en-US"; rec.interimResults=false; rec.maxAlternatives=1; rec.continuous=false;
+            rec.onresult=function(ev){
+              let said="";
+              try{ said=ev.results[0][0].transcript||""; }catch(e){}
+              if(said){ inp.value=said; setListening(false); send(); }
+            };
+            rec.onerror=function(){ setListening(false); };
+            rec.onend=function(){ setListening(false); };
+            setListening(true); rec.start();
+          }catch(e){ setListening(false); }
+        };
+      }
+
+      function openRuby(){
+        ov.hidden=false; document.body.style.overflow="hidden";
+        loadHistory();
+        try{ inp.focus(); }catch(e){}
+      }
+      function closeRuby(){
+        ov.hidden=true; document.body.style.overflow="";
+        if(listening){ try{ rec.stop(); }catch(e){} }
+        try{ window.speechSynthesis && window.speechSynthesis.cancel(); }catch(e){}
+      }
+      openBtn.onclick=openRuby;
+      closeBtn.onclick=closeRuby;
+      document.addEventListener("keydown",function(e){
+        if(e.key==="Escape" && !ov.hidden) closeRuby();
       });
     }
     const _showIn = showIn;
-    showIn = function(extra){ _showIn(extra); mountChat(); };
-    if(user) mountChat();
+    showIn = function(extra){ _showIn(extra); mountRuby(); };
+    if(user) mountRuby();
   }
 })();
 
@@ -2521,7 +4160,7 @@ def mock_results():
         {"id": "2", "title": "Receptionist", "company": {"display_name": "Dental Office"},
          "location": {"display_name": "Johnston, IA"}, "salary_min": 37440, "salary_max": 39520,
          "salary_is_predicted": "1", "created": "2026-06-01T00:00:00Z",
-         "redirect_url": "https://www.adzuna.com/job/2", "description": "Greet patients, answer phones."},
+         "redirect_url": "https://www.adzuna.com/job/2", "description": "Greet patients, answer phones. Questions? Call (515) 244-0198 or email hiring@johnstondental.example."},
         {"id": "3", "title": "Office Clerk", "company": {"display_name": "Logistics Co"},
          "location": {"display_name": "Grimes, IA"}, "salary_min": None, "salary_max": None,
          "salary_is_predicted": "0", "created": "2026-06-04T00:00:00Z",
@@ -2544,13 +4183,8 @@ def mock_results():
 def collect_mock():
     seen = {}
     for j in mock_results():
-        if requires_degree(j):
-            continue
         seen[j["id"]] = normalize(j, "remote" if looks_remote(j) else "local")
-    rows = [r for r in seen.values()
-            if is_admin_title(r["title"]) and is_attainable(r["title"])
-            and not title_excluded(r["title"])
-            and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
+    rows = [r for r in seen.values() if _passes_filters(r)]
     return dedupe_rows(rows)[0]
 
 
@@ -2594,11 +4228,24 @@ def main():
     global BLOCKLIST
     BLOCKLIST = load_blocklist(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                             "scam_blocklist.txt"))
+    domain_cache: dict[str, object] = {}
+    if not args.mock:
+        domain_screen.reset_lookup_budget()
+        for r in rows:
+            domain_screen.annotate_row(r, domain_cache)
     spam_index = build_spam_index(rows)
     for r in rows:
-        r["scam"] = scam_assessment(r, spam_index)
+        r["scam"] = scam_assessment(r, spam_index, domain_cache=domain_cache)
     safe = sort_rows([r for r in rows if r["scam"]["level"] == "safe"])
     hidden = [r for r in rows if r["scam"]["level"] != "safe"]
+
+    if not args.mock and hidden:
+        autogen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scam_blocklist_autogen.txt")
+        added = domain_screen.enrich_blocklist_autogen(hidden, autogen)
+        if added:
+            BLOCKLIST = load_blocklist(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                    "scam_blocklist.txt"))
+            print(f"  blocklist: auto-added {len(added)} young-domain host(s): {', '.join(added)}")
 
     stamp = datetime.now(timezone.utc).astimezone()
     datestr = stamp.strftime("%Y-%m-%d")
@@ -2606,9 +4253,11 @@ def main():
 
     base = os.path.dirname(os.path.abspath(__file__))
     web_dir = os.path.join(base, "web")
+    bundle_dir = os.path.join(base, "app", "public")
     os.makedirs(web_dir, exist_ok=True)
+    os.makedirs(bundle_dir, exist_ok=True)
     csv_path = os.path.join(base, f"admin-jobs-{datestr}.csv")
-    html_path = os.path.join(web_dir, "index.html")     # the mobile PWA
+    html_path = os.path.join(web_dir, "index.html")     # legacy fallback until Astro-only
     write_csv(sort_rows(rows), csv_path)                 # full audit incl. hidden
     # Portal config never reaches a --mock page: canned data must not gain a
     # sign-in surface, and a mock page must never be deployed anyway.
@@ -2617,6 +4266,9 @@ def main():
     write_html(safe, len(hidden), len(rows), html_path, human,
                contact=args.contact, contact_phone=args.contact_phone,
                portal_cfg=portal_cfg, sentry_cfg=sentry_cfg)
+    write_jobs_bundle(safe, len(hidden), len(rows), bundle_dir, human,
+                      contact=args.contact, contact_phone=args.contact_phone,
+                      portal_cfg=portal_cfg)
 
     if args.push_supabase:
         if args.mock:
@@ -2626,6 +4278,9 @@ def main():
             if portal_push.supabase_enabled():
                 try:
                     portal_push.push_jobs(_portal_rows(safe, stamp.isoformat()), log=print)
+                    # Drop portal rows the scanner hasn't seen in 14 days (stale noise).
+                    cutoff = (stamp - timedelta(days=14)).isoformat()
+                    portal_push.purge_stale_jobs(cutoff, log=print)
                 except RuntimeError as err:
                     # Loud but non-fatal: the public site must publish even
                     # when the portal is down. CI surfaces this in the log.

@@ -32,7 +32,7 @@ permissions:
 jobs:
   semgrep:
     name: scan (keyless OSS)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10   # never let a hung scan run forever (CI-hang policy)
     # Runs on EVERY PR, including Dependabot. This job is now a REQUIRED status
     # check, and a job skipped via `if:` reports "skipped" — which branch
@@ -40,14 +40,18 @@ jobs:
     # (no token needed), so running it on Dependabot PRs is harmless and gives a
     # real pass instead of a blocking skip.
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false   # read-only job; don't leave the token in git config
 
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
       - name: Install Semgrep (OSS, no account)
-        run: python -m pip install --upgrade pip semgrep
+        # Pinned for reproducibility (registry RULESETS still update at scan time;
+        # bump this manually or via Dependabot if semgrep is added to a reqs file).
+        run: python -m pip install --upgrade pip && pip install semgrep==1.167.0
 
       # Keyless: every --config is a PUBLIC registry ruleset pulled over HTTPS
       # with no auth. --error => exit non-zero (fail the PR) on any finding.

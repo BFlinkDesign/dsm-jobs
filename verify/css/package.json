@@ -1,0 +1,9 @@
+{
+  "name": "dsm-jobs-css-tools",
+  "private": true,
+  "description": "Dev-only CSS validator: Lightning CSS validates/transpiles the PWA's inline CSS for our browser targets. No JS dependency tree.",
+  "version": "1.1.0",
+  "dependencies": {
+    "lightningcss-cli": "1.32.0"
+  }
+}

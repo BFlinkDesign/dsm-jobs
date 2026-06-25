@@ -141,12 +141,30 @@ create policy "own chat: delete" on public.chat_messages for delete
   to authenticated using ((select auth.uid()) = user_id);
 create index chat_messages_user_idx on public.chat_messages (user_id, created_at desc);
 
+-- ── ai_usage: per-user rate ledger for the paid AI features ────────────────
+-- One row per AI call (currently the resume tailor). The edge function inserts
+-- a row, then counts the last few minutes and refuses if over budget — so a
+-- stuck loop or a misused token can't run up the Anthropic bill. No body stored.
+create table public.ai_usage (
+  id         uuid primary key default gen_random_uuid(),
+  user_id    uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  kind       text not null check (kind in ('resume_tailor')),
+  created_at timestamptz not null default now()
+);
+alter table public.ai_usage enable row level security;
+create policy "own ai_usage: select" on public.ai_usage for select
+  to authenticated using ((select auth.uid()) = user_id);
+create policy "own ai_usage: insert" on public.ai_usage for insert
+  to authenticated with check ((select auth.uid()) = user_id);
+create index ai_usage_user_idx on public.ai_usage (user_id, kind, created_at desc);
+
 -- ── Data API exposure (required since 2026-04-28 for new tables) ───────────
 grant select on public.jobs to authenticated;
 grant select, insert, update, delete on public.user_job_status to authenticated;
 grant select, insert, update, delete on public.job_notes to authenticated;
 grant select, insert, update on public.user_profile to authenticated;
 grant select, insert, delete on public.chat_messages to authenticated;
+grant select, insert on public.ai_usage to authenticated;
 -- Deliberately NOTHING granted to anon: the portal is invite-only.
 
 -- ── indexes for the obvious access paths ───────────────────────────────────

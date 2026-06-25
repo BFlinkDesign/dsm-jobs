@@ -1,0 +1,75 @@
+# @claude mention assistant: comment "@claude ..." on an issue or PR and Claude
+# responds — answers questions, or drafts changes on a branch.
+#
+# TRIGGER: an @claude mention by a user with WRITE access. That write-access
+# gate is the PRIMARY security control — on this PUBLIC repo, random outside
+# commenters CANNOT trigger Claude (claude-code-action enforces it). We
+# deliberately do NOT set `allowed_non_write_users` (the documented risky
+# bypass), so untrusted parties can never invoke Claude with a prompt they control.
+#
+# SAFETY:
+# - Dormant unless CLAUDE_CODE_OAUTH_TOKEN is set (costs nothing until funded).
+#   That token bills against the Max subscription, not metered API usage.
+# - No auto-merge / no auto-PR: on a mention Claude pushes a branch and links
+#   the PR-creation page; a human opens and reviews it, so `main` stays protected.
+# - `show_full_output` is left at its default (OFF) — Actions logs are
+#   world-readable on a public repo, so Claude's output stays sanitized.
+# - Least privilege: only the token scopes the action needs to read context,
+#   push a branch, and comment.
+#
+# UNTRUSTED INPUT: issue/PR/comment text is untrusted. The action strips hidden
+# markdown/HTML, and the write-access gate keeps the trigger itself trusted.
+
+name: Claude Assistant
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+# Least privilege: read context, push a branch, comment on the issue/PR.
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write        # claude-code-action exchanges a GitHub OIDC token
+
+# One Claude run at a time per issue/PR thread.
+concurrency:
+  group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  claude:
+    # Defense-in-depth author gate enforced by GitHub BEFORE the action runs, so
+    # safety doesn't rest solely on claude-code-action's internal write-access
+    # check. Per event type, require the TRIGGERING author (commenter / reviewer /
+    # issue opener — not some other field on the payload) to be a trusted member.
+    if: >-
+      (github.event_name == 'issues' &&
+       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
+      (github.event_name == 'issue_comment' &&
+       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' &&
+       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Respond to @claude
+        uses: anthropics/claude-code-action@428971d2ecd6e3a7cb0ee0da2a3a8b33fdb3678d # v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # No `prompt:` → mention (tag) mode: the action responds to "@claude"
+          # in issue/PR comments, bodies, and titles. Default trigger is "@claude".

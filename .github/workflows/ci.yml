@@ -12,17 +12,19 @@ permissions:
 
 jobs:
   backend-checks:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10          # REQUIRED: never let a hung job run forever
     strategy:
       fail-fast: false
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false   # read-only job; don't leave the token in git config
 
       - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -46,11 +48,52 @@ jobs:
       - name: Mock pipeline end-to-end
         run: python find_admin_jobs.py --mock
 
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22.12"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+
+      - name: Regenerate Rudy saying pools
+        run: python scripts/generate_rudy_sayings.py
+
+      - name: Build Astro PWA (mock data)
+        working-directory: app
+        run: npm ci --no-audit --no-fund && npm run build
+
+  css-checks:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false   # read-only job; don't leave the token in git config
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Set up Node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "20"
+
+      - name: Install CSS toolchain (Lightning CSS)
+        working-directory: verify/css
+        run: npm ci --no-audit --no-fund    # exact, from the committed lockfile
+
+      - name: Validate generated CSS (Lightning CSS)
+        run: python verify/css/lint_css.py
+
   secret-scan:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false   # read-only job; don't leave the token in git config
 
       - name: Shape-based secret scan (no external deps)
         shell: bash
@@ -68,3 +111,53 @@ jobs:
             echo "::error::Potential secret detected (see matches above)"; exit 1
           fi
           echo "No secret shapes found."
+
+  gitleaks:
+    # Second secret layer: gitleaks' 150+ provider rules + entropy detection,
+    # complementing the shape-scan above. Installed as a PINNED binary verified
+    # by SHA256 (no third-party action to trust). Runs the DEFAULT ruleset with
+    # NO allowlist — verified clean against the whole repo, so nothing is exempt
+    # (the ci.yml secret-SHAPED regexes use literal [..] and don't false-positive).
+    name: secret scan (gitleaks, pinned)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false   # read-only job; don't leave the token in git config
+
+      - name: Run gitleaks (pinned binary + checksum)
+        shell: bash
+        run: |
+          set -euo pipefail
+          VER=8.30.1
+          SHA=551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+          curl -fsSL -o gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VER}/gitleaks_${VER}_linux_x64.tar.gz"
+          echo "${SHA}  gitleaks.tar.gz" | sha256sum -c -
+          tar -xzf gitleaks.tar.gz gitleaks
+          ./gitleaks dir . --no-banner --redact --exit-code 1
+
+  zizmor:
+    # GitHub Actions static analysis: catches insecure workflow patterns
+    # (credential persistence / "artipacked", template injection, over-broad
+    # permissions, ref confusion, ...). Pinned, pip-installed (zizmor ships
+    # wheels). Run --offline for determinism: every audit we rely on is local,
+    # and all our actions are already SHA-pinned, so no online check adds signal.
+    name: actions static analysis (zizmor, pinned)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false   # read-only job; don't leave the token in git config
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install zizmor (pinned)
+        run: python -m pip install --upgrade pip && pip install zizmor==1.16.0
+
+      - name: Run zizmor (fail on any finding)
+        run: zizmor --offline --persona regular .github/workflows/*.yml
