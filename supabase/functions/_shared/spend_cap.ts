@@ -36,17 +36,42 @@ const RATES: Record<string, { in: number; out: number }> = {
 // is only for the pre-call gate's MTD comparison; keep it equal to the SQL stop.
 export const SPEND_CAP_USD = 25.00;
 
-// Per-call usage as Anthropic returns it (input_tokens / output_tokens).
-export type Usage = { input_tokens?: number; output_tokens?: number } | null | undefined;
+// Per-call usage as Anthropic returns it. With prompt caching ON (both paid
+// functions set cache_control on the system prompt) `input_tokens` is only the
+// UNCACHED remainder — the cached tokens are billed under the cache_* classes
+// and must be priced too, or the ledger undercounts and the $25 cap trips late.
+//   cache write (5m ephemeral): 1.25x base input rate
+//   cache read                : 0.10x base input rate
+export type Usage = {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_creation_input_tokens?: number;
+  cache_read_input_tokens?: number;
+} | null | undefined;
 
-// Provider cost in USD for one model call. Unknown model => 0 (logged by caller
-// via accumulateCost); never throws, so a pricing miss can't crash a request.
+const CACHE_WRITE_MULT = 1.25;
+const CACHE_READ_MULT = 0.10;
+
+// Provider cost in USD for one model call. Unknown model => 0 but LOGGED (a
+// silent $0 would let a model-id typo bypass the cap); never throws, so a
+// pricing miss can't crash a request.
 export function costForUsage(model: string, usage: Usage): number {
   const rate = RATES[model];
-  if (!rate || !usage) return 0;
+  if (!rate) {
+    console.error(`spend-cap: no pricing for model '${model}' — cost counted as $0 (cap may not trip)`);
+    return 0;
+  }
+  if (!usage) return 0;
   const inTok = usage.input_tokens ?? 0;
   const outTok = usage.output_tokens ?? 0;
-  return (inTok * rate.in + outTok * rate.out) / 1_000_000;
+  const cacheWrite = usage.cache_creation_input_tokens ?? 0;
+  const cacheRead = usage.cache_read_input_tokens ?? 0;
+  return (
+    inTok * rate.in +
+    cacheWrite * rate.in * CACHE_WRITE_MULT +
+    cacheRead * rate.in * CACHE_READ_MULT +
+    outTok * rate.out
+  ) / 1_000_000;
 }
 
 // Accumulate cost across multiple model calls (resume-tailor's write/critique/
