@@ -14,6 +14,7 @@ Exit non-zero on a hard parse error so CI can gate on it. Usage:
 """
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -54,8 +55,12 @@ def main() -> int:
 
     # 1) Lightning CSS: validate + transpile for our targets. Hard-fails on parse errors.
     print("\n=== Lightning CSS (validate + transpile, last 2 versions / >0.3%) ===")
+    npx = shutil.which("npx.cmd" if os.name == "nt" else "npx") or shutil.which("npx")
+    if not npx:
+        print("CSS LINT FAIL: npx was not found on PATH.", file=sys.stderr)
+        return 1
     lc = subprocess.run(
-        ["npx", "--prefix", HERE, "lightningcss", "--minify", "--browserslist",
+        [npx, "--prefix", HERE, "lightningcss", "--minify", "--browserslist",
          "--error-recovery", css_path, "-o", os.path.join(HERE, "app.min.css")],
         cwd=HERE, capture_output=True, text=True,
     )

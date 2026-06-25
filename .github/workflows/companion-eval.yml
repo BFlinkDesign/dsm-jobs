@@ -1,0 +1,52 @@
+# Live-model behavioral eval for the companion (Rudy).
+#
+# Sends adversarial messages through the REAL model using the deployed system
+# prompt and asserts Rudy behaves safely (crisis routing, no confabulation, the
+# daytime/remote availability boundary, the not-a-therapist boundary). This is
+# the behavioral half of the verification story — grounding_test.ts/safety_test.ts
+# cover the structural half in edge-checks.yml.
+#
+# Costs a few cents of tokens per run, so it is NOT on pull_request. It runs on
+# demand and weekly, and self-skips (clean exit 0) when ANTHROPIC_API_KEY is
+# unset or Anthropic credits are exhausted — so a fork or an unfunded repo never
+# fails. Enable it by setting the ANTHROPIC_API_KEY repo secret.
+
+name: Companion Behavioral Eval
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "0 13 * * 1" # weekly, Monday 13:00 UTC — catches prompt/model drift
+
+permissions:
+  contents: read
+
+concurrency:
+  group: companion-eval-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  eval:
+    name: behavioral eval (live model)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Read-only; never pushes (zizmor: artipacked).
+          persist-credentials: false
+
+      - name: Set up Deno
+        uses: denoland/setup-deno@667a34cdef165d8d2b2e98dde39547c9daac7282 # v2.0.4
+        with:
+          deno-version: v2.x
+
+      - name: Run behavioral eval
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          deno run \
+            --allow-net=api.anthropic.com \
+            --allow-env=ANTHROPIC_API_KEY \
+            --allow-read=supabase/functions \
+            supabase/functions/companion/behavioral_eval.ts

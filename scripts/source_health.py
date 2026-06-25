@@ -13,14 +13,58 @@ conservative so it never cries wolf:
 Reuses providers' allowlisted request helpers — no new network code. Stdlib only.
 """
 
+from __future__ import annotations
+
+import json
+import os
 import re
 import sys
 import time
+from datetime import date
 
 sys.path.insert(0, ".")
 import providers as p  # noqa: E402
 
+STATE_PATH = os.path.join(os.path.dirname(__file__), "source_health_state.json")
+EMPTY_ALERT_WEEKS = 4
+
 ok, gone, flaky = [], [], []
+
+
+def _load_state() -> dict:
+    if not os.path.exists(STATE_PATH):
+        return {}
+    try:
+        with open(STATE_PATH, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def _save_state(state: dict) -> None:
+    with open(STATE_PATH, "w", encoding="utf-8") as fh:
+        json.dump(state, fh, indent=2, sort_keys=True)
+        fh.write("\n")
+
+
+def _track_empty_feeds(state: dict) -> list[str]:
+    """Increment empty-week counters; return feeds empty long enough to prune."""
+    today = date.today().isoformat()
+    actionable: list[str] = []
+    seen = {lbl for lbl, _ in ok}
+    for label in seen:
+        count = next(n for lbl, n in ok if lbl == label)
+        if count > 0:
+            state.pop(label, None)
+            continue
+        rec = state.get(label, {"empty_weeks": 0, "last_checked": ""})
+        if rec.get("last_checked") != today:
+            rec["empty_weeks"] = int(rec.get("empty_weeks", 0)) + 1
+        rec["last_checked"] = today
+        state[label] = rec
+        if rec["empty_weeks"] >= EMPTY_ALERT_WEEKS:
+            actionable.append(label)
+    return actionable
 
 
 def probe(label, fn):
@@ -103,11 +147,21 @@ def main():
     empty = [lbl for lbl, n in ok if not n]
     if empty:
         print("Reachable but empty (no current openings): " + ", ".join(empty))
+    state = _load_state()
+    actionable = _track_empty_feeds(state)
+    _save_state(state)
+    if actionable:
+        print(f"\nPRUNE CANDIDATES (empty >= {EMPTY_ALERT_WEEKS} weekly checks):")
+        for label in actionable:
+            weeks = state[label]["empty_weeks"]
+            print(f"  - {label}: empty {weeks} weeks — consider removing from providers.py")
     if gone:
         print("\nGONE — fix or remove from providers.py:")
         for label, why in gone:
             print(f"  - {label}: {why}")
         return 1
+    if actionable:
+        return 2
     return 0
 
 

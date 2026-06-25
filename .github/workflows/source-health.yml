@@ -1,9 +1,8 @@
 name: Source Health (weekly)
 
-# Weekly: probe every keyless job source (Greenhouse/Lever boards, government
-# feeds, Workday tenants, SmartRecruiters) and report which are alive. A source
-# that goes UNREACHABLE opens an issue so dead boards get fixed or removed —
-# the "self-evolving" signal that keeps the feed honest over time.
+# Weekly: probe keyless sources, persist empty-feed state, auto-prune dead weight,
+# and open auto-fix issues for GONE feeds. AI replaces human-in-the-loop for feed
+# hygiene — only supabase/portal changes still need human merge.
 
 on:
   schedule:
@@ -11,43 +10,87 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   issues: write
 
 jobs:
   source-health:
-    runs-on: ubuntu-latest
-    timeout-minutes: 8
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6
-      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: true   # zizmor: ignore[artipacked] — bot commits state + prune
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
+
       - name: Probe job sources
         id: probe
+        continue-on-error: true
         shell: bash
         run: |
           set -o pipefail
           python scripts/source_health.py | tee /tmp/report.txt
-          echo "report<<EOF" >> "$GITHUB_OUTPUT"; cat /tmp/report.txt >> "$GITHUB_OUTPUT"; echo "EOF" >> "$GITHUB_OUTPUT"
+          # Read the PYTHON exit (the 0/1/2 state machine), not the pipeline's:
+          # `tee` exiting 0 would otherwise mask a probe failure under pipefail.
+          code=${PIPESTATUS[0]}
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+          echo "report<<EOF" >> "$GITHUB_OUTPUT"
+          cat /tmp/report.txt >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          exit $code
+
+      - name: Auto-prune long-empty feeds
+        if: steps.probe.outputs.code == '2' || steps.probe.outputs.code == '0'
+        run: python scripts/auto_prune_feeds.py
+
+      - name: Commit state and provider prune
+        if: always()
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Belt-and-suspenders: never commit a providers.py that won't import
+          # (auto_prune already guards, but this commit lands on the default
+          # branch, so a corrupt file would break every scan until reverted).
+          if ! python -m compileall -q providers.py; then
+            echo "::error::providers.py does not compile — refusing to commit the prune"
+            git checkout -- providers.py
+          fi
+          git add scripts/source_health_state.json providers.py
+          git diff --staged --quiet || git commit -m "chore: source-health state + auto-prune empty feeds"
+          git push || true
+
       - name: Open/refresh an issue if a source is dead
-        if: failure()
+        if: steps.probe.outputs.code == '1'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         with:
           script: |
             const body = "Weekly source-health probe found a DEAD job source.\n\n```\n" +
               (process.env.REPORT || "see workflow logs") + "\n```\n\n" +
-              `Fix the endpoint or drop it from providers.py. Run: ` +
-              `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
             const title = "🔌 A job source is down";
             const open = await github.rest.issues.listForRepo({
               owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "source-health" });
+            let num;
             if (open.data.length) {
+              num = open.data[0].number;
               await github.rest.issues.createComment({ owner: context.repo.owner,
-                repo: context.repo.repo, issue_number: open.data[0].number, body });
+                repo: context.repo.repo, issue_number: num, body });
             } else {
-              await github.rest.issues.create({ owner: context.repo.owner,
-                repo: context.repo.repo, title, body, labels: ["source-health", "automated"] });
+              const created = await github.rest.issues.create({ owner: context.repo.owner,
+                repo: context.repo.repo, title, body, labels: ["source-health", "outage", "automated"] });
+              num = created.data.number;
             }
+            await github.rest.issues.addLabels({ owner: context.repo.owner,
+              repo: context.repo.repo, issue_number: num, labels: ["auto-fix"] });
         env:
           REPORT: ${{ steps.probe.outputs.report }}
+
+      - name: Fail job if probe failed
+        if: steps.probe.outputs.code != '0'
+        env:
+          PROBE_EXIT: ${{ steps.probe.outputs.code }}
+        run: exit "$PROBE_EXIT"

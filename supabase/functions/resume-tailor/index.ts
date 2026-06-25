@@ -31,6 +31,12 @@
 
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as Sentry from "npm:@sentry/deno@10";
+import {
+  accumulateCost,
+  checkSpendAllowed,
+  recordSpendAndAlert,
+  type Usage,
+} from "../_shared/spend_cap.ts";
 
 const SENTRY_DSN = Deno.env.get("SENTRY_DSN");
 if (SENTRY_DSN) {
@@ -93,10 +99,14 @@ doesn't have, leave it out — do not fabricate it. When in doubt, keep her own 
 means FRAMING her real experience better for this job — never adding new facts. A tailored resume that
 overstates gets her caught in an interview; honest and well-organized is the whole job.
 
-HOW TO TAILOR:
-- Lead with the experience and skills from her resume that match THIS posting.
-- Mirror the posting's real language ONLY where it truthfully describes her existing experience.
-- Keep it honest about gaps — never paper over them with invented content.
+HOW TO TAILOR (read the WHOLE posting first):
+- Pull out the posting's must-have skills, software, and duties. Lead with bullets from her resume
+  that match those — use the posting's exact words ONLY where they truthfully describe her work.
+- Put the strongest match at the top of each section. Drop or shorten bullets that don't help THIS job.
+- If the posting lists required software (Excel, Outlook, EMR, scheduling systems, etc.), surface hers
+  only if her resume already mentions them — never add tools she hasn't used.
+- Mirror 5-8 real keywords/phrases from the posting in the resume body (ATS scanners look for these).
+- The cover note should name ONE specific duty from the posting she has done, in plain first person.
 
 ${VOICE_RULES}
 
@@ -105,13 +115,19 @@ Return your answer using the provided JSON schema:
 - "changes": 3 to 6 short, plain-language bullets telling her what you emphasized and why — warm and
   encouraging, and TRUTHFUL (only what you actually surfaced from her real experience).
 - "cover_note": a short, honest, first-person cover note (4-7 sentences) she can edit, drawing only on
-  her real experience.`;
+  her real experience.
+- "follow_up": one short, polite follow-up message she can send after applying. Do not sound desperate.
+- "ats_alignment": an object with:
+  - "strong_matches": 3 to 6 job keywords/duties that are truthfully supported by her resume.
+  - "suggested_keywords": 0 to 6 job keywords worth adding ONLY if she can personally confirm them.
+  - "note": one plain sentence explaining how to use this without keyword stuffing or inventing facts.`;
 
 // The critic gets her ORIGINAL resume as ground truth plus the draft, and judges
 // drift — it does not treat the draft as authoritative.
 const CRITIC_SYSTEM = `You are a strict reviewer checking a tailored resume + cover note before a real
 person sends them to a real employer. You are given (1) her ORIGINAL resume — the only source of truth —
-(2) the job posting, and (3) the tailored DRAFT. Judge the draft on four things and be hard to please:
+  (2) the job posting, and (3) the tailored DRAFT, cover note, follow-up, and ATS alignment.
+Judge the draft on four things and be hard to please:
 
 1. TRUTH (most important): Does every claim in the draft trace to something in her ORIGINAL resume? Flag
    ANY invented employer, title, date, certification, degree, tool, metric, or accomplishment, and any
@@ -139,8 +155,19 @@ const WRITER_SCHEMA = {
     resume: { type: "string" },
     changes: { type: "array", items: { type: "string" } },
     cover_note: { type: "string" },
+    follow_up: { type: "string" },
+    ats_alignment: {
+      type: "object",
+      properties: {
+        strong_matches: { type: "array", items: { type: "string" } },
+        suggested_keywords: { type: "array", items: { type: "string" } },
+        note: { type: "string" },
+      },
+      required: ["strong_matches", "suggested_keywords", "note"],
+      additionalProperties: false,
+    },
   },
-  required: ["resume", "changes", "cover_note"],
+  required: ["resume", "changes", "cover_note", "follow_up", "ats_alignment"],
   additionalProperties: false,
 };
 
@@ -170,7 +197,17 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-type WriterOut = { resume: string; changes: string[]; cover_note: string };
+type WriterOut = {
+  resume: string;
+  changes: string[];
+  cover_note: string;
+  follow_up: string;
+  ats_alignment: {
+    strong_matches: string[];
+    suggested_keywords: string[];
+    note: string;
+  };
+};
 type CriticOut = {
   ok: boolean;
   fabrications: string[];
@@ -210,7 +247,7 @@ async function callModel(
         },
         body: JSON.stringify({
           model,
-          max_tokens: 4000,
+          max_tokens: 5000,
           // Stable system cached; her resume + posting ride in the user turn.
           system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
           output_config: { format: { type: "json_schema", schema } },
@@ -272,7 +309,7 @@ async function handle(req: Request): Promise<Response> {
     jobTitle = String(body?.jobTitle ?? "").trim().slice(0, 300);
     company = String(body?.company ?? "").trim().slice(0, 300);
     // jobText is the full posting when she pastes it (much better), else the snippet.
-    jobText = String(body?.jobText ?? "").trim().slice(0, 12000);
+    jobText = String(body?.jobText ?? "").trim().slice(0, 16000);
   } catch {
     return json({ error: "bad request" }, 400);
   }
@@ -300,6 +337,20 @@ async function handle(req: Request): Promise<Response> {
     return json({ error: "You're going quick — give me a couple minutes and try again 💜" }, 429);
   }
 
+  // App-wide monthly Anthropic spend cap (shared with the companion). Check MTD
+  // ONCE here, before the first model call — the whole write -> critique ->
+  // revise loop counts as one tailoring (same philosophy as the rate cap above),
+  // so we don't re-gate mid-loop and strand an in-flight Opus spend. FAILS
+  // CLOSED: checkSpendAllowed returns allowed:false on any ledger error.
+  const spend = await checkSpendAllowed(supabase);
+  if (!spend.allowed) {
+    return json({ error: "The monthly AI budget has been reached — résumé tailoring is paused until next month." }, 503);
+  }
+
+  // Accumulate provider cost across every model call in the loop (Opus writer +
+  // Sonnet critic, billed at different rates). Recorded ONCE after the loop.
+  const spendCalls: Array<{ model: string; usage: Usage }> = [];
+
   const POSTING =
     `JOB POSTING\nTitle: ${jobTitle || "(not given)"}\nEmployer: ${company || "(not given)"}\n` +
     `Description:\n${jobText || "(only the title was provided)"}`;
@@ -324,11 +375,25 @@ async function handle(req: Request): Promise<Response> {
       });
       await Sentry.flush(2000);
     }
+    // The write call may have run and billed even though we couldn't use it;
+    // record whatever it cost before we bail (post-call, never fails closed).
+    await recordSpendAndAlert(supabase, accumulateCost(spendCalls));
     return json({ error: "the résumé helper is resting — try again in a minute" }, 502);
   }
+  spendCalls.push({ model: WRITER_MODEL, usage: (firstWrite.data as { usage?: Usage })?.usage });
   let draft = parseFirstJson(firstWrite.data) as WriterOut | null;
   if (!draft?.resume) {
-    return json({ error: "I couldn't put that together cleanly — try once more?" }, 502);
+    // A truncated (max_tokens) response yields invalid/partial JSON — tell her
+    // it was a length problem so a real qualification isn't silently dropped.
+    const stop = (firstWrite.data as { stop_reason?: string })?.stop_reason;
+    if (stop === "max_tokens") {
+      console.error("resume-tailor: writer hit max_tokens (résumé + posting too long); output truncated");
+    }
+    await recordSpendAndAlert(supabase, accumulateCost(spendCalls));  // the write still billed
+    const msg = stop === "max_tokens"
+      ? "That posting was a bit long for one pass — trim it down and try again so nothing gets cut off."
+      : "I couldn't put that together cleanly — try once more?";
+    return json({ error: msg }, 502);
   }
 
   // ── 2-3. CRITIQUE → REVISE loop, bounded ───────────────────────────────
@@ -339,9 +404,12 @@ async function handle(req: Request): Promise<Response> {
     const critUser =
       `${RESUME_BLOCK}\n\n${POSTING}\n\n` +
       `TAILORED DRAFT TO REVIEW:\nRESUME:\n${draft.resume}\n\n` +
-      `COVER NOTE:\n${draft.cover_note || "(none)"}`;
+      `COVER NOTE:\n${draft.cover_note || "(none)"}\n\n` +
+      `FOLLOW-UP:\n${draft.follow_up || "(none)"}\n\n` +
+      `ATS ALIGNMENT:\n${JSON.stringify(draft.ats_alignment ?? {}, null, 2)}`;
     const crit = await callModel(apiKey, CRITIC_MODEL, CRITIC_SYSTEM, critUser, CRITIC_SCHEMA, "critique");
     if (!crit.ok) break; // keep the current draft; one bad critique shouldn't sink it
+    spendCalls.push({ model: CRITIC_MODEL, usage: (crit.data as { usage?: Usage })?.usage });
     const verdict = parseFirstJson(crit.data) as CriticOut | null;
     if (!verdict || verdict.ok) break; // satisfied (or unparseable) → ship current draft
 
@@ -352,7 +420,9 @@ async function handle(req: Request): Promise<Response> {
     const reviseUser =
       `${POSTING}\n\n${RESUME_BLOCK}\n\n` +
       `YOUR PREVIOUS DRAFT:\nRESUME:\n${draft.resume}\n\nCOVER NOTE:\n${draft.cover_note || "(none)"}\n\n` +
-      `A reviewer found issues. Fix ALL of them and return the corrected resume, changes, and cover note.\n` +
+      `FOLLOW-UP:\n${draft.follow_up || "(none)"}\n\n` +
+      `ATS ALIGNMENT:\n${JSON.stringify(draft.ats_alignment ?? {}, null, 2)}\n\n` +
+      `A reviewer found issues. Fix ALL of them and return the corrected resume, changes, cover note, follow-up, and ATS alignment.\n` +
       (fab.length ? `FABRICATIONS TO REMOVE (these are NOT in her real resume — delete or fix every one):\n- ${fab.join("\n- ")}\n` : "") +
       (tells.length ? `AI-SOUNDING PHRASES TO REWRITE in plain human language:\n- ${tells.join("\n- ")}\n` : "") +
       (misses.length ? `WAYS TO FIT THIS POSTING BETTER (using only her real experience):\n- ${misses.join("\n- ")}\n` : "") +
@@ -360,15 +430,27 @@ async function handle(req: Request): Promise<Response> {
       `\n\nRemember: never add anything that isn't in her real resume.`;
     const rev = await callModel(apiKey, WRITER_MODEL, WRITER_SYSTEM, reviseUser, WRITER_SCHEMA, "revise");
     if (!rev.ok) break; // keep the current draft
+    spendCalls.push({ model: WRITER_MODEL, usage: (rev.data as { usage?: Usage })?.usage });
     const revised = parseFirstJson(rev.data) as WriterOut | null;
     if (!revised?.resume) break; // keep the current draft
     draft = revised;
   }
 
+  // Record the full provider cost of this tailoring (write + every critique +
+  // every revise) once, and fire the $20/$25 alerts if it crossed a threshold.
+  // Post-call: never fails closed (the spend already happened).
+  await recordSpendAndAlert(supabase, accumulateCost(spendCalls));
+
   return json({
     resume: draft.resume,
     changes: Array.isArray(draft.changes) ? draft.changes.slice(0, 8) : [],
     cover_note: typeof draft.cover_note === "string" ? draft.cover_note : "",
+    follow_up: typeof draft.follow_up === "string" ? draft.follow_up : "",
+    ats_alignment: {
+      strong_matches: Array.isArray(draft.ats_alignment?.strong_matches) ? draft.ats_alignment.strong_matches.slice(0, 8) : [],
+      suggested_keywords: Array.isArray(draft.ats_alignment?.suggested_keywords) ? draft.ats_alignment.suggested_keywords.slice(0, 8) : [],
+      note: typeof draft.ats_alignment?.note === "string" ? draft.ats_alignment.note : "",
+    },
   });
 }
 

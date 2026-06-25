@@ -99,6 +99,23 @@ def test_verdict_below_when_under_floor():
     assert fa.normalize(_job(31200, 33280), "local")["verdict"] == "below"
 
 
+def test_verdict_max_only_never_meets():
+    # "up to $25/hr" has no known LOW end — it must NOT earn the $19+ badge
+    # off its ceiling (invariant #1: never claim a floor we can't see).
+    assert fa.salary_verdict(None, 25.0, stated=True) == "unlisted"
+    assert fa.salary_verdict(None, 12.0, stated=True) == "unlisted"
+    # A real low end still works in both directions.
+    assert fa.salary_verdict(20.0, 25.0, stated=True) == "meets"
+    assert fa.salary_verdict(12.0, 25.0, stated=True) == "below"
+
+
+def test_phone_not_lifted_from_long_digit_run():
+    # An order/ID number must not be sliced into a fake one-tap "Call" contact.
+    assert fa.extract_contact_hints("Order #80012345551234 ships today")["contactPhone"] == ""
+    # A genuine formatted number is still extracted.
+    assert fa.extract_contact_hints("Call 515-244-0198 to apply")["contactPhone"] == "(515) 244-0198"
+
+
 # ── formatting + sorting ──────────────────────────────────────────────
 
 
@@ -269,6 +286,48 @@ def test_payload_includes_enrichment_fields():
     assert p["category"] == "Office"
     assert p["commute"] == "~20 min drive"  # Des Moines, IA from Grimes
     assert "trustLabel" in p and "about" in p
+    assert "contactPhone" in p and "contactEmail" in p and "contactName" in p
+
+
+def test_extract_contact_hints_from_posting():
+    text = "Questions? Call (515) 244-0198 or email hiring@johnstondental.example. Contact Jane Smith."
+    hints = fa.extract_contact_hints(text)
+    assert hints["contactPhone"] == "(515) 244-0198"
+    assert hints["contactEmail"] == "hiring@johnstondental.example"
+    assert hints["contactName"] == "Jane Smith"
+
+
+def test_extract_contact_hints_ignores_noreply_email():
+    hints = fa.extract_contact_hints("Reach us at noreply@scam.example or call (900) 555-0100")
+    assert hints["contactEmail"] == ""
+    assert hints["contactPhone"] == ""  # premium/fiction ranges never surface
+
+
+def test_extract_contact_hints_empty_when_no_posting_text():
+    assert fa.extract_contact_hints("") == {"contactPhone": "", "contactEmail": "", "contactName": ""}
+    assert fa.extract_contact_hints(None)["contactPhone"] == ""
+
+
+def test_payload_embeds_employer_stated_contact():
+    row = fa.normalize(
+        {
+            "id": "c1",
+            "title": "Receptionist",
+            "company": {"display_name": "Dental Office"},
+            "location": {"display_name": "Johnston, IA"},
+            "salary_min": 39520,
+            "salary_max": 41600,
+            "salary_is_predicted": "0",
+            "created": "2026-06-01T00:00:00Z",
+            "redirect_url": "https://example.com/j",
+            "description": "Call (515) 555-1212 or email hr@dental.example",
+        },
+        "local",
+    )
+    row["scam"] = {"level": "safe", "reasons": []}
+    p = fa._jobs_payload([row])[0]
+    assert p["contactPhone"] == "(515) 555-1212"
+    assert p["contactEmail"] == "hr@dental.example"
 
 
 def test_app_keeps_server_sort_order():
@@ -302,6 +361,18 @@ def test_scam_remote_unknown_employer_is_hidden():
     r = _row(title="Administrative Assistant", company="Unknownish Co", source="remote", desc="")
     out = fa.scam_assessment(r, {})
     assert out["level"] in ("scam", "suspect")  # never 'safe'
+
+
+def test_scam_remote_gmail_apply_link_is_hidden():
+    r = _row(
+        title="Administrative Assistant",
+        company="Unknownish Co",
+        source="remote",
+        desc="",
+    )
+    r["url"] = "https://gmail.com/inbox/apply-here"
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+    assert "apply link" in fa.scam_assessment(r, {})["reasons"][0]
 
 
 def test_scam_remote_too_good_pay_is_scam():
@@ -533,6 +604,55 @@ def test_hard_tell_overrides_trusted_employer():
     assert fa.scam_assessment(r, {})["level"] == "scam"
 
 
+def test_trusted_match_is_word_bounded_not_substring():
+    # Audit fix: a hint must match as a WORD, not a substring. Junk names that
+    # merely contain a trusted token ('ups' in 'Startups', 'marsh' in
+    # 'Marshalling', 'target' in 'Targeted') must NOT be trusted, or they get
+    # rescued from scam signals and floated to the top for a scam-targeted user.
+    for bogus in ("Quick Startups Staffing", "Backups Remote Jobs", "Cloud Meetups LLC",
+                  "Marshalling Logistics", "Targeted Leads LLC", "U.S. Bankruptcy Court"):
+        assert not fa.employer_is_trusted(bogus), bogus
+        assert fa.trusted_reason(bogus) == "", bogus
+    # Real employers still match (including punctuated / multi-word names).
+    for legit in ("CVS Health", "UnityPoint Health", "State of Iowa - DOT", "Hy-Vee",
+                  "Robert Half", "U.S. Bank"):
+        assert fa.employer_is_trusted(legit), legit
+        assert fa.trusted_reason(legit) != "", legit
+
+
+def test_substring_lookalike_remote_is_not_rescued():
+    # The lookalike name ('ups' inside 'Meetups') no longer earns the trusted
+    # rescue, so a remote posting from it is hidden, not shown as safe.
+    r = _row(title="Administrative Assistant", company="Cloud Meetups LLC", source="remote")
+    assert fa.scam_assessment(r, {})["level"] in ("scam", "suspect")
+
+
+def test_remote_too_good_pay_scam_even_for_trusted_name():
+    # Audit fix: a $30+/hr REMOTE 'admin' role is bait even when it names a
+    # trusted employer — a trusted name is trivially spoofed, and a real trusted
+    # employer's entry-admin role isn't a $30+/hr remote gig. (Trusted + remote
+    # at ordinary pay stays safe — see below.)
+    r = _row(title="Data Entry", company="UnityPoint Health", source="remote", hmin=35.0, hmax=40.0)
+    assert fa.scam_assessment(r, {})["level"] == "scam"
+    ok = _row(title="Scheduling Assistant", company="UnityPoint Health", source="remote", hmin=20.0, hmax=23.0)
+    assert fa.scam_assessment(ok, {})["level"] == "safe"
+
+
+def test_remote_trusted_name_with_structural_tell_is_not_rescued():
+    # A REMOTE posting that names a trusted brand AND shows a structural tell
+    # (same role spammed across cities) is the spoofed-brand shape — the trusted
+    # rescue must not launder it. A LOCAL trusted posting with the same tell is
+    # still downgraded to safe (a real employer hiring the role in many offices).
+    rows = [_row(title="Administrative Assistant", company="UnityPoint Health",
+                 source="remote", desc="") for _ in range(3)]
+    for i, r in enumerate(rows):
+        r["location"] = f"City{i}, IA"
+    idx = fa.build_spam_index(rows)
+    assert fa.scam_assessment(rows[0], idx)["level"] == "scam"
+    local = {**rows[0], "source": "local"}
+    assert fa.scam_assessment(local, idx)["level"] == "safe"
+
+
 def test_degree_preferred_is_not_required():
     assert (
         fa.requires_degree(
@@ -577,15 +697,48 @@ def test_template_has_no_legacy_theme_leftovers():
         assert warm not in t, f"legacy warm color {warm} still in template"
 
 
-def test_resume_tailor_paste_description_field_present():
-    """The tailor flow lets her paste the FULL job description (optional) so the
-    engine gets more than the Adzuna snippet, and fires the engine separately."""
+def test_native_platform_affordances_preserved():
+    """End-user actions use OS-native handlers — AI owns vetting, not the dialer."""
     t = fa.APP_TEMPLATE
-    assert 'id="tailorjd"' in t                      # the paste-description textarea
-    assert 'data-act="runtailor"' in t               # the separate "go" button
-    assert "function runTailor(" in t                # reads the paste, prefers it
-    # the pasted text must actually be preferred over the snippet when long enough
-    assert "pasted.length>=40 ? pasted : snippet" in t
+    assert "tel:" in t and "mailto:" in t
+    assert "navigator.share" in t
+    assert "Notification" in t
+    assert "beforeinstallprompt" in t
+
+
+def test_ai_automation_first_documented():
+    """Load-bearing: AI replaces human-in-the-loop for operator judgment."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    claude = open(os.path.join(root, "CLAUDE.md"), encoding="utf-8").read().lower()
+    assert "ai replaces human-in-the-loop" in claude
+    assert "auto-fix" in claude or "autonomously" in claude
+    rabbit = open(os.path.join(root, ".coderabbit.yaml"), encoding="utf-8").read().lower()
+    assert "human-in-the-loop" in rabbit
+
+
+def test_resume_tailor_paste_description_field_present():
+    """The tailor flow uses scanner-pulled full text when available; paste is only
+    needed when the listing gave a short preview."""
+    t = fa.APP_TEMPLATE
+    assert 'id="tailorjd"' in t                      # paste fallback when descFull is short
+    assert 'data-act="runtailor"' in t               # manual go when paste is required
+    assert "function runTailor(" in t
+    assert "function tailorJobText(" in t
+    assert "descFull" in t                           # full posting rides in the job payload
+    assert "full.length>=200" in t                   # one-tap tailor when we have enough text
+    assert "pasted.length>=40" in t                  # her paste still wins when she adds more
+    assert "isPlausiblePhone" in t                   # follow-up never dials fiction/premium lines
+
+
+def test_resume_tailor_edge_function_never_invents():
+    """The server-side tailor is load-bearing: critic must flag fabrications."""
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "supabase/functions/resume-tailor/index.ts"),
+               encoding="utf-8").read()
+    assert "never invent" in src.lower()
+    assert "fabrications" in src
+    assert "CRITIC_SYSTEM" in src
+    assert "MAX_REVISIONS" in src
 
 
 def test_resume_tailor_copy_both_and_download_present():

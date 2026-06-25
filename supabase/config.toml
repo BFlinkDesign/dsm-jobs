@@ -6,3 +6,8 @@ project_id = "tcclohxvhmwgjrtdkkuw"
 # in-function getUser() check is the genuine second layer (invite-only users).
 [functions.companion]
 verify_jwt = true
+
+# Resume tailoring reads private profile resume text and calls the paid model.
+# Keep the platform edge gate aligned with the in-function getUser() check.
+[functions.resume-tailor]
+verify_jwt = true

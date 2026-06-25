@@ -5,24 +5,46 @@
 # review priorities are: don't leak her data, don't show her a scam, and don't
 # ever quote a made-up wage. Tuned for a solo maintainer: low-noise profile, no
 # merge-blocking (CI + Semgrep are the hard gates; CodeRabbit is advisory).
+#
+# LOAD-BEARING: AI replaces human-in-the-loop for operator judgment — security,
+# feed hygiene, and repair loops run autonomously when CI/Semgrep/Socket pass.
+# End-user tel:/share/Notification stay native; AI owns vetting + tailoring.
 language: "en-US"
 early_access: false
 
 reviews:
-  # "chill" = fewer nitpicks, focus on real issues. Right for a single reviewer
-  # who has no second human to absorb false-positive noise.
+  # "chill" + security-only tone below. Advisory — CI + Semgrep + gitleaks block merges.
   profile: "chill"
-  # Advisory only — CodeRabbit comments but does not formally block the merge.
-  # The deterministic gates (CI: ruff/mypy/tests/secret-scan, Semgrep SAST) are
-  # what gate merges.
   request_changes_workflow: false
-  high_level_summary: true
+  high_level_summary: false
   poem: false
-  review_status: true
+  review_status: false
   collapse_walkthrough: true
   auto_review:
     enabled: true
     drafts: false
+    auto_pause_after_reviewed_commits: 2
+    ignore_usernames:
+      - "dependabot[bot]"
+      - "github-actions[bot]"
+      - "cursor[bot]"
+    ignore_title_keywords:
+      - "chore:"
+      - "deps"
+      - "ci:"
+      - "bump"
+      - "WIP"
+      - "[skip review]"
+  tone_instructions: |
+    Security and invariant breaks ONLY. Flag: secret/PII leakage, XSS or injection,
+    scam-shield weakening, guessed wages shown as numbers, fabricated user data,
+    missing URL allowlists on outbound fetch, service_role keys in the page.
+    Skip style, nitpicks, naming, refactors, and "could be cleaner" unless it is
+    an exploitable bug. Severity: Critical (exploit/data leak) > Warning (real bug)
+    > ignore everything else.
+    NEVER weaken scam shield, pay-truth, or XSS invariants.
+    Product/UX suggestions welcome when they improve her phone-first flow; prefer
+    native platform affordances (tel:, mailto:, Notification) over custom replicas.
 
   # Skip generated / binary / vendor noise. web/index.html is generated and
   # gitignored (never in a PR); listed for safety. Icons/images aren't code.
@@ -91,4 +113,4 @@ reviews:
         - No secrets in source; read them from the environment only.
 
 chat:
-  auto_reply: true
+  auto_reply: false

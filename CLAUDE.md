@@ -22,10 +22,26 @@ python -m pytest -q --timeout=60                 # full suite (timeout is mandat
 python -m pytest tests/test_find_admin_jobs.py::test_blocklist_hides_even_trusted -q   # single test
 python -m ruff check find_admin_jobs.py tests    # lint (CI runs this)
 
-python -m http.server 8137 --directory web --bind 127.0.0.1   # serve the PWA locally to test (file:// won't run the SW)
+python -m http.server 8137 --directory web --bind 127.0.0.1   # serve built PWA (file:// won't run the SW)
 
-pip install -r verify/requirements.txt && python verify/camera.py   # the CAMERA: render the PWA in real Chrome + inspect (8 checks)
+# Astro app (canonical UI — builds into ../web/)
+cd app && npm run build
+# Local test with base path: serve web/ at http://127.0.0.1:8137/dsm-jobs/ (use junction or copy under dsm-jobs/)
+
+bash verify/setup-web.sh && python verify/camera.py   # the CAMERA: mock build + 8 checks at /dsm-jobs/
 ```
+
+**The camera is the deterministic visual-verification mechanism.** It renders the
+`--mock` build (canned data) in Playwright's **bundled Chromium, pinned** by
+`verify/requirements.txt` (== one fixed revision) — never system Chrome — with a
+fixed viewport/scale, reduced-motion, and frozen animations, so the pixels are
+reproducible across runs and machines. Three ways to drive that ONE mechanism:
+(a) **local CLI** — `bash verify/setup-web.sh && python verify/camera.py`;
+(b) **CI** — `.github/workflows/camera.yml` runs it on a pinned `ubuntu-24.04`
+runner on push to `claude/camera-pass` (or manual dispatch) and pushes the PNGs
+to the `camera-shots` branch, so a browserless sandbox can `git fetch` and view
+them; (c) **web env** — the same `setup-web.sh` as the environment setup script,
+which works once the environment's network policy permits the Chromium download.
 
 Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install -r requirements-dev.txt` (ruff, pytest, pytest-timeout, mypy). The **camera** self-verifier (`verify/`) needs `playwright` + system Chrome — verify-only, not a runtime dep.
 
@@ -37,8 +53,9 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 - **`providers.py`** — extra sources, each fail-soft (one bad provider never kills the scan), routed through the single `salary_verdict()`. Key-gated: **USAJobs** (`USAJOBS_API_KEY`+`USAJOBS_EMAIL`; always employer-stated; PH/PA codes), **Jooble** (`JOOBLE_API_KEY`; free-text salary → always "Pay not listed"), **JSearch** (`JSEARCH_API_KEY`; 200 req/MONTH cap → fixed 5-query budget; prefers `apply_options[].is_direct` links), **Careerjet** (`CAREERJET_AFFID`; salary_type H/Y mapped). Always-on (no key): **ATS** — Greenhouse + Lever boards in `ATS_BOARDS` (real employer apply URLs; highest trust; Greenhouse pay→unlisted as its public API has no period field; Lever per-hour/per-year mapped). Add a board token only after confirming it returns 200+jobs live. **CareerOneStop** is an honest stub (envelope unverified). Remote-only/EU APIs (RemoteOK/Himalayas/Remotive/Arbeitnow) deliberately NOT wired — empty/EUR salary fields are dangerous under invariant #1. All shapes verified live/against official docs 2026-06-10.
   - **Update 2026-06-16:** **Jooble** + **JSearch** are key-provisioned and **live** (verified end-to-end against real DSM results). **Careerjet** is intentionally **inert/dropped** — its API requires a fixed server-IP allowlist + real-time per-user params (`user_ip`/`user_agent`) that don't fit a nightly CI scan from rotating GitHub-runner IPs. Additional **always-on keyless** sources are wired beyond Greenhouse/Lever: **NEOGOV / GovernmentJobs.com** gov feeds (`NEOGOV_AGENCIES` — State of Iowa + Polk/Dallas metro: Des Moines, Urbandale, Waukee, **Dallas County, Bondurant, City of Johnston** [the IA city — the bare `johnston` slug was Johnston County **NC** and was fixed]), **Workday** CxS (`WORKDAY_BOARDS` — Athene/Corteva/Nationwide/Voya), and **SmartRecruiters** (`SMARTRECRUITERS_COMPANIES` — Wellmark). Probed + **rejected** after live end-to-end testing (0 rows survived the metro+admin filters / national-noise flooding): The Muse, Hy-Vee/EMC/MercyOne Workday, dmww, Warren/Story-only NEOGOV feeds.
 - **`portal/`** — Supabase portal (schema + RLS + setup runbook). **LIVE as of 2026-06-16** — project `tcclohxvhmwgjrtdkkuw` (`https://tcclohxvhmwgjrtdkkuw.supabase.co`), all 5 tables + RLS applied, **email signup/login working end-to-end** (verified: signup → instant session → RLS-isolated saved work). Config that makes it work: **Site URL** = `https://bflinkdesign.github.io/dsm-jobs/` + that redirect allow-listed, and **"Confirm email" OFF** (so a phone-only user gets in instantly — the default Supabase mailer is too spam-prone to depend on). Only the **`email`** provider is enabled; Google needs a Google Cloud OAuth client (front-end auto-shows the button once enabled), Apple is skipped ($99/yr dev program). The static PWA still works fully without sign-in (localStorage fallback). **Network note:** the Supabase *dashboard* (`auth.supabase.io`) is firewall-blocked from CNC-1 (Eagle network) — but `api.supabase.com` + `<ref>.supabase.co` are reachable, so config is done via the Management API with a personal access token generated off-network, or the dashboard from another device.
-- **`web/`** — the PWA. `index.html` is **generated** (gitignored); `manifest.webmanifest`, `sw.js`, and icons are **committed** static shell. The app embeds jobs as inline JSON and does search / filter chips / sort / "Applied·Saved·Hide" via `localStorage`. The front end is rendered from `APP_TEMPLATE` (a non-f-string raw template filled with `##JOBS##` / `##META##` / `##SENTRY##` / `##PORTAL##` / `##PORTAL_SCRIPT##`).
-  - **Update 2026-06-16:** the three filter rows are now **labeled** (`Filter` / `Job type` / `How far you'll drive from Grimes`) so they don't read as one ambiguous wall of pills. The **commute-radius chooser** (Any / 20 / 30 / 45 min) lets the end user pick how far she'll drive; it persists in localStorage and remote jobs always show. Social sign-in buttons (Google) render **only if the project actually enables that provider** (a `/auth/v1/settings` fetch) — so a not-yet-configured Google button is never a dead end.
+- **`web/`** — the **deployed PWA output** (`npm run build` in `app/` → `web/`). `index.html` and hashed `_astro/*` are **generated**; `manifest.webmanifest`, `sw.js`, icons, and feed JSON land via `app/public/`. **Canonical UI source is `app/`** (Astro + TypeScript in `app/src/scripts/`). Legacy `find_admin_jobs.py` `APP_TEMPLATE` still runs during scan for audit/HTML parity but is **overwritten** by the Astro build — do not add product features only to `APP_TEMPLATE`.
+  - **Update 2026-06-16:** labeled filter rows (`Filter` / Job type / commute). Commute-radius chooser persists in state. Google button only if provider enabled.
+  - **Update 2026-06-22 (Astro):** Jobs load from `jobs.json` + `meta.json` at runtime; state in `dsm-jobs-state-v2` + Supabase `user_profile` blob. Passkeys, magic link, follow-up done, expanded filter chips, PWA update toast, offline/retry UX. **Collapsible filter panel** — **ported** (`#filter-toggle` / `.filter-panel.is-collapsed`, `filtersExpanded` persisted to localStorage, collapsed by default so cards show first).
 - **CI** (`.github/workflows/ci.yml`): ruff + compile + tests + mock pipeline (3.11/3.12) + a self-contained secret-shape scan.
 - **CD** (`.github/workflows/scan.yml`): daily + manual; builds `web/`, uploads the site bundle as an artifact (the audit CSV is deliberately NOT uploaded — artifacts are public), and force-pushes `web/` to this repo's `gh-pages` branch via the built-in `GITHUB_TOKEN` (`permissions: contents: write`; no PAT).
 - **`verify/camera.py`** — the **camera** self-verifier: builds `--mock`, renders the PWA in real Chrome (Playwright via `channel="chrome"`), photographs each view, and inspects the live DOM against the invariants (8 checks incl. **invariant #1 at the render layer**, labeled filter rows, provider-aware auth, no render-garbage). Exit 0 iff all pass. Complements the unit tests: pytest proves the *logic*, the camera proves the *rendered reality*. Re-run before any deploy. Generated `verify/shots/` + `report.json` are gitignored; see `verify/README.md`.
@@ -52,6 +69,7 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 5. **XSS-safe rendering** in the embedded JS: all fields go through `esc()` (encodes `& < > " ' \``) and apply links through `safeUrl()` (http/https only). Embedded JSON has `</` escaped. Keep both if you touch `APP_TEMPLATE`.
 6. **Secrets**: `ADZUNA_APP_ID/KEY` (and future provider keys) live in local `.env` (gitignored) and GitHub Actions secrets. Push a value to a GH secret via stdin (`gh secret set NAME` with piped input), never `--body`/argv. Collect into `.env` via the `/add-secret` masked dialog — never paste keys into chat.
 7. **Verify rendered reality with vision, not text-scraping.** Grepping the generated HTML/source silently misses structure, layout, and visual regressions — a string can be present and still render broken, overlapped, or invisible. Screenshots/vision are the catch. Before claiming a UI change works (and before any deploy), confirm it by rendering and *looking* (the `verify/camera.py` camera, or a screenshot), not by string-matching alone. Text checks supplement vision; they never replace it.
+8. **AI replaces human-in-the-loop for operator judgment.** Scans, WHOIS/blocklist growth, feed pruning, and `auto-fix` repair loops run autonomously when deterministic gates pass (CI, Semgrep, gitleaks, Socket). Monitors label issues `auto-fix`; Claude drafts repairs; auto-merge-guard ships code-path fixes without waiting on a maintainer. **Product/scam judgment for her is automated up front** (scam shield hides bait; attainability filter; WHOIS on young domains) — she never self-vets. **End-user actions stay native** (`tel:` / `mailto:` / `Notification` / share / PWA install): the OS places the call or email; AI handles vetting, tailoring, **Rudy**, and follow-up timing. Résumé AI reframes only what she wrote — never invents facts.
 
 ## Deploy / publish
 
@@ -66,11 +84,32 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 - **Scam-shield hardening** — gig/"paid panel" bait titles flagged (distinctive phrases only, so legit Market Research Coordinator roles aren't false-hidden).
 - **The camera self-verifier** (`verify/camera.py`) — renders the PWA in real Chrome + inspects 8 invariant checks; ran 8/8 green + a visual pass on all 4 views.
 
+## Shipped 2026-06-22
+
+- **Follow-up reminders** + contact Call/Email on applied jobs (3/5/7-day chips, `Notification`, Supabase sync).
+- **Résumé tailor** reads full job text (`descFull`); stronger ATS edge function (write→critique→revise).
+- **WHOIS domain-age screening** + `scam_blocklist_autogen.txt` growth from young-domain scam rows.
+- **Auto-prune** long-empty feeds via `scripts/auto_prune_feeds.py` + weekly `source-health.yml`.
+- **AI-first operator loop** — monitors label `auto-fix`; Claude repair + auto-merge for safe code paths.
+- **More source enrichment** — Greenhouse `?content=true`, Workday/SmartRecruiters/NEOGOV detail, City of Norwalk.
+- **CD on merge** — `scan.yml` also runs on every push to `main` (not only the daily cron).
+
+### Shipped 2026-06-22 (Astro goth rebuild + audit closure — see `docs/HANDOFF.md`)
+
+- **Astro app** (`app/`) is the canonical PWA UI; goth/sparkle tokens, Rudy sayings, 5-tab shell.
+- **Follow-up done** + editable contacts + call script; filters/search in `AppState` + Supabase profile blob.
+- **Magic link** sign-in; passkey/Face ID wired; **health.yml** checks `"Jobs for you"`.
+- **Leverage UX:** undo apply/hide, scroll restore per tab, SW update toast, offline banner, pull-to-refresh, iOS install coach, stale feed banner, tailor download.
+- **Companion renamed to Rudy** in edge function prompt (UI already said Rudy).
+
 ## Planned / next
 
-- **USAJobs** key (still pending — always employer-stated pay; free at developer.usajobs.gov). Remaining providers also **unlock WHOIS domain-age scam-checking** (Adzuna only exposes a JS redirect, so the employer domain isn't reachable from it).
 - **Resend SMTP** for reliable password-reset + magic-link email (today's default Supabase mailer is spam-prone). Then "Confirm email" could go back ON.
 - **Google OAuth** (optional — needs a Google Cloud client; the button auto-appears once enabled). Apple intentionally skipped ($99/yr).
-- **Recover MercyOne/Hy-Vee/national-tenant sources via better parsing** (they have real metro jobs; the parser couldn't isolate them from national noise — see the rejected list in `providers.py`).
+- **Web Push** for follow-ups when app closed (especially iOS PWA limits on `Notification` alone).
+- **Passkeys** — enable in Supabase dashboard; verify on Lilly's iPhone after one password sign-in.
+- **Recover MercyOne/Hy-Vee/national-tenant sources** via better parsing (see rejected list in `providers.py`).
 - Malwarebytes reputation was tested and returns "unknown" for job/ATS domains (sparse coverage) — not used.
 - Figma design file: https://www.figma.com/design/HxvPka9GtLJYBJpHQwY0M7 (the live app captured for iteration).
+
+**Handoff doc:** `docs/HANDOFF.md` — session summary, verify steps, PR checklist.

@@ -38,8 +38,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
+import domain_screen
 import providers
 
 # Windows-safe console output (avoid cp1252 crashes); keep print() text ASCII.
@@ -199,6 +200,20 @@ TRUSTED_EMPLOYER_GROUPS = {
     ],
 }
 TRUSTED_EMPLOYER_HINTS = [h for hints in TRUSTED_EMPLOYER_GROUPS.values() for h in hints]
+
+
+def _trusted_rx(hints):
+    """Compile hints into a word-bounded matcher. A substring match (`'ups' in
+    'startups'`) wrongly trusts junk names like 'Quick Startups Staffing' or
+    'Marshalling Logistics' ('marsh'), which then rescues them from scam signals
+    and floats them to the top — a real hole for a scam-targeted user. Word
+    boundaries keep every legitimate hit ('CVS Health', 'State of Iowa') while
+    refusing accidental substrings."""
+    return re.compile("|".join(r"\b" + re.escape(h) + r"\b" for h in hints), re.IGNORECASE)
+
+
+_TRUSTED_EMPLOYER_RX = _trusted_rx(TRUSTED_EMPLOYER_HINTS)
+_TRUSTED_GROUP_RX = {label: _trusted_rx(hints) for label, hints in TRUSTED_EMPLOYER_GROUPS.items()}
 
 # Local jobs must be in Polk or Dallas County. Adzuna locations are city-based,
 # so this is an allowlist of every city/CDP in the two counties; a local posting
@@ -408,10 +423,15 @@ BLOCKLIST = []
 
 
 def load_blocklist(path="scam_blocklist.txt"):
+    """Manual blocklist plus autogen file (WHOIS-young domains from live scans)."""
     items = []
-    if os.path.exists(path):
+    base, _ = os.path.splitext(path)
+    autogen = base + "_autogen.txt"
+    for bl_path in (path, autogen):
+        if not os.path.exists(bl_path):
+            continue
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(bl_path, encoding="utf-8") as fh:
                 for line in fh:
                     line = line.strip()
                     if line and not line.startswith("#"):
@@ -582,9 +602,9 @@ def job_category(title):
 
 def trusted_reason(company):
     """Why an employer is on the trusted list ('Government', ...), or ''."""
-    c = (company or "").lower()
-    for label, hints in TRUSTED_EMPLOYER_GROUPS.items():
-        if any(h in c for h in hints):
+    c = company or ""
+    for label, rx in _TRUSTED_GROUP_RX.items():
+        if rx.search(c):
             return label
     return ""
 
@@ -678,8 +698,7 @@ def title_is_remote(job):
 
 
 def employer_is_trusted(company):
-    c = (company or "").lower()
-    return any(h in c for h in TRUSTED_EMPLOYER_HINTS)
+    return bool(_TRUSTED_EMPLOYER_RX.search(company or ""))
 
 
 def is_attainable(title):
@@ -708,7 +727,30 @@ def build_spam_index(rows):
     return index
 
 
-def scam_assessment(row, spam_index):
+# Apply links that point at personal inboxes or off-platform messengers are
+# scam-shaped — especially on remote listings where a spoofed brand is common.
+_SCAM_APPLY_HOST_HINTS = (
+    "gmail.com", "yahoo.com", "hotmail.com", "outlook.com", "proton.me",
+    "icloud.com", "aol.com",
+    "bit.ly", "t.co", "tinyurl.com", "goo.gl", "cutt.ly",
+    "telegram.", "whatsapp.", "t.me",
+)
+
+
+def _apply_url_is_suspicious(url):
+    """True when an apply URL routes to a personal inbox or link shortener."""
+    u = (url or "").lower()
+    if not u:
+        return False
+    try:
+        host = urllib.parse.urlparse(u).netloc.lower()
+    except ValueError:
+        return False
+    blob = host + u
+    return any(h in blob for h in _SCAM_APPLY_HOST_HINTS)
+
+
+def scam_assessment(row, spam_index, *, domain_cache=None):
     """
     Return {"level": "safe"|"suspect"|"scam", "reasons": [...]}.
     Designed to be CONSERVATIVE for a user who would fall for a scam: when in
@@ -760,24 +802,54 @@ def scam_assessment(row, spam_index):
     if not company.strip() or "not listed" in company.lower():
         reasons.append("no employer name")
 
+    # Personal-inbox / shortener apply links (remote spoof shape).
+    if remote and _apply_url_is_suspicious(row.get("url")):
+        reasons.append("apply link goes to a personal inbox or link-shortener")
+
+    # WHOIS domain age — direct employer apply URLs only (ATS hosts skipped).
+    if remote and not trusted:
+        host = row.get("_apply_host") or domain_screen.apply_host(row.get("url") or "")
+        if host and not domain_screen.is_trusted_apply_host(host) and not domain_screen.is_skipped_apply_host(host):
+            cache = domain_cache if domain_cache is not None else {}
+            age = row.get("_domain_age_days")
+            if age is None:
+                age = domain_screen.domain_age_days(host, cache)
+                row["_domain_age_days"] = age
+            if age is not None and age < domain_screen.MIN_DOMAIN_AGE_DAYS:
+                reasons.append(
+                    f"apply domain {host} registered {age} days ago "
+                    f"(under {domain_screen.MIN_DOMAIN_AGE_DAYS}d)"
+                )
+
     if reasons:
-        # Trusted employer can't rescue a hard description tell, but absent those,
-        # a known employer downgrades structural noise to safe.
+        # A trusted employer can't rescue a hard description tell. Absent those, a
+        # known LOCAL employer downgrades structural noise to safe — but a REMOTE
+        # posting never gets the trusted rescue: naming a trusted brand on a
+        # remote listing that ALSO shows a structural tell (cross-city spam, blank
+        # employer, financial-duty language) is the spoofed-brand shape, and a
+        # real trusted employer's entry-admin role is local. A clean remote role
+        # from a trusted name (no tells) still reaches the safe path below.
         hard = any("description mentions" in r or "scam-prone" in r for r in reasons)
         if hard:
             return {"level": "scam", "reasons": reasons}
-        if trusted:
+        if trusted and not remote:
             return {"level": "safe", "reasons": []}
         return {"level": "scam", "reasons": reasons}
 
-    # No explicit flags. Apply extra suspicion to remote + unknown employer.
-    if remote and not trusted:
-        # Unrealistic pay for entry remote admin is bait.
+    # No explicit flags. Remote postings get extra suspicion.
+    if remote:
+        # Unrealistic pay for entry remote admin is bait — even when the posting
+        # NAMES a trusted employer, because a real trusted employer's entry-admin
+        # role isn't a $30+/hr remote gig. A trusted name alone is easy to fake,
+        # so remote doesn't get the trusted rescue here (same spoofed-name logic
+        # as the financial-duty check above).
         if hourly is not None and hourly >= 30:
+            who = "spoofed trusted name" if trusted else "unknown employer"
             return {"level": "scam",
-                    "reasons": [f"remote, unknown employer, pay ${hourly:.0f}/hr is too good for entry admin"]}
-        return {"level": "suspect",
-                "reasons": ["remote role from an employer we couldn't recognize"]}
+                    "reasons": [f"remote, {who}, pay ${hourly:.0f}/hr is too good for entry admin"]}
+        if not trusted:
+            return {"level": "suspect",
+                    "reasons": ["remote role from an employer we couldn't recognize"]}
 
     return {"level": "safe", "reasons": []}
 
@@ -787,10 +859,12 @@ def salary_verdict(hourly_min, hourly_max, *, stated):
     SAFETY: providers *predict* pay when the employer didn't post it (Adzuna
     flags it; Jooble doesn't even say). A non-stated wage NEVER earns a number
     or a $19+ badge. Wage FLOOR test: the LOW end of a stated range must clear
-    $19 ("$16-$23" does not count)."""
-    floor = hourly_min if hourly_min is not None else hourly_max
+    $19 ("$16-$23" does not count). A max-ONLY range ("up to $25") has no known
+    low end, so it can never earn 'meets' — we will not claim a floor we can't
+    see (invariant #1)."""
+    floor = hourly_min                  # the $19+ claim rests on the LOW end only
     if floor is None or not stated:
-        return "unlisted"               # no pay, or only a guess
+        return "unlisted"               # no pay, only a guess, or max-only (no floor)
     if floor >= MIN_HOURLY:
         return "meets"
     return "below"
@@ -834,6 +908,20 @@ def normalize(job, source):
 # Collection
 # --------------------------------------------------------------------------
 
+def _passes_filters(r):
+    """The single keep/drop predicate for a normalized row. Shared by the live
+    (`collect`) and `--mock` (`collect_mock`) paths so the camera — which renders
+    the --mock build — exercises the exact gates that ship, including the
+    night-shift and US-only filters that the mock path used to skip."""
+    return (is_admin_title(r["title"])
+            and is_attainable(r["title"])
+            and not title_excluded(r["title"])
+            and not requires_degree(r)
+            and (is_remote_row(r) or is_day_shift(r))
+            and passes_us_filter(r)
+            and (r["source"] != "local" or commute_minutes(r["location"]) is not None))
+
+
 def collect(verbose=True):
     seen = {}
     def add(jobs, source):
@@ -867,14 +955,7 @@ def collect(verbose=True):
             seen[r["id"]] = r
 
     all_rows = list(seen.values())
-    rows = [r for r in all_rows
-            if is_admin_title(r["title"])
-            and is_attainable(r["title"])
-            and not title_excluded(r["title"])
-            and not requires_degree(r)
-            and (is_remote_row(r) or is_day_shift(r))
-            and passes_us_filter(r)
-            and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
+    rows = [r for r in all_rows if _passes_filters(r)]
     dropped = len(all_rows) - len(rows)
     if verbose and dropped:
         print(f"  (filtered out {dropped} non-admin / senior / skilled / degree / "
@@ -886,15 +967,21 @@ def collect(verbose=True):
 
 
 def dedupe_rows(rows):
-    """Adzuna re-publishes the same posting from multiple boards under different
-    IDs. Collapse rows with the same employer + title + location, keeping the
-    newest. Returns (deduped_rows, number_collapsed)."""
-    best = {}
+    """Collapse duplicate postings: same real apply URL, or same employer+title+location.
+
+    Adzuna re-publishes under different IDs; ATS rows often share one apply URL.
+    Returns (deduped_rows, number_collapsed)."""
+    best: dict[tuple, dict] = {}
     for r in rows:
-        key = (_norm_company(r["company"]), (r["title"] or "").lower().strip(),
-               (r["location"] or "").lower().strip())
+        url_key = domain_screen.normalize_apply_url(r.get("url") or "")
+        host = domain_screen.apply_host(r.get("url") or "")
+        if url_key and not domain_screen.is_skipped_apply_host(host):
+            key = ("url", url_key)
+        else:
+            key = ("cty", (_norm_company(r["company"]), (r["title"] or "").lower().strip(),
+                           (r["location"] or "").lower().strip()))
         cur = best.get(key)
-        if cur is None or (r["created"] or "") > (cur["created"] or ""):
+        if cur is None or (r.get("created") or "") > (cur.get("created") or ""):
             best[key] = r
     return list(best.values()), len(rows) - len(best)
 
@@ -949,12 +1036,15 @@ def write_csv(rows, path):
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh)
         w.writerow(["safety", "verdict", "title", "company", "location",
-                    "salary_hourly", "posted", "source", "scam_reasons", "url"])
+                    "salary_hourly", "posted", "source", "apply_host", "domain_age_days",
+                    "scam_reasons", "url"])
         for r in rows:
             sc = r.get("scam", {"level": "safe", "reasons": []})
             w.writerow([sc["level"], VERDICT_LABEL.get(r["verdict"], ("?", ""))[0],
                         r["title"], r["company"], r["location"], salary_text(r),
-                        r["created"], r["source"], "; ".join(sc["reasons"]), r["url"]])
+                        r["created"], r["source"],
+                        r.get("_apply_host") or "", r.get("_domain_age_days") or "",
+                        "; ".join(sc["reasons"]), r["url"]])
 
 
 # "Will train" — employer-stated phrases that mean a candidate without
@@ -976,6 +1066,75 @@ def will_train(description):
     return any(h in d for h in TRAIN_HINTS)
 
 
+# Employer-stated contact lines in a posting — extracted for one-tap follow-up.
+# Never guessed: only text that appears in the job description survives.
+_EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
+_PHONE_RE = re.compile(
+    # (?<!\d) stops a 10-digit slice being lifted out of a longer digit run
+    # (order numbers, IDs) and surfaced as a fake one-tap "Call" contact.
+    r"(?<!\d)(?:\+?1[-.\s]?)?(?:\((\d{3})\)|(\d{3}))[-.\s]?(\d{3})[-.\s]?(\d{4})\b"
+)
+_JUNK_EMAIL = re.compile(
+    r"(noreply|no-reply|donotreply|mailer-daemon|example\.com|sentry\.io|wixpress|"
+    r"facebook\.com|twitter\.com|linkedin\.com/feed)",
+    re.I,
+)
+_NAME_RE = re.compile(
+    r"(?:contact|call|ask for|speak with|hr contact|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)",
+    re.I,
+)
+
+
+def _plausible_contact_phone(digits: str) -> bool:
+    """Reject premium/fiction NANP ranges — only employer-stated real lines."""
+    if len(digits) != 10 or not digits.isdigit():
+        return False
+    area, prefix = digits[:3], digits[3:6]
+    if area in ("900", "976"):
+        return False
+    if area in ("211", "311", "411", "511", "611", "711", "811", "911"):
+        return False
+    # 555-01xx is reserved for fiction/examples in North America.
+    if prefix == "555" and digits[6:8] == "01":
+        return False
+    return True
+
+
+def extract_contact_hints(description: str) -> dict[str, str]:
+    """Pull phone/email/name from employer posting text when explicitly present."""
+    text = description or ""
+    phones: list[str] = []
+    seen_phones: set[str] = set()
+    for m in _PHONE_RE.finditer(text):
+        digits = re.sub(r"\D", "", m.group())
+        if len(digits) == 11 and digits.startswith("1"):
+            digits = digits[1:]
+        if len(digits) != 10 or digits in seen_phones or not _plausible_contact_phone(digits):
+            continue
+        seen_phones.add(digits)
+        phones.append(f"({digits[:3]}) {digits[3:6]}-{digits[6:]}")
+
+    emails: list[str] = []
+    seen_emails: set[str] = set()
+    for m in _EMAIL_RE.finditer(text):
+        em = m.group().strip().lower()
+        if _JUNK_EMAIL.search(em) or em in seen_emails:
+            continue
+        seen_emails.add(em)
+        emails.append(m.group().strip())
+
+    name = ""
+    nm = _NAME_RE.search(text)
+    if nm:
+        name = nm.group(1).strip()
+
+    return {
+        "contactPhone": phones[0] if phones else "",
+        "contactEmail": emails[0] if emails else "",
+        "contactName": name,
+    }
+
+
 def _jobs_payload(safe_rows):
     """Build the JSON list the front-end app renders."""
     jobs = []
@@ -990,6 +1149,8 @@ def _jobs_payload(safe_rows):
         # the content tuple as a last-resort distinct key.
         jid = r.get("id") or r.get("url") or "|".join(
             (r.get("title") or "", r.get("company") or "", r.get("location") or ""))
+        hints = extract_contact_hints(r.get("description") or "")
+        full_desc = (r.get("description") or "").strip()
         jobs.append({
             "id": str(jid),
             "title": r["title"],
@@ -1008,8 +1169,12 @@ def _jobs_payload(safe_rows):
             "category": job_category(r["title"]),
             "commute": "" if r["source"] == "remote" else commute_text(r["location"]),
             "commuteMin": None if r["source"] == "remote" else commute_minutes(r["location"]),
-            "about": snippet(r.get("description")),
-            "trains": will_train(r.get("description")),
+            "about": snippet(full_desc),
+            "descFull": full_desc[:6000],
+            "trains": will_train(full_desc),
+            "contactPhone": hints["contactPhone"],
+            "contactEmail": hints["contactEmail"],
+            "contactName": hints["contactName"],
         })
     return jobs
 
@@ -1167,6 +1332,33 @@ def _sentry_head(sentry_cfg):
         return ""
     dsn_js = json.dumps(sentry_cfg["dsn"])
     return SENTRY_CDN_TAG + "\n" + _SENTRY_INIT_TMPL.replace("__DSN__", dsn_js)
+
+
+def write_jobs_bundle(safe_rows, hidden_count, total_checked, web_dir, generated,
+                      contact="me", contact_phone="", portal_cfg=None):
+    """Emit static JSON the Astro front-end consumes (jobs + meta + public portal config)."""
+    os.makedirs(web_dir, exist_ok=True)
+    jobs_path = os.path.join(web_dir, "jobs.json")
+    meta_path = os.path.join(web_dir, "meta.json")
+    portal_path = os.path.join(web_dir, "portal.json")
+    jobs = _jobs_payload(safe_rows)
+    meta = {
+        "contact": contact,
+        "phone": contact_phone,
+        "generated": generated,
+        "hidden": hidden_count,
+        "total": total_checked,
+        "safe": len(safe_rows),
+    }
+    with open(jobs_path, "w", encoding="utf-8") as fh:
+        json.dump(jobs, fh, ensure_ascii=False)
+        fh.write("\n")
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump(meta, fh, ensure_ascii=False)
+        fh.write("\n")
+    with open(portal_path, "w", encoding="utf-8") as fh:
+        json.dump(portal_cfg or {}, fh, ensure_ascii=False)
+        fh.write("\n")
 
 
 def write_html(safe_rows, hidden_count, total_checked, path, generated,
@@ -1649,6 +1841,40 @@ header.bar{position:sticky;top:0;z-index:20;
 @keyframes burst{0%{opacity:1;transform:translate(0,0) scale(.6) rotate(0)}100%{opacity:0;transform:translate(var(--bx),var(--by)) scale(1.3) rotate(120deg)}}
 /* Snooze (Not today) */
 .act.snz.on{background:var(--surface);color:var(--green-d);border-color:rgba(192,132,252,.4)}
+/* Follow-up contact + alerts — action-first: one-tap call/email, typing optional */
+.followup{margin-top:10px;padding:12px 14px;background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.followup h4{margin:0 0 10px;font-size:15px;font-weight:700;color:var(--green-d);line-height:1.35}
+.followwho{margin:0 0 10px;font-size:14px;color:var(--ink2);line-height:1.4}
+.followhero{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 10px}
+.followcta{flex:1 1 calc(50% - 4px);display:inline-flex;align-items:center;justify-content:center;gap:8px;
+ min-height:52px;padding:12px 14px;border-radius:12px;font:inherit;font-size:16px;font-weight:800;
+ text-decoration:none;border:0;cursor:pointer;transition:.12s}
+.followcta.call{background:var(--green);color:#fff;box-shadow:var(--glow)}
+.followcta.mail{background:var(--card);color:var(--green-d);border:1.5px solid rgba(192,132,252,.45)}
+.followcta.paste{background:var(--card);color:var(--ink);border:1.5px dashed var(--line);flex:1 1 100%}
+.followcta:active{transform:scale(.97)}
+.followwhen{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 8px}
+.followwhenlbl{font-size:13px;font-weight:700;color:var(--ink2);margin-right:2px}
+.followchip{background:var(--card);border:1.5px solid var(--line);border-radius:999px;color:var(--ink2);
+ font:inherit;font-size:13px;font-weight:700;padding:8px 12px;min-height:40px;cursor:pointer}
+.followchip.on{background:var(--green-soft);border-color:var(--green);color:var(--green-d)}
+.followedit{margin-top:6px}
+.followedit summary{cursor:pointer;font-weight:700;font-size:14px;color:var(--green-d);list-style-position:inside}
+.followfld{width:100%;margin:8px 0 0;font:inherit;font-size:16px;padding:12px;border-radius:10px;
+ border:1.5px solid var(--line);background:var(--card);color:var(--ink)}
+.followfld:focus{outline:none;border-color:var(--green)}
+.followrow{display:flex;flex-wrap:wrap;gap:8px;margin-top:10px}
+.followrow .act{flex:1 1 auto;min-width:120px}
+.followduecard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:8px 0}
+.followduecard .title{font-size:16px;margin:0 0 2px}
+.followduecard .co{font-size:14px;color:var(--ink2);margin:0 0 8px}
+.followalert,.followbanner{background:rgba(192,132,252,.12);border:1px solid rgba(192,132,252,.35);
+ color:var(--green-d);border-radius:12px;padding:12px 14px;margin:10px 0;font-size:15px;line-height:1.45}
+.followalert b,.followbanner b{color:#f3ecff}
+.followbanner{cursor:pointer}
+.tab{position:relative}
+.tab .badge{position:absolute;top:4px;left:58%;min-width:17px;height:17px;padding:0 5px;border-radius:999px;
+ background:var(--green);color:#fff;font-size:10px;font-weight:800;line-height:17px;text-align:center}
 /* Call script */
 .script{margin-top:9px}
 .script summary{cursor:pointer;font-weight:700;color:var(--green-d);font-size:14px;list-style-position:inside}
@@ -1700,6 +1926,8 @@ header.bar{position:sticky;top:0;z-index:20;
   </header>
 
   <div class="stale" id="stale" hidden></div>
+  <div class="followbanner" id="followbanner" hidden role="button" tabindex="0"
+    aria-label="Open follow-up reminders"></div>
 
   <!-- Full-screen auth modal (all modern sign-in methods) -->
   <div class="authov" id="authmodal" hidden>
@@ -1786,6 +2014,8 @@ header.bar{position:sticky;top:0;z-index:20;
       <h2>My applications</h2>
       <p class="weekline" id="weekline"></p>
     </div>
+    <div class="followalert" id="followalert" hidden></div>
+    <button class="act" id="notifybtn" type="button" hidden>Turn on phone reminders for follow-ups</button>
     <div class="logbtns">
       <button class="act" id="printlog">Print my work-search log</button>
       <button class="act" id="copylog">Copy as text</button>
@@ -1991,6 +2221,10 @@ header.bar{position:sticky;top:0;z-index:20;
     <details class="faq"><summary>How does the work-search log work?</summary>
       <p>When you mark a job Applied, it's saved with the date automatically. The
       <b>My apps</b> tab can print or copy your weekly list for your Iowa unemployment claim.</p></details>
+    <details class="faq"><summary>How do follow-up reminders work?</summary>
+      <p>When you apply, we pull any phone or email from the job posting automatically.
+      You get big <b>Call</b> and <b>Email</b> buttons — or tap <b>Paste</b> if they texted you
+      a number. <b>My apps</b> badges you when it&rsquo;s time to follow up.</p></details>
     <details class="faq"><summary>Is my information private?</summary>
       <p>Everything stays on your phone unless you choose to sign in. Signing in saves your
       jobs, notes and chats to a private account so a new phone doesn&rsquo;t lose them. It&rsquo;s
@@ -2056,6 +2290,195 @@ function daysSince(d){ const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
 function ago(d){ const n=daysSince(d); if(n==null) return "";
   if(n===0) return "today"; if(n===1) return "yesterday";
   if(n<14) return n+" days ago"; return Math.round(n/7)+" weeks ago"; }
+function addDaysISO(d, n){
+  const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
+  if(isNaN(t)) return today();
+  return new Date(t+n*864e5).toISOString().slice(0,10);
+}
+function daysUntil(d){
+  const t=Date.parse(String(d).slice(0,10)+"T00:00:00");
+  if(isNaN(t)) return null;
+  return Math.ceil((t-Date.now())/864e5);
+}
+function safeTel(u){ return String(u||"").replace(/[^0-9+]/g,""); }
+function notifPerm(){ return typeof Notification!=="undefined" ? Notification.permission : "denied"; }
+function fmtPhone(d){
+  var t=safeTel(d).replace(/^\+?1/,"").slice(-10);
+  if(t.length!==10) return String(d||"").trim();
+  return "("+t.slice(0,3)+") "+t.slice(3,6)+"-"+t.slice(6);
+}
+function isPlausiblePhone(d){
+  var t=safeTel(d).replace(/^\+?1/,"").slice(-10);
+  if(t.length!==10) return false;
+  var area=t.slice(0,3), prefix=t.slice(3,6);
+  if(area==="900"||area==="976") return false;
+  if(prefix==="555"&&t.slice(6,8)==="01") return false;
+  return true;
+}
+function safeMail(u){
+  const m=String(u||"").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m) ? m : "";
+}
+function parseContactPaste(text){
+  var out={name:"",phone:"",email:""};
+  if(!text) return out;
+  var mail=text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  if(mail && !/noreply|no-reply|donotreply/i.test(mail[0])) out.email=mail[0];
+  var ph=text.match(/(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]?\d{3}[-.\s]?\d{4}/);
+  if(ph && isPlausiblePhone(ph[0])) out.phone=fmtPhone(ph[0]);
+  var nm=text.match(/(?:contact|call|ask for|speak with|recruiter)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i);
+  if(nm) out.name=nm[1];
+  return out;
+}
+function jobContactHints(j){
+  if(!j) return {name:"",phone:"",email:""};
+  return {name:j.contactName||"", phone:j.contactPhone||"", email:j.contactEmail||""};
+}
+function effectiveContact(id, j){
+  var fu=state.followUps[id]||{}, hints=jobContactHints(j);
+  return {
+    name:(fu.name||"").trim()||hints.name,
+    phone:(fu.phone||"").trim()||hints.phone,
+    email:(fu.email||"").trim()||hints.email,
+  };
+}
+function ensureFollowUp(id){
+  if(!state.followUps[id]){
+    const appliedOn=state.applied[id]||today();
+    state.followUps[id]={name:"",phone:"",email:"",on:addDaysISO(appliedOn,5),done:false};
+  }
+  return state.followUps[id];
+}
+function seedFollowUpFromJob(id, j){
+  var fu=ensureFollowUp(id), hints=jobContactHints(j);
+  if(!fu.phone && hints.phone) fu.phone=hints.phone;
+  if(!fu.email && hints.email) fu.email=hints.email;
+  if(!fu.name && hints.name) fu.name=hints.name;
+  return fu;
+}
+function followActionHTML(id, c, opts){
+  opts=opts||{};
+  var tel=isPlausiblePhone(c.phone)?safeTel(c.phone):"", mail=safeMail(c.email), parts=[];
+  if(tel){
+    parts.push('<a class="followcta call" href="tel:'+esc(tel)+'"'+
+      (opts.track?' data-act="fuopen" data-kind="call" data-id="'+esc(id)+'"':'')+'>'+
+      IC.phone+'Call '+esc(c.name||fmtPhone(c.phone))+'</a>');
+  }
+  if(mail){
+    var subj=opts.title?("Follow-up: "+opts.title):"Job application follow-up";
+    parts.push('<a class="followcta mail" href="mailto:'+esc(mail)+'?subject='+encodeURIComponent(subj)+'"'+
+      (opts.track?' data-act="fuopen" data-kind="mail" data-id="'+esc(id)+'"':'')+'>'+
+      IC.mail+'Email'+(c.name?(" "+esc(c.name)):"")+'</a>');
+  }
+  if(!parts.length){
+    parts.push('<button type="button" class="followcta paste" data-act="fupaste" data-id="'+esc(id)+'">'+
+      IC.paste+'Paste phone or email</button>');
+  }
+  return parts.join("");
+}
+function followWhenHTML(id){
+  var fu=ensureFollowUp(id), base=state.applied[id]||today();
+  var chips=[[3,"3 days"],[5,"5 days"],[7,"1 week"]];
+  return '<div class="followwhen"><span class="followwhenlbl">Remind me</span>'+
+    chips.map(function(ch){
+      var on=addDaysISO(base, ch[0]);
+      return '<button type="button" class="followchip'+(fu.on===on?" on":"")+'" data-act="fuwhen" data-id="'+
+        esc(id)+'" data-days="'+ch[0]+'">'+ch[1]+'</button>';
+    }).join("")+
+    '<input class="followfld" style="flex:1 1 140px;max-width:170px;margin:0" data-fu-on="'+esc(id)+'" type="date" aria-label="Follow-up date" value="'+esc(fu.on||"")+'">'+
+    '</div>';
+}
+function followUpBlockHTML(id, j){
+  if(!(id in state.applied)) return "";
+  seedFollowUpFromJob(id, j);
+  const fu=ensureFollowUp(id), c=effectiveContact(id, j);
+  const due=fu.on && !fu.done && fu.on<=today();
+  const soon=fu.on && !fu.done && fu.on>today() && daysUntil(fu.on)!=null && daysUntil(fu.on)<=3;
+  const who=c.name ? esc(c.name)+(j&&j.company?" at "+esc(j.company):"") :
+    (j&&j.company ? esc(j.company)+" HR" : "Who to contact");
+  return '<div class="followup">'+
+    '<h4>'+(due?'&#9888; Follow up today':(soon?'Follow up '+esc(ago(fu.on)||fu.on):'Follow-up'))+'</h4>'+
+    (c.phone||c.email?'<p class="followwho">'+who+'</p>':'')+
+    '<div class="followhero">'+followActionHTML(id, c, {track:true, title:j&&j.title})+'</div>'+
+    followWhenHTML(id)+
+    '<details class="followedit"'+(openFollowEdit.has(id)?' open':'')+'>'+
+      '<summary>Add or change contact</summary>'+
+      '<input class="followfld" data-fu-name="'+esc(id)+'" placeholder="Name (recruiter, HR…)" value="'+esc(fu.name)+'">'+
+      '<input class="followfld" data-fu-phone="'+esc(id)+'" type="tel" inputmode="tel" autocomplete="tel" placeholder="Phone" value="'+esc(fu.phone)+'">'+
+      '<input class="followfld" data-fu-email="'+esc(id)+'" type="email" inputmode="email" autocomplete="email" placeholder="Email" value="'+esc(fu.email)+'">'+
+      '<button type="button" class="followcta paste" data-act="fupaste" data-id="'+esc(id)+'">'+IC.paste+'Paste from clipboard</button>'+
+    '</details>'+
+    '<div class="followrow">'+
+      (j?callScriptHTML(j, state.applied[id]||fu.on):'')+
+      (fu.done
+        ?'<button class="act" data-act="fuedit" data-id="'+esc(id)+'">'+IC.pen+'Edit follow-up</button>'
+        :'<button class="act applied on" data-act="fudone" data-id="'+esc(id)+'">'+IC.check+'I followed up</button>')+
+    '</div></div>';
+}
+function followUpsDue(){
+  return appliedEntries().filter(function(r){
+    const fu=state.followUps[r.id];
+    return fu && !fu.done && fu.on && fu.on<=today();
+  });
+}
+function renderFollowAlerts(){
+  const due=followUpsDue();
+  const n=due.length;
+  const alertEl=document.getElementById("followalert");
+  const banner=document.getElementById("followbanner");
+  const notifyBtn=document.getElementById("notifybtn");
+  if(alertEl){
+    if(n){
+      alertEl.hidden=false;
+      alertEl.innerHTML='<b>'+n+(n===1?" follow-up is":" follow-ups are")+' due</b> — tap to call or email.'+
+        due.slice(0,3).map(function(r){
+          var j=jobById.get(r.id), c=effectiveContact(r.id, j);
+          return '<div class="followduecard">'+
+            '<div class="title">'+esc(r.title)+'</div>'+
+            '<div class="co">'+esc(r.company)+'</div>'+
+            '<div class="followhero">'+followActionHTML(r.id, c, {title:r.title})+'</div>'+
+            '</div>';
+        }).join("");
+    } else { alertEl.hidden=true; alertEl.innerHTML=""; }
+  }
+  if(banner){
+    if(n){
+      banner.hidden=false;
+      banner.innerHTML='<b>'+n+(n===1?" follow-up":" follow-ups")+' ready</b> — tap to see who to contact.';
+    } else { banner.hidden=true; banner.innerHTML=""; }
+  }
+  if(notifyBtn){
+    const canNotify=(typeof Notification!=="undefined");
+    notifyBtn.hidden=!canNotify || notifPerm()==="granted" || !Object.keys(state.applied).length;
+    if(!notifyBtn.hidden) notifyBtn.textContent=
+      notifPerm()==="denied" ? "Reminders blocked — enable in phone settings"
+      : "Turn on phone reminders for follow-ups";
+    notifyBtn.disabled=canNotify && notifPerm()==="denied";
+  }
+  const tab=document.getElementById("nav-apps");
+  if(tab){
+    let badge=tab.querySelector(".badge");
+    if(n){
+      if(!badge){ badge=document.createElement("span"); badge.className="badge"; tab.appendChild(badge); }
+      badge.textContent=n>9?"9+":String(n); badge.hidden=false;
+    } else if(badge) badge.hidden=true;
+  }
+}
+function maybeNotifyFollowUps(){
+  if(typeof Notification==="undefined" || notifPerm()!=="granted") return;
+  const due=followUpsDue();
+  if(!due.length || state.followAlertDay===today()) return;
+  state.followAlertDay=today(); persist();
+  due.slice(0,3).forEach(function(r, i){
+    const fu=state.followUps[r.id]||{};
+    setTimeout(function(){
+      try{
+        new Notification("Time to follow up",{body:r.title+(fu.name?" — "+fu.name:""),
+          tag:"followup-"+r.id, icon:"./icon-192.png"});
+      }catch(e){}
+    }, i*400);
+  });
+}
 
 let state = load();
 // applied used to be an array of ids; it's now a map id -> date applied.
@@ -2070,12 +2493,15 @@ state.savedAt = state.savedAt || {};         // id -> date saved (for gentle "st
 state.resume  = state.resume  || "";         // her base résumé text (this device only; fed to the tailor)
 state.appliedLog = state.appliedLog || {};   // id -> {t,c,d,u} captured at apply time, so the
                                              // work-search log survives jobs leaving the feed
+state.followUps = state.followUps || {};     // id -> {name,phone,email,on,done} follow-up tracker
+state.followAlertDay = state.followAlertDay || "";  // last day we fired daily follow-up alerts
 state.profile = state.profile || {};         // quiz answers -> "For you" feed boost
 state.maxCommute = state.maxCommute || "";   // "" = any distance; else a minutes cap ("20"/"30"/"45")
 const prevSeen = new Set(state.seen||[]);
 function persist(){ save({applied:state.applied, saved:[...state.saved], hidden:[...state.hidden],
   notes:state.notes, seen:JOBS.map(j=>j.id), coachOff:state.coachOff,
-  snooze:state.snooze, savedAt:state.savedAt, appliedLog:state.appliedLog, profile:state.profile,
+  snooze:state.snooze, savedAt:state.savedAt, appliedLog:state.appliedLog, followUps:state.followUps,
+  followAlertDay:state.followAlertDay, profile:state.profile,
   resume:state.resume, maxCommute:state.maxCommute}); }
 // Ledger backfill: any applied job still in today's feed gets its details kept.
 JOBS.forEach(j=>{ if(state.applied[j.id] && !state.appliedLog[j.id])
@@ -2090,6 +2516,7 @@ const newCount = Object.keys(isNew).length;
 persist();
 
 const openNotes = new Set();
+const openFollowEdit = new Set();
 let portalSync = null;   // set by the portal IIFE when sign-in is configured; null otherwise
 let filters = { q:"", cat:"", pay:false, inperson:false, remote:false, known:false,
                 saved:false, applied:false, showHidden:false, trains:false,
@@ -2121,6 +2548,9 @@ const IC = {
   share:'<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 12v8h14v-8"/></svg>',
   lock:'<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/></svg>',
   spark:'<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 2l1.6 6.4L20 10l-6.4 1.6L12 18l-1.6-6.4L4 10l6.4-1.6z"/></svg>',
+  phone:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M6.5 4h3l1.5 4-2 1.5a11 11 0 005 5L17 12.5l4 1.5v3A2 2 0 0119 19a15 15 0 01-6-2 15 15 0 01-4-4 15 15 0 01-2-6 2 2 0 012-3z"/></svg>',
+  mail:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
+  paste:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><rect x="8" y="2" width="12" height="16" rx="2"/><path d="M4 6a2 2 0 012-2h8v16H6a2 2 0 01-2-2z"/></svg>',
 };
 
 function esc(s){return String(s==null?"":s).replace(/[&<>"'`]/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;","`":"&#96;"}[c];});}
@@ -2200,6 +2630,8 @@ function render(){
   list.forEach(function(j,i){ wrap.appendChild(cardEl(j,i)); });
   updateFilterCount();
   renderPicks(); renderApps(); renderCorner();
+  renderFollowAlerts();
+  maybeNotifyFollowUps();
 }
 
 // Collapsible filter panel: collapsed by default so jobs are visible immediately;
@@ -2280,8 +2712,9 @@ function cardEl(j, i){
       (navigator.share?'<button class="act" data-act="share" data-id="'+esc(j.id)+'">'+IC.share+'Share</button>':'')+
     '</div>'+
     '<div class="notes'+(openNotes.has(j.id)?' open':'')+'">'+
-      '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — who you talked to, when to follow up">'+esc(note)+'</textarea>'+
+      '<textarea data-note="'+esc(j.id)+'" placeholder="Your notes — interview times, what they said">'+esc(note)+'</textarea>'+
     '</div>'+
+    (applied ? followUpBlockHTML(j.id, j) : '')+
     // Signed-out: the actions above are hidden by CSS and THIS is the only
     // button — one tap opens the free sign-up. No freebies without an account.
     '<button class="lockcta" data-act="signup">'+IC.lock+'Create a free account to apply &amp; save</button>';
@@ -2336,6 +2769,7 @@ function markApplied(id, el){
     (jobById.get(id) ? {t:jobById.get(id).title, c:jobById.get(id).company,
                         d:today(), u:jobById.get(id).url} : {t:"(job)", c:"", d:today(), u:""});
   state.appliedLog[id].d = state.applied[id];
+  seedFollowUpFromJob(id, jobById.get(id));
   // Full date+time stamp captured the moment she logs it — for unemployment/court
   // documentation. (It records when the activity was logged in the app.)
   state.appliedLog[id].ts = new Date().toISOString();
@@ -2446,9 +2880,15 @@ function stopSpook(){
   var fill=document.getElementById("spookfill"); if(fill) fill.style.width="100%";  // snap to done
 }
 
-/* Step 1: open the modal on an intro panel that lets her (optionally) paste the
-   FULL job description. We only have a snippet from the listing; the full posting
-   makes the tailoring much sharper. It's optional — she can tap straight through. */
+/* Résumé tailoring — uses the fullest posting text we have (scanner-pulled
+   descFull beats snippet; her paste beats both when she adds more). */
+function tailorJobText(j, pasted){
+  var full=String((j&&j.descFull)||"").trim();
+  var snip=(((j&&j.about)||"")+" "+((j&&j.title)||"")).trim();
+  if(pasted && pasted.length>=40) return pasted;
+  if(full.length>=200) return full;
+  return snip;
+}
 function tailorJob(id){
   var j=jobById.get(id); if(!j) return;
   var resume=(state.resume||"").trim();
@@ -2464,31 +2904,36 @@ function tailorJob(id){
     return;
   }
   window.__tailorJobId = id;
+  var full=(j.descFull||"").trim();
+  if(full.length>=200){
+    openTailorModal();
+    setTailorBody('<p class="sub">Using the full posting for <b>'+esc(j.title)+'</b> at '+esc(j.company)+'&hellip;</p>');
+    runTailor("");
+    return;
+  }
   openTailorModal();
   setTailorBody(
     '<p class="sub">For <b>'+esc(j.title)+'</b> at '+esc(j.company)+'.</p>'+
     '<div class="tailorsec">'+
       '<h3>Paste the full job description</h3>'+
-      '<p class="tailorhint">Optional, but it makes the match much better. Open the posting, '+
-        'copy the whole description, and paste it here. Leave it blank and I&rsquo;ll use what we already have.</p>'+
-      '<textarea class="authfield tailorpaste" id="tailorjd" aria-label="Full job description (optional)" '+
-        'placeholder="Paste the job description here (optional)&hellip;"></textarea>'+
+      '<p class="tailorhint">This listing only gave us a short preview. Open the apply page, '+
+        'copy the whole description, and paste it here for a much sharper match.</p>'+
+      '<textarea class="authfield tailorpaste" id="tailorjd" aria-label="Full job description" '+
+        'placeholder="Paste the full job description here&hellip;"></textarea>'+
     '</div>'+
     '<button class="authprimary" data-act="runtailor">Tailor my résumé <span class="sparkle">&#10022;</span></button>'+
     '<p class="authnote">Built only from what you wrote — never adds anything you didn&rsquo;t.</p>'
   );
   var ta=document.getElementById("tailorjd"); if(ta) ta.focus();
 }
-/* Step 2: fire the engine. Prefer the pasted full description; fall back to the
-   listing snippet. stopSpook in .finally so the loader timer can never leak. */
-function runTailor(){
+function runTailor(pastedOverride){
   var id=window.__tailorJobId;
   var j=jobById.get(id); if(!j) return;
   var resume=(state.resume||"").trim();
   var ta=document.getElementById("tailorjd");
-  var pasted=ta ? (ta.value||"").trim() : "";
-  var snippet=((j.about||"")+" "+(j.title||"")).trim();
-  var jobText = pasted.length>=40 ? pasted : snippet;  // her full paste wins
+  var pasted=(typeof pastedOverride==="string") ? pastedOverride
+    : (ta ? (ta.value||"").trim() : "");
+  var jobText=tailorJobText(j, pasted);
   startSpook(j.title);
   Promise.resolve().then(function(){
     return window.__tailorInvoke({ resume:resume, jobTitle:j.title, company:j.company, jobText:jobText });
@@ -2552,10 +2997,24 @@ async function _docxToText(buf){
   return _docxXmlToText(new TextDecoder().decode(xmlBytes));
 }
 var _pdfjs = null;
+// pdf.js is the one CDN dependency loaded by dynamic import(), which (unlike a
+// <script integrity>) can't carry an SRI attribute. We pin it anyway: fetch the
+// bytes with the native integrity option (browser verifies SHA-384 and rejects
+// a tampered bundle), then import / run from a same-origin blob URL. Mirrors how
+// supabase-js and Sentry are SRI-pinned. Hashes are verified by verify/pdfjs_sri.py.
+var PDFJS_VER = "4.7.76";
+var PDFJS_SRI = "sha384-qgyx6GmMWoI003drRr62DU41/67b3n7M2G0EXu2WhaOsBqONtHyay9Vw4aIivyOX";
+var PDFJS_WORKER_SRI = "sha384-ATeT9bCTw1LFxZRSxFHBli/+35MHo/faKiXDlvCvxK2ENYquq3OIA9RkrOW44G/L";
+async function _verifiedBlobUrl(url, sri){
+  var resp = await fetch(url, { integrity: sri, mode: "cors", credentials: "omit" });
+  if(!resp.ok) throw new Error("Couldn't load the PDF reader.");
+  return URL.createObjectURL(await resp.blob());  // throws if the SHA-384 doesn't match
+}
 async function _loadPdfjs(){
   if(_pdfjs) return _pdfjs;
-  var lib = await import("https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.min.mjs");
-  lib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.7.76/build/pdf.worker.min.mjs";
+  var base = "https://cdn.jsdelivr.net/npm/pdfjs-dist@" + PDFJS_VER + "/build/";
+  var lib = await import(await _verifiedBlobUrl(base + "pdf.min.mjs", PDFJS_SRI));
+  lib.GlobalWorkerOptions.workerSrc = await _verifiedBlobUrl(base + "pdf.worker.min.mjs", PDFJS_WORKER_SRI);
   _pdfjs = lib; return lib;
 }
 async function _pdfToText(buf){
@@ -2613,7 +3072,7 @@ document.querySelector(".app").addEventListener("click",(e)=>{
   }
   e.preventDefault();
   if(act==="applied"){
-    if(state.applied[id]){ delete state.applied[id]; }
+    if(state.applied[id]){ delete state.applied[id]; delete state.followUps[id]; }
     else { state.applied[id]=today(); markApplied(id, t); }
   }
   if(act==="saved"){ if(state.saved.has(id)){ state.saved.delete(id); delete state.savedAt[id]; }
@@ -2634,6 +3093,30 @@ document.querySelector(".app").addEventListener("click",(e)=>{
     open ? openNotes.add(id) : openNotes.delete(id);
     if(open) box.querySelector("textarea").focus();
     return;                       // no re-render; keep the textarea focused
+  }
+  if(act==="fudone"){
+    ensureFollowUp(id).done=true; persist();
+    if(portalSync) portalSync.followUps();
+    render(); return;
+  }
+  if(act==="fuedit"){
+    ensureFollowUp(id).done=false; openFollowEdit.add(id); persist();
+    if(portalSync) portalSync.followUps();
+    render(); return;
+  }
+  if(act==="fupaste"){
+    pasteFollowContact(id); return;
+  }
+  if(act==="fuwhen"){
+    var days=+(t.getAttribute("data-days")||5);
+    var fu=ensureFollowUp(id);
+    fu.on=addDaysISO(state.applied[id]||today(), days);
+    persist();
+    if(portalSync) portalSync.followUps();
+    render(); return;
+  }
+  if(act==="fuopen"){
+    openFollowEdit.add(id); persist(); return;
   }
   if(act==="share"){
     const j=jobById.get(id);
@@ -2671,10 +3154,51 @@ document.querySelector(".app").addEventListener("click",(e)=>{
   persist(); render();
 });
 
+function pasteFollowContact(id){
+  function apply(text){
+    var parsed=parseContactPaste(text||"");
+    var fu=ensureFollowUp(id), got=false;
+    if(parsed.phone){ fu.phone=parsed.phone; got=true; }
+    if(parsed.email){ fu.email=parsed.email; got=true; }
+    if(parsed.name){ fu.name=parsed.name; got=true; }
+    if(!got){ showToast("Couldn't find a phone or email — try typing it in."); openFollowEdit.add(id); render(); return; }
+    openFollowEdit.add(id); persist();
+    if(portalSync) portalSync.followUps();
+    showToast("Got it — tap Call or Email above ✦");
+    render();
+  }
+  if(navigator.clipboard && navigator.clipboard.readText){
+    navigator.clipboard.readText().then(apply).catch(function(){
+      showToast("Paste didn't work — tap Add or change contact and type it in.");
+      openFollowEdit.add(id); render();
+    });
+  } else {
+    var typed=window.prompt("Paste the phone number or email they gave you:", "");
+    if(typed) apply(typed);
+  }
+}
+
 // Auto-save notes as they type (no re-render, so the keyboard stays up).
+const followTimers = {};
 document.querySelector(".app").addEventListener("input",(e)=>{
-  const t=e.target.closest("[data-note]"); if(!t) return;
-  const id=t.getAttribute("data-note");
+  const t=e.target;
+  const fuId=t.getAttribute("data-fu-name")||t.getAttribute("data-fu-phone")||
+             t.getAttribute("data-fu-email")||t.getAttribute("data-fu-on");
+  if(fuId){
+    const fu=ensureFollowUp(fuId);
+    if(t.hasAttribute("data-fu-name")) fu.name=t.value;
+    if(t.hasAttribute("data-fu-phone")) fu.phone=t.value;
+    if(t.hasAttribute("data-fu-email")) fu.email=t.value;
+    if(t.hasAttribute("data-fu-on")) fu.on=t.value;
+    persist();
+    clearTimeout(followTimers[fuId]);
+    followTimers[fuId]=setTimeout(function(){
+      if(portalSync) portalSync.followUps();
+      renderFollowAlerts();
+    }, 700);
+    return;
+  }
+  const id=t.getAttribute("data-note"); if(!id) return;
   const v=t.value;
   if(v.trim()) state.notes[id]=v; else delete state.notes[id];
   persist();
@@ -2693,6 +3217,31 @@ document.getElementById("search").addEventListener("input",(e)=>{
   if(META.phone){ b.href="tel:"+META.phone.replace(/[^0-9+]/g,""); b.textContent="Something feels wrong? Call "+who; }
   else { b.removeAttribute("href"); b.style.cursor="default"; b.textContent="Something feels wrong? Ask "+who+" before you reply"; }
 })();
+
+(function followBanner(){
+  const b=document.getElementById("followbanner"); if(!b) return;
+  function go(){ setView("apps"); }
+  b.addEventListener("click", go);
+  b.addEventListener("keydown", function(e){
+    if(e.key==="Enter"||e.key===" "){ e.preventDefault(); go(); }
+  });
+})();
+
+(function followNotifyBtn(){
+  const btn=document.getElementById("notifybtn"); if(!btn) return;
+  btn.addEventListener("click", function(){
+    if(typeof Notification==="undefined") return;
+    Notification.requestPermission().then(function(p){
+      if(p==="granted") showToast("Reminders on — we'll nudge you when it's time to follow up ✦");
+      else if(p==="denied") showToast("Blocked in phone settings — you can still see alerts in My apps.");
+      renderFollowAlerts(); maybeNotifyFollowUps();
+    });
+  });
+})();
+
+document.addEventListener("visibilitychange", function(){
+  if(document.visibilityState==="visible"){ renderFollowAlerts(); maybeNotifyFollowUps(); }
+});
 
 // Warn when the list itself is old (offline, or the daily scan stopped).
 (function staleBanner(){
@@ -2741,101 +3290,31 @@ window.addEventListener("appinstalled", function(){
 // Deterministic per-day hash — used by todaysPicks() to rotate which jobs lead
 // the Today view (stable for a given day so the list doesn't shuffle on every tap).
 function dayHash(){ const d=today(); let h=0; for(let i=0;i<d.length;i++) h=(h*31+d.charCodeAt(i))>>>0; return h; }
-// Words of affirmation — a LARGE pool in Daddy's voice. pickEnc() draws from a
+// Words of affirmation. pickEnc() draws from a
 // shuffled "bag" so every line shows once before any repeats (then reshuffles),
 // and the footer + greeting + each visit get a fresh one — never the same phrase
 // sitting there all day.
 const ENC_LINES = [
-  "Job ads are wish lists. If you can do half of it, apply — you're more qualified than you let yourself believe. — Daddy",
-  "You showed up today. That's the whole battle, and you won it. — Daddy",
-  "One application beats five you never send. Small is enough. I'm proud of you. — Daddy",
-  "“Pay not listed” isn't a no — it's just a question you get to ask. — Daddy",
-  "Rough day? The jobs will keep. Be as kind to yourself as I am to you. — Daddy",
-  "You are not behind. You're exactly where the next right step starts. — Daddy",
-  "Your worth was never up for hire. A job is something you do, not who you are. — Daddy",
-  "Send one. Just one. Then go rest knowing you moved the needle. — Daddy",
-  "A 'no' from one office is just a door pointing you to the right one. — Daddy",
-  "The bravest thing you'll do today is try. You've already got that in you. — Daddy",
-  "Nervous hands still fill out applications. Do it scared — that counts double. — Daddy",
-  "You don't have to feel ready. You just have to begin. I'm right here. — Daddy",
-  "Every screen you fill out is proof you didn't give up. That's everything. — Daddy",
-  "Slow progress is still progress. We're not racing anyone. — Daddy",
-  "I'd hire you in a heartbeat. The right employer will see what I see. — Daddy",
-  "Take the morning gently. The afternoon can hold one small step. — Daddy",
-  "You survived 100% of your hardest days. Today's no match for you. — Daddy",
-  "Rejection isn't a verdict on you. It's just traffic on the way there. — Daddy",
-  "Tidy beats perfect. Send the good-enough application and breathe. — Daddy",
-  "You are allowed to be proud of small wins. I sure am. — Daddy",
-  "The fact that you're still trying tells me everything about your heart. — Daddy",
-  "Rest is part of the work, not a break from it. Lie down guilt-free. — Daddy",
-  "One steady step a day adds up faster than you'd ever guess. — Daddy",
-  "You don't need to have it figured out. You just need to keep showing up. — Daddy",
-  "Whatever today holds, you won't face it alone. — Daddy",
-  "Courage isn't loud. Sometimes it's just opening the app again. — Daddy",
-  "Your past doesn't disqualify you. It made you someone who keeps going. — Daddy",
-  "Apply like someone who's already been believed in — because you have. — Daddy",
-  "The hard part is starting. You're stronger than the blank form. — Daddy",
-  "Good things are coming, and you're doing the work to meet them. — Daddy",
-  "You are not too much, and you are not too late. — Daddy",
-  "Every employer here was checked, so you're safe to just be yourself. — Daddy",
-  "Drink some water, take a breath, and tap one job. That's a full day's brave. — Daddy",
-  "I'm not proud of you because you applied. I'm proud of you, period. — Daddy",
-  "The version of you a year from now is cheering for this exact moment. — Daddy",
-  "You can do hard things gently. There's no prize for white-knuckling it. — Daddy",
-  "If today all you did was open this, that's a start — and starts matter. — Daddy",
-  "Confidence comes after you act, not before. So act, and let it catch up. — Daddy",
-  "You've got a steady, capable mind. Let an employer be lucky to find it. — Daddy",
-  "No experience? You have a lifetime of figuring things out. That's experience. — Daddy",
-  "The right job is looking for someone exactly like you. Help it find you. — Daddy",
-  "Be patient with yourself. Healing and job-hunting run on the same clock. — Daddy",
-  "You don't have to earn rest. But you've earned it anyway today. — Daddy",
-  "Tap one job before the doubt talks you out of it. Quick — I'll wait. — Daddy",
-  "Whatever the inner critic says, I outrank it. And I say you've got this. — Daddy",
-  "Some days 'enough' is just getting out of bed. That's a yes from me. — Daddy",
-  "You are building a life, one small honest step at a time. Keep building. — Daddy",
-  "Showing up imperfectly beats waiting to be perfect every single time. — Daddy",
-  "The work you put in today is a gift to the you of next month. — Daddy",
-  "You're not starting over. You're starting from experience. — Daddy",
-  "I believe in you on the days you can't, so lean on that and keep moving. — Daddy",
-  "A quiet day of trying is still a day you didn't quit. I see it. — Daddy",
-  "Worthy of the job, worthy of rest, worthy of good things. All of it. — Daddy",
-  "One foot, then the other. That's the whole secret. — Daddy",
-  "You handle more than you give yourself credit for. Give yourself credit. — Daddy",
-  "Send it before you're sure. Sure is overrated; brave is everything. — Daddy",
-  "The list felt long, so just take the top one. Done is better than perfect. — Daddy",
-  "Your name on an application is a small act of hope. I love seeing it. — Daddy",
-  "If it was easy you wouldn't need to be brave — and look, you are. — Daddy",
-  "Take up space. You belong in that interview chair. — Daddy",
-  "Progress you can't feel is still progress you're making. Trust it. — Daddy",
-  "You are doing better than the voice in your head is telling you. — Daddy",
-  "Today doesn't have to be a big day. It just has to be a kind one. — Daddy",
-  "Whatever happens with the search, you're still my greatest pride. — Daddy",
-  "The effort is yours to give; the outcome isn't yours to carry alone. — Daddy",
-  "One application is a complete success. Don't let 'more' steal that. — Daddy",
-  "Breathe in: I can try. Breathe out: that's enough. Now tap one. — Daddy",
-  "You've come further than you can see from where you're standing. — Daddy",
-  "Steady wins this. And steady is exactly what you are. — Daddy",
-  "There's no wrong pace for healing or hunting. Yours is the right one. — Daddy",
-  "I'd rather you send one with a calm heart than ten in a panic. — Daddy",
-  "The door you're looking for opens for the people who keep knocking. — Daddy",
-  "You are not a burden for needing time. You're a person, and you're mine. — Daddy",
-  "Small and consistent beats big and burned-out. Go small today. — Daddy",
-  "Each 'apply' is you betting on yourself. Smart bet. I'd take it. — Daddy",
-  "You don't have to be fearless. You just have to be willing. You are. — Daddy",
-  "The right people will be glad you walked in. Go let them. — Daddy",
-  "Give yourself the grace you'd give anyone you love. You deserve it too. — Daddy",
-  "However today goes, you can come back tomorrow. The door stays open. — Daddy",
-  "You're allowed to want a good life. Reaching for it is not too much. — Daddy",
-  "Quiet courage is still courage. You've got more than you know. — Daddy",
-  "One honest try today. That's the assignment, and you're acing it. — Daddy",
-  "Your effort counts even when no one writes back. I'm counting it. — Daddy",
-  "Be brave for ten minutes. That's usually all a step takes. — Daddy",
-  "You are not behind your old self, your friends, or anyone. You're on time. — Daddy",
-  "The hardest worker I know is also allowed to rest. Both are true. — Daddy",
-  "Keep going gently. Gentle and forward is still forward. — Daddy",
-  "If you can read this and try one thing, today was a win. — Daddy",
-  "You're worth the wait, and you're worth the work. Now go, sweetheart. — Daddy",
-  "Whatever you get done today, come back and let me tell you I'm proud. ✦ — Daddy",
+  "Job ads are wish lists. If you match the core work, it is worth applying.",
+  "One focused application is progress. Small steps still count.",
+  "Pay not listed is a question to ask, not a reason to count yourself out.",
+  "Start with the clearest match. Momentum is easier after the first step.",
+  "A saved job is not a commitment. It is just a useful option to revisit.",
+  "If a posting feels confusing, slow down and use the checklist.",
+  "You can take this one task at a time. The app will keep track.",
+  "The goal is not a perfect search. The goal is a steady one.",
+  "A no from one employer is information, not a verdict.",
+  "Apply before doubt turns a good match into extra work.",
+  "A short, honest note is better than waiting for perfect wording.",
+  "Trust the scam checks, then make the next practical move.",
+  "Your experience does not need to match every bullet to matter.",
+  "Send the application that is ready enough. Improve the next one.",
+  "If today is busy, choose one job and save the rest.",
+  "A calm pace is still a real pace.",
+  "Every reviewed posting narrows the search.",
+  "The best next step is usually the smallest clear one.",
+  "You are allowed to ask about pay, hours, and training.",
+  "Keep the search simple: review, save, apply, follow up.",
 ];
 let _encBag = [];
 function pickEnc(){
@@ -2845,20 +3324,14 @@ function pickEnc(){
   return ENC_LINES[i];
 }
 const KIND_LINES = [
-  "That took real effort. Proud of you. ✦ — Daddy",
-  "Applied! That's a genuine step forward. ✦ — Daddy",
-  "Look at you go. One more out the door. ✦ — Daddy",
-  "Done — and it's in your weekly log too. ✦ — Daddy",
-  "That's my girl. Keep that momentum. ✦ — Daddy",
-  "Sent! That's courage you can be proud of. ✦ — Daddy",
-  "Another one in. You're on a roll. ✦ — Daddy",
-  "Yes! That's a real step toward a real job. ✦ — Daddy",
-  "Brave done quietly is still brave. Proud of you. ✦ — Daddy",
-  "That's the way. One honest try at a time. ✦ — Daddy",
-  "Logged and counted. You're building something. ✦ — Daddy",
-  "Look at you keeping promises to yourself. ✦ — Daddy",
-  "You did the scary thing. I'm beaming. ✦ — Daddy",
-  "Steady and brave — that's exactly who you are. ✦ — Daddy",
+  "Applied. That is a real step forward.",
+  "Sent and logged.",
+  "Good progress. One more application is out the door.",
+  "That application is now in your weekly log.",
+  "Momentum counts. Keep the next step simple.",
+  "Saved. You can come back to it later.",
+  "Follow-up noted.",
+  "Done. The search is more organized than it was a minute ago.",
 ];
 let toastTimer = null;
 function showToast(text, label, fn){
@@ -2964,13 +3437,18 @@ function renderApps(){
   rows.forEach(function(r){
     const j=jobById.get(r.id);
     const days=daysSince(r.date);
+    const fu=state.followUps[r.id]||{};
     const el=document.createElement("div");
     el.className="card";
     el.innerHTML =
       '<div class="title">'+esc(r.title)+'</div>'+
       '<div class="co">'+esc(r.company)+'</div>'+
-      '<div class="meta"><span>'+IC.check+'applied '+esc(ago(r.date)||r.date)+'</span></div>'+
-      (days!=null&&days>=5&&j?'<div class="nudge">It\'s been a bit — a quick call shows you\'re serious.'+callScriptHTML(j,r.date)+'</div>':'')+
+      '<div class="meta"><span>'+IC.check+'applied '+esc(ago(r.date)||r.date)+'</span>'+
+        (fu.name?'<span>'+IC.pen+esc(fu.name)+'</span>':'')+
+        (fu.on&&!fu.done?'<span>'+IC.pen+(fu.on<=today()?'follow up today':'follow up '+esc(ago(fu.on)||fu.on))+'</span>':'')+
+      '</div>'+
+      followUpBlockHTML(r.id, j)+
+      (days!=null&&days>=5&&j&&!fu.done?'<div class="nudge">It\'s been a bit — a quick call shows you\'re serious.'+callScriptHTML(j,r.date)+'</div>':'')+
       (r.url?'<div class="actions"><a class="act" style="text-decoration:none" href="'+esc(safeUrl(r.url))+'" target="_blank" rel="noopener">'+IC.arrow+'View job</a>'+
       '<button class="act" data-act="applied" data-id="'+esc(r.id)+'">'+IC.eye+'Un-mark</button></div>':'');
     wrap.appendChild(el);
@@ -3350,7 +3828,7 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
       localStorage.setItem("pk_offered:" + user.id, "1");
       showToast("Add Face ID for instant sign-in next time?", "Add", function(){
         sb.auth.registerPasskey().then(function(r){
-          showToast(r.error ? "Couldn't add it — that's okay, you're still signed in." : "Face ID ready ✦ — Daddy");
+          showToast(r.error ? "Couldn't add it — that's okay, you're still signed in." : "Face ID ready");
         }).catch(function(){ showToast("Couldn't add it this time — no worries."); });
       });
     }
@@ -3419,7 +3897,20 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
         // wins. Fill only keys we don't already have, then push the merged result.
         var sp = (res[2] && res[2].data && res[2].data.profile) || {};
         Object.keys(sp).forEach(function(k){
+          if(k==="followUps") return;
           if(state.profile[k] === undefined || state.profile[k] === "") state.profile[k] = sp[k];
+        });
+        var sfu = sp.followUps || {};
+        Object.keys(sfu).forEach(function(id){
+          if(!state.followUps[id]) state.followUps[id] = sfu[id];
+          else {
+            var l=state.followUps[id], r=sfu[id]||{};
+            l.name = l.name || r.name || "";
+            l.phone = l.phone || r.phone || "";
+            l.email = l.email || r.email || "";
+            if(!l.on) l.on = r.on || "";
+            l.done = !!(l.done || r.done);
+          }
         });
         persist(); render(); renderCorner();
         var toPush = Object.keys(localIds).filter(function(id){
@@ -3471,11 +3962,12 @@ setView("jobs");   // also seeds #footenc with a fresh phrase (see setView)
     }
     function pushProfile(){
       if(!user) return;
+      state.profile.followUps = state.followUps;
       sb.from("user_profile").upsert({ profile: state.profile }, { onConflict: "user_id" })
         .then(function(r){ if(r.error) console.log("[portal] profile push:", r.error.message); });
     }
-    // Let the (non-portal) main script trigger a profile sync after name/quiz edits.
-    portalSync = { profile: pushProfile };
+    // Let the (non-portal) main script trigger a profile sync after name/quiz/follow-up edits.
+    portalSync = { profile: pushProfile, followUps: pushProfile };
 
     // Live mutations: these delegated listeners run AFTER the main handlers
     // above (same container, registered later), so state is already updated.
@@ -3668,7 +4160,7 @@ def mock_results():
         {"id": "2", "title": "Receptionist", "company": {"display_name": "Dental Office"},
          "location": {"display_name": "Johnston, IA"}, "salary_min": 37440, "salary_max": 39520,
          "salary_is_predicted": "1", "created": "2026-06-01T00:00:00Z",
-         "redirect_url": "https://www.adzuna.com/job/2", "description": "Greet patients, answer phones."},
+         "redirect_url": "https://www.adzuna.com/job/2", "description": "Greet patients, answer phones. Questions? Call (515) 244-0198 or email hiring@johnstondental.example."},
         {"id": "3", "title": "Office Clerk", "company": {"display_name": "Logistics Co"},
          "location": {"display_name": "Grimes, IA"}, "salary_min": None, "salary_max": None,
          "salary_is_predicted": "0", "created": "2026-06-04T00:00:00Z",
@@ -3691,13 +4183,8 @@ def mock_results():
 def collect_mock():
     seen = {}
     for j in mock_results():
-        if requires_degree(j):
-            continue
         seen[j["id"]] = normalize(j, "remote" if looks_remote(j) else "local")
-    rows = [r for r in seen.values()
-            if is_admin_title(r["title"]) and is_attainable(r["title"])
-            and not title_excluded(r["title"])
-            and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
+    rows = [r for r in seen.values() if _passes_filters(r)]
     return dedupe_rows(rows)[0]
 
 
@@ -3741,11 +4228,24 @@ def main():
     global BLOCKLIST
     BLOCKLIST = load_blocklist(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                             "scam_blocklist.txt"))
+    domain_cache: dict[str, object] = {}
+    if not args.mock:
+        domain_screen.reset_lookup_budget()
+        for r in rows:
+            domain_screen.annotate_row(r, domain_cache)
     spam_index = build_spam_index(rows)
     for r in rows:
-        r["scam"] = scam_assessment(r, spam_index)
+        r["scam"] = scam_assessment(r, spam_index, domain_cache=domain_cache)
     safe = sort_rows([r for r in rows if r["scam"]["level"] == "safe"])
     hidden = [r for r in rows if r["scam"]["level"] != "safe"]
+
+    if not args.mock and hidden:
+        autogen = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scam_blocklist_autogen.txt")
+        added = domain_screen.enrich_blocklist_autogen(hidden, autogen)
+        if added:
+            BLOCKLIST = load_blocklist(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                                    "scam_blocklist.txt"))
+            print(f"  blocklist: auto-added {len(added)} young-domain host(s): {', '.join(added)}")
 
     stamp = datetime.now(timezone.utc).astimezone()
     datestr = stamp.strftime("%Y-%m-%d")
@@ -3753,9 +4253,11 @@ def main():
 
     base = os.path.dirname(os.path.abspath(__file__))
     web_dir = os.path.join(base, "web")
+    bundle_dir = os.path.join(base, "app", "public")
     os.makedirs(web_dir, exist_ok=True)
+    os.makedirs(bundle_dir, exist_ok=True)
     csv_path = os.path.join(base, f"admin-jobs-{datestr}.csv")
-    html_path = os.path.join(web_dir, "index.html")     # the mobile PWA
+    html_path = os.path.join(web_dir, "index.html")     # legacy fallback until Astro-only
     write_csv(sort_rows(rows), csv_path)                 # full audit incl. hidden
     # Portal config never reaches a --mock page: canned data must not gain a
     # sign-in surface, and a mock page must never be deployed anyway.
@@ -3764,6 +4266,9 @@ def main():
     write_html(safe, len(hidden), len(rows), html_path, human,
                contact=args.contact, contact_phone=args.contact_phone,
                portal_cfg=portal_cfg, sentry_cfg=sentry_cfg)
+    write_jobs_bundle(safe, len(hidden), len(rows), bundle_dir, human,
+                      contact=args.contact, contact_phone=args.contact_phone,
+                      portal_cfg=portal_cfg)
 
     if args.push_supabase:
         if args.mock:
@@ -3773,6 +4278,9 @@ def main():
             if portal_push.supabase_enabled():
                 try:
                     portal_push.push_jobs(_portal_rows(safe, stamp.isoformat()), log=print)
+                    # Drop portal rows the scanner hasn't seen in 14 days (stale noise).
+                    cutoff = (stamp - timedelta(days=14)).isoformat()
+                    portal_push.purge_stale_jobs(cutoff, log=print)
                 except RuntimeError as err:
                     # Loud but non-fatal: the public site must publish even
                     # when the portal is down. CI surfaces this in the log.
