@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "astro dev",
     "typecheck": "astro check",
-    "build": "npm run typecheck && astro build",
+    "build": "npm run typecheck && astro build && node downlevel.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },
