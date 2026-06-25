@@ -1411,3 +1411,26 @@ body::after {
   border: none;
   color: inherit;
 }
+
+/* Keyboard focus ring for controls that don't already show one (a11y / focus
+   management). Inputs (.search/.field/.filter-toggle) keep their own box-shadow
+   ring; this covers buttons, chips, tabs, and links that previously showed no
+   visible keyboard-focus indicator. :focus-visible = keyboard only, so mouse/
+   touch presses stay ring-free. */
+.btn:focus-visible,
+.chip:focus-visible,
+.tab:focus-visible,
+.qopt:focus-visible,
+.toast-undo:focus-visible,
+a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn:focus-visible,
+  .chip:focus-visible,
+  .tab:focus-visible {
+    outline-offset: 1px;
+  }
+}
