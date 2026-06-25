@@ -585,6 +585,49 @@ def is_remote_row(row):
     return row.get("source") == "remote" or title_is_remote(row)
 
 
+# Hard category exclusions — they OVERRIDE the admin allowlist. Even when a title
+# also carries an admin word (e.g. "Food Service Receptionist", "Retail Office
+# Clerk", "Warehouse Data Entry"), drop it: she has told us plainly — no food
+# service, retail, warehouse, or floor/manual roles, remote or not.
+EXCLUDED_TITLE_TERMS = (
+    "food service", "food prep", "line cook", "prep cook", "kitchen", "barista",
+    "waitstaff", "waiter", "waitress", "busser", "bartender", "dishwasher",
+    "hostess", "host/hostess", "fast food", "restaurant", "cafe", "deli", "grill",
+    "cashier", "retail", "sales associate", "sales floor", "stocker",
+    "stock associate", "merchandiser", "warehouse", "forklift", "picker/packer",
+    "picker", "packer", "production associate", "assembler", "machine operator",
+    "housekeeping", "housekeeper", "janitor", "custodian", "groundskeeper",
+    "laundry", "delivery driver", "cdl driver", "valet", "dock worker",
+)
+
+
+def has_excluded_category(title):
+    """True when the title names a food-service / retail / warehouse / manual role
+    she has ruled out — checked even if the title also contains an admin word."""
+    t = (title or "").lower()
+    return any(term in t for term in EXCLUDED_TITLE_TERMS)
+
+
+# Weekend-required roles are out too (no childcare on weekends), remote or not.
+# We match REQUIREMENT phrasing only, so "weekends off" / "no weekend work"
+# (which are GOOD) never trigger a drop.
+WEEKEND_REQUIRED_HINTS = (
+    "weekend availability", "available weekends", "available on weekends",
+    "weekends required", "weekend required", "must work weekends",
+    "must be available weekends", "rotating weekends", "rotating weekend",
+    "every weekend", "every other weekend", "saturday and sunday",
+    "saturdays and sundays", "weekends a must", "weekend coverage",
+    "weekends only", "weekend only", "weekend shift",
+)
+
+
+def requires_weekend(job):
+    """True when the posting clearly requires weekend work — dropped even if
+    remote, since she has no weekend childcare."""
+    blob = ((job.get("title") or "") + "  " + (job.get("description") or "")).lower()
+    return any(h in blob for h in WEEKEND_REQUIRED_HINTS)
+
+
 def is_admin_title(title):
     """Precision gate: keep only genuine admin/clerical titles."""
     t = (title or "").lower()
@@ -914,6 +957,8 @@ def _passes_filters(r):
     the --mock build — exercises the exact gates that ship, including the
     night-shift and US-only filters that the mock path used to skip."""
     return (is_admin_title(r["title"])
+            and not has_excluded_category(r["title"])
+            and not requires_weekend(r)
             and is_attainable(r["title"])
             and not title_excluded(r["title"])
             and not requires_degree(r)
@@ -993,8 +1038,15 @@ def sort_rows(rows):
 
 
 def _neg_date(d):
-    # Sort newest-first within a verdict group.
-    return (9999 - int(d[:4]) if d[:4].isdigit() else 9999, d)
+    """A NEGATIVE day-ordinal so a plain ascending sort puts the NEWEST date
+    first (the old (9999-year, date) key sorted oldest-first within a year —
+    one reason fresh leads weren't surfacing on top). Blank/garbage dates
+    return 0, which sorts after any real (negative) date — i.e. treated as
+    oldest, so undated rows sink rather than float."""
+    try:
+        return -(int(d[0:4]) * 372 + int(d[5:7]) * 31 + int(d[8:10]))
+    except (ValueError, TypeError, IndexError):
+        return 0
 
 
 # --------------------------------------------------------------------------
@@ -1023,12 +1075,16 @@ def salary_text(r):
 
 
 def friend_sort(rows):
-    """Trusted/known employers first, then $19+ first, then newest. The app
-    preserves this order — re-sorting by pay would bury 'Pay not listed' jobs,
-    which are often the best leads (see invariant #2)."""
+    """NEWEST FIRST — the freshest leads belong on top (what she expected to
+    see). Trusted employer and pay verdict are only tiebreakers WITHIN the same
+    day, so 'Pay not listed' jobs are never buried by pay (invariant #2 holds:
+    ordering ignores the wage except as a last-resort same-day tiebreak). This
+    is the default feed order; the app lets her switch to 'Best match for you',
+    closest commute, or pay."""
     rank = {"meets": 0, "unlisted": 1, "below": 2}
-    return sorted(rows, key=lambda r: (0 if employer_is_trusted(r["company"]) else 1,
-                                       rank.get(r["verdict"], 9), _neg_date(r["created"])))
+    return sorted(rows, key=lambda r: (_neg_date(r["created"]),
+                                       0 if employer_is_trusted(r["company"]) else 1,
+                                       rank.get(r["verdict"], 9)))
 
 
 def write_csv(rows, path):

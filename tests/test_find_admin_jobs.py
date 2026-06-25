@@ -219,6 +219,72 @@ def test_is_day_shift():
                                 "description": "Hours: 4pm to midnight."})
 
 
+def test_excluded_category_overrides_admin_allowlist():
+    # A title can match the admin allowlist AND still be dropped — she ruled out
+    # food service, retail, and warehouse work even when an office word sneaks in.
+    for title in ("Food Service Receptionist", "Retail Office Assistant",
+                  "Warehouse Data Entry Clerk", "Front Desk Cashier",
+                  "Administrative Assistant - Restaurant Group"):
+        assert fa.has_excluded_category(title), title
+    # Clean office / customer-service / care titles are NOT excluded.
+    for title in ("Administrative Assistant", "Receptionist", "Data Entry Clerk",
+                  "Customer Service Representative", "Caregiver"):
+        assert not fa.has_excluded_category(title), title
+
+
+def test_excluded_category_drops_in_pipeline():
+    # "Food Service Receptionist" passes the admin allowlist (has "receptionist")
+    # but the hard category exclude must still drop it.
+    row = fa.normalize({**_job(41600, 45760),
+                        "title": "Food Service Receptionist"}, "local")
+    assert fa.is_admin_title(row["title"]) is True
+    assert fa._passes_filters(row) is False
+
+
+def test_weekend_required_dropped():
+    assert fa.requires_weekend({"title": "Office Clerk",
+                                "description": "Must work weekends and some holidays."})
+    assert fa.requires_weekend({"title": "Scheduler",
+                                "description": "Every other weekend required."})
+    assert fa.requires_weekend({"title": "Receptionist",
+                                "description": "Saturday and Sunday coverage needed."})
+    # Good phrasings (which are a PLUS) must never trigger a drop:
+    assert not fa.requires_weekend({"title": "Office Clerk",
+                                    "description": "Weekends off. Monday-Friday only."})
+    assert not fa.requires_weekend({"title": "Receptionist",
+                                    "description": "No weekend work, daytime hours."})
+
+
+def test_weekend_dropped_even_when_remote():
+    # Remote is exempt from the day-shift gate, but NOT from the weekend gate —
+    # she has no weekend childcare, remote or not.
+    row = fa.normalize({**_job(41600, 45760),
+                        "title": "Data Entry (Remote)",
+                        "description": "Remote role. Must be available weekends."}, "remote")
+    assert fa.is_remote_row(row) is True
+    assert fa._passes_filters(row) is False
+
+
+def test_friend_sort_newest_first():
+    # The default feed order is newest-first; trust/pay only break same-day ties.
+    rows = [
+        {"created": "2026-06-10", "company": "Random Co", "verdict": "meets"},
+        {"created": "2026-06-24", "company": "Unknown LLC", "verdict": "unlisted"},
+        {"created": "2026-06-18", "company": "Some Co", "verdict": "below"},
+    ]
+    ordered = fa.friend_sort(rows)
+    assert [r["created"] for r in ordered] == ["2026-06-24", "2026-06-18", "2026-06-10"]
+
+
+def test_neg_date_orders_newest_first():
+    # More-recent date → smaller (more negative) key → sorts first ascending.
+    assert fa._neg_date("2026-06-24") < fa._neg_date("2026-06-10")
+    assert fa._neg_date("2026-06-10") < fa._neg_date("2025-12-31")
+    # Blank / garbage sinks below any real date (treated as oldest).
+    assert fa._neg_date("") == 0
+    assert fa._neg_date("2026-06-24") < fa._neg_date("")
+
+
 def test_in_polk_or_dallas_counties_only():
     # In: Polk + Dallas County cities, and the counties by name.
     assert fa.in_polk_or_dallas("Waukee, IA") is True

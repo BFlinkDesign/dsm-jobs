@@ -1434,3 +1434,27 @@ a:focus-visible {
     outline-offset: 1px;
   }
 }
+
+/* ── Today's picks: the "why this fits her" reason line ─────────────────── */
+.pick-reason {
+  margin: 0 0 6px;
+  font-size: var(--text-sm, 0.92rem);
+  font-weight: 700;
+  color: var(--route);
+  line-height: 1.3;
+}
+.pick-reason::before { content: "✦ "; color: var(--purple-spark, var(--route)); }
+
+/* ── Sort row sits just above the collapsible filters ──────────────────── */
+.sort-row { margin-bottom: 10px; }
+
+/* ── Money & help tab ──────────────────────────────────────────────────── */
+.resource-section { margin-top: 20px; }
+.section-head {
+  font-family: var(--font-display, system-ui);
+  font-size: var(--text-lg, 1.2rem);
+  margin: 0 0 4px;
+  color: var(--purple-spark, var(--route));
+}
+.section-sub { margin: 0 0 10px; }
+.resource-card { margin-bottom: 10px; }
