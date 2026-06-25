@@ -329,6 +329,8 @@ function toast(msg: string, undo?: () => void): void {
 /** True if any popup overlay is currently open — used so two popups never stack
  * (the update modal was burying the install coach). */
 function anyModalOpen(): boolean {
+  const tour = document.getElementById("tour-root");
+  if (tour && !tour.hidden) return true;
   return !!document.querySelector(".modal-back:not([hidden])");
 }
 
@@ -341,61 +343,159 @@ function showUpdateModal(): void {
   go.addEventListener("click", () => { location.reload(); }, { once: true });
 }
 
-// ── Guided "Show me around" walkthrough (Wispr-Flow-style: one idea per card,
-// learn-by-doing tips, progress dots). Re-openable from Help; auto on first run.
-type TourStep = { emoji: string; title: string; body: string; tip?: string };
+// ── Guided "Show me around" walkthrough. Interactive, Wispr-Flow-style: a few
+// quick taps actually TUNE her feed (immediate, personal payoff), then spotlight
+// coachmarks highlight the REAL on-screen controls, with motion + progress.
+type TourChip = { val: string; label: string };
+type TourStep =
+  | { type: "intro" | "payoff" | "finish"; emoji: string; h: string; p: string }
+  | { type: "ask"; key: string; emoji: string; h: string; chips: TourChip[] }
+  | { type: "spot"; target: string; emoji: string; h: string; p: string; view?: ViewName };
+
 const TOUR_STEPS: TourStep[] = [
-  { emoji: "👋", title: "Welcome — let me show you around",
-    body: "This finds safe, daytime, no-degree jobs near you and remote. Every single job is scam-checked before you ever see it. Here's the whole app in 7 quick taps.",
-    tip: "You can reopen this any time from the Help tab." },
-  { emoji: "🗂️", title: "Jobs — newest on top",
-    body: "The Jobs tab shows safe jobs with the freshest on top. Tap any job to read it and apply.",
-    tip: "Try the Sort buttons: Newest, Best match, Remote first, or Closest." },
-  { emoji: "⭐", title: "Today — your 3 best picks",
-    body: "Each morning the Today tab hands you just three strong leads chosen for you, each with a line on why it fits. Small and doable — no pressure to do all three." },
-  { emoji: "✅", title: "Apply, then follow up",
-    body: "Tap Apply on a job. The Apps tab remembers everything you applied to and nudges you to follow up in a few days — that follow-up is how people get callbacks." },
-  { emoji: "💚", title: "Money & help — when bills are tight",
-    body: "The Money tab has real local help: rent, utilities, food, child care, and free classes to earn more. Each one has a tap-to-call button and exactly what to say.",
-    tip: "If money is the worry right now, start there — one call to 211 opens a lot of doors." },
-  { emoji: "📝", title: "Rudy & your résumé",
-    body: "In My corner, paste your résumé and Rudy tailors it to any job in seconds, and answers questions kindly. Rudy only uses what you wrote — it never makes things up." },
-  { emoji: "🛡️", title: "You're safe here",
-    body: "Scams are removed before they reach you, not just labeled. Real jobs never ask you to pay, buy gift cards, or interview off-app. The Help tab also has free crisis lines, any time.",
-    tip: "That's the tour — you've got this. ✦" },
+  { type: "intro", emoji: "👋", h: "Hi — let me set this up for you",
+    p: "Two quick taps and I'll tune this to the jobs that fit YOU. Then I'll point out where everything is. Tap Next when you're ready." },
+  { type: "ask", key: "kind", emoji: "💭", h: "What kind of work feels right?",
+    chips: [{ val: "quiet", label: "Calm, behind the scenes" }, { val: "people", label: "Helping people" }, { val: "care", label: "Caring for someone" }] },
+  { type: "ask", key: "where", emoji: "🏠", h: "Where do you want to work?",
+    chips: [{ val: "home", label: "From home (remote)" }, { val: "out", label: "Out in town" }, { val: "any", label: "Either is fine" }] },
+  { type: "ask", key: "confidence", emoji: "🌱", h: "Starting something new?",
+    chips: [{ val: "low", label: "Yes — I'd love training" }, { val: "mid", label: "A little nervous" }, { val: "high", label: "I've got this" }] },
+  { type: "payoff", emoji: "✨", h: "Done — these are YOUR jobs now",
+    p: "I just put your kind of work first. From here on, the list is tuned to you. Let me show you around…" },
+  { type: "spot", target: "#sort-row", view: "jobs", emoji: "🔀", h: "Sort it your way",
+    p: "Newest is the default. Tap 'Best match' to use what you just told me — or 'Remote first'." },
+  { type: "spot", target: "#jobs-list .job-card", view: "jobs", emoji: "🗂️", h: "Tap a job to open it",
+    p: "Read it, then Apply. Every single job here was scam-checked before it ever reached you." },
+  { type: "spot", target: ".nav-bottom [data-view='money'], .nav-side [data-view='money']", emoji: "💚", h: "Bills tight this month?",
+    p: "The Money tab has real local help — rent, food, utilities — plus free classes. One tap to call." },
+  { type: "spot", target: ".nav-bottom [data-view='today'], .nav-side [data-view='today']", emoji: "⭐", h: "Just three picks a day",
+    p: "Overwhelmed? The Today tab gives you three strong leads, chosen for you. That's the whole list." },
+  { type: "finish", emoji: "🎉", h: "You're all set!",
+    p: "Reopen this any time from the Help tab. You've got this. ✦" },
 ];
 
 let tourIdx = 0;
+
+/** First visible match of a (possibly comma-separated) selector. */
+function tourTarget(sel: string): HTMLElement | null {
+  for (const one of sel.split(",")) {
+    const el = document.querySelector(one.trim()) as HTMLElement | null;
+    if (el && el.offsetParent !== null) return el;
+  }
+  return document.querySelector(sel.split(",")[0].trim()) as HTMLElement | null;
+}
+
+/** Place the glowing ring over a real element and float the pop above/below it. */
+function positionSpotlight(target: HTMLElement): void {
+  const r = target.getBoundingClientRect();
+  const pad = 8;
+  const ring = $("#tour-ring");
+  const pop = $("#tour-pop");
+  if (ring) {
+    ring.hidden = false;
+    ring.style.top = `${r.top - pad}px`;
+    ring.style.left = `${r.left - pad}px`;
+    ring.style.width = `${r.width + pad * 2}px`;
+    ring.style.height = `${r.height + pad * 2}px`;
+  }
+  if (pop) {
+    pop.classList.add("anchored");
+    const popH = pop.offsetHeight || 230;
+    const below = r.bottom + popH + 26 < window.innerHeight;
+    pop.style.top = below ? `${r.bottom + 18}px` : `${Math.max(14, r.top - popH - 18)}px`;
+    pop.style.left = "50%";
+    pop.style.transform = "translateX(-50%)";
+  }
+}
+
+function centerPop(): void {
+  const ring = $("#tour-ring");
+  if (ring) ring.hidden = true;
+  const pop = $("#tour-pop");
+  if (pop) {
+    pop.classList.remove("anchored");
+    pop.style.top = "50%";
+    pop.style.left = "50%";
+    pop.style.transform = "translate(-50%, -50%)";
+  }
+}
+
 function renderTour(): void {
   const s = TOUR_STEPS[tourIdx];
-  if (!s) return;
+  const root = $("#tour-root");
+  const pop = $("#tour-pop");
+  const dim = $("#tour-dim");
+  if (!s || !root || !pop) return;
+
   const set = (sel: string, txt: string) => { const e = $(sel); if (e) e.textContent = txt; };
   set("#tour-emoji", s.emoji);
-  set("#tour-title", s.title);
-  set("#tour-body", s.body);
-  const tip = $("#tour-tip");
-  if (tip) {
-    if (s.tip) { tip.textContent = s.tip; tip.hidden = false; }
-    else { tip.textContent = ""; tip.hidden = true; }
-  }
-  const dots = $("#tour-dots");
-  if (dots) dots.innerHTML = TOUR_STEPS.map((_, i) => `<span class="tour-dot${i === tourIdx ? " on" : ""}"></span>`).join("");
+  set("#tour-h", s.h);
+  const bar = $("#tour-progress-bar");
+  if (bar) bar.style.width = `${((tourIdx + 1) / TOUR_STEPS.length) * 100}%`;
   const back = $("#tour-back");
   if (back) back.hidden = tourIdx === 0;
+
+  // Chips (interactive personalization)
+  const chips = $("#tour-chips");
+  const para = $("#tour-p");
+  if (s.type === "ask") {
+    const cur = getState().profile.quiz[s.key];
+    if (chips) {
+      chips.innerHTML = s.chips.map((c) =>
+        `<button type="button" class="tour-chip${cur === c.val ? " on" : ""}" data-tour-chip="${esc(c.val)}">${esc(c.label)}</button>`).join("");
+      chips.hidden = false;
+    }
+    if (para) { para.hidden = true; para.textContent = ""; }
+  } else {
+    if (chips) { chips.hidden = true; chips.innerHTML = ""; }
+    if (para) { para.hidden = false; para.textContent = s.p; }
+  }
+
   const next = $("#tour-next");
-  if (next) next.textContent = tourIdx === TOUR_STEPS.length - 1 ? "Done ✦" : "Next";
+  if (next) {
+    next.classList.toggle("ghosty", s.type === "ask");
+    next.textContent = s.type === "ask" ? "Skip" : (s.type === "finish" ? "Start looking ✦" : "Next");
+  }
+
+  // Re-trigger the entrance fade
+  pop.classList.remove("pop-in");
+  void pop.offsetWidth;
+  pop.classList.add("pop-in");
+
+  if (s.type === "spot") {
+    if (s.view) setView(s.view);
+    if (dim) dim.style.background = "transparent";   // the ring's shadow dims
+    setTimeout(() => {
+      const tgt = tourTarget(s.target);
+      if (!tgt) { if (dim) dim.style.background = ""; centerPop(); return; }
+      tgt.scrollIntoView({ block: "center", behavior: "auto" });
+      setTimeout(() => positionSpotlight(tgt), 70);
+    }, 50);
+  } else {
+    if (dim) dim.style.background = "";
+    centerPop();
+    if (s.type === "payoff") {
+      patchState((st) => { st.filters.sortBy = "match"; });
+      autosave();
+      setView("jobs");
+    }
+  }
 }
+
 function startTour(): void {
   tourIdx = 0;
-  const m = $("#tour-modal");
-  if (!m) return;
-  renderTour();
-  m.hidden = false;
+  const root = $("#tour-root");
+  if (!root) return;
+  root.hidden = false;
+  document.body.style.overflow = "hidden";
   localStorage.setItem("tour-seen", "1");
+  renderTour();
 }
 function closeTour(): void {
-  const m = $("#tour-modal");
-  if (m) m.hidden = true;
+  const root = $("#tour-root");
+  if (root) root.hidden = true;
+  document.body.style.overflow = "";
 }
 function tourNext(): void {
   if (tourIdx >= TOUR_STEPS.length - 1) { closeTour(); return; }
@@ -404,6 +504,15 @@ function tourNext(): void {
 }
 function tourBack(): void {
   if (tourIdx > 0) { tourIdx -= 1; renderTour(); }
+}
+/** A personalization chip was tapped — save it and glide to the next step. */
+function tourPickChip(val: string): void {
+  const s = TOUR_STEPS[tourIdx];
+  if (!s || s.type !== "ask") return;
+  patchState((st) => { st.profile.quiz[s.key] = val; });
+  autosave();
+  renderTour();                 // show it selected
+  setTimeout(tourNext, 300);    // then advance with a beat
 }
 
 function jobCategories(): string[] {
@@ -2713,7 +2822,15 @@ async function boot(): Promise<void> {
   // stacks under another popup).
   $("#tour-next")?.addEventListener("click", tourNext);
   $("#tour-back")?.addEventListener("click", tourBack);
-  $("#tour-close")?.addEventListener("click", closeTour);
+  $("#tour-skip")?.addEventListener("click", closeTour);
+  $("#tour-chips")?.addEventListener("click", (e) => {
+    const b = (e.target as HTMLElement).closest("[data-tour-chip]") as HTMLElement | null;
+    if (b) tourPickChip(b.getAttribute("data-tour-chip") || "");
+  });
+  window.addEventListener("resize", () => {
+    const root = $("#tour-root");
+    if (root && !root.hidden) renderTour();
+  });
   if (!localStorage.getItem("tour-seen")) {
     setTimeout(() => { if (!anyModalOpen()) startTour(); }, 900);
   }

@@ -214,17 +214,19 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
       </div>
     </div>
 
-    <!-- Guided "Show me around" walkthrough — populated by renderTour() -->
-    <div class="modal-back tour-back" id="tour-modal" hidden>
-      <div class="modal tour-card card-glitter" role="dialog" aria-modal="true" aria-labelledby="tour-title">
-        <button type="button" class="modal-x" id="tour-close" aria-label="Close tour">&times;</button>
-        <div class="tour-spark" id="tour-emoji" aria-hidden="true">✦</div>
-        <h2 id="tour-title" class="tour-title"></h2>
-        <p class="tour-body" id="tour-body"></p>
-        <p class="tour-tip" id="tour-tip" hidden></p>
-        <div class="tour-dots" id="tour-dots" aria-hidden="true"></div>
-        <div class="tour-nav">
-          <button type="button" class="btn btn-ghost" id="tour-back">Back</button>
+    <!-- Guided "Show me around" walkthrough — interactive, driven by renderTour() -->
+    <div class="tour-root" id="tour-root" hidden>
+      <div class="tour-dim" id="tour-dim"></div>
+      <div class="tour-ring" id="tour-ring" hidden></div>
+      <div class="tour-progress"><span class="tour-progress-bar" id="tour-progress-bar"></span></div>
+      <button type="button" class="tour-skip" id="tour-skip">Skip</button>
+      <div class="tour-pop pop-in" id="tour-pop" role="dialog" aria-modal="true" aria-labelledby="tour-h">
+        <div class="tour-emoji" id="tour-emoji" aria-hidden="true">✦</div>
+        <h2 id="tour-h" class="tour-h"></h2>
+        <p id="tour-p" class="tour-p"></p>
+        <div class="tour-chips" id="tour-chips" hidden></div>
+        <div class="tour-foot">
+          <button type="button" class="tour-back" id="tour-back" hidden>‹ Back</button>
           <button type="button" class="btn update-go tour-next" id="tour-next">Next</button>
         </div>
       </div>
