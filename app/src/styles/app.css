@@ -1458,3 +1458,112 @@ a:focus-visible {
 }
 .section-sub { margin: 0 0 10px; }
 .resource-card { margin-bottom: 10px; }
+
+/* ── Splashy "new version" update modal (big, centered, attention-grabbing) ── */
+.update-modal {
+  text-align: center;
+  max-width: 340px;
+  width: 88%;
+  padding: 30px 24px 28px;
+  border: 2px solid var(--purple-spark, #bca9ff);
+  box-shadow:
+    0 0 0 4px color-mix(in oklab, var(--purple-bright, #6c4bd8) 32%, transparent),
+    var(--shadow-md, 0 8px 28px -8px rgba(0, 0, 0, 0.65));
+}
+.update-spark {
+  font-size: 3rem;
+  line-height: 1;
+  color: var(--route, #f0b35a);
+  animation: update-pop 1.6s ease-in-out infinite;
+}
+.update-title {
+  font-family: var(--font-display, system-ui);
+  font-size: 1.95rem;
+  line-height: 1.05;
+  margin: 10px 0 6px;
+  background: var(--glitter-gradient, linear-gradient(135deg, #84f3b7, #f0b35a, #6c4bd8));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.update-sub { margin: 0 0 20px; font-size: 1rem; }
+.update-go {
+  width: 100%;
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.4px;
+  padding: 16px;
+  color: #0b0b10;
+  border: none;
+  border-radius: var(--radius-md, 14px);
+  background: var(--glitter-gradient, linear-gradient(135deg, #84f3b7, #f0b35a, #6c4bd8));
+  box-shadow: 0 8px 24px -6px color-mix(in oklab, var(--route, #f0b35a) 55%, transparent);
+}
+/* Only the one-time "LETTSSSS GOO" CTA pulses; reused buttons (tour Next,
+   install coach) stay calm and tappable. */
+#update-go { animation: update-pulse 1.4s ease-in-out infinite; }
+.update-go:active { transform: scale(0.98); }
+@keyframes update-pop {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.18) rotate(8deg); }
+}
+@keyframes update-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .update-spark, .update-go { animation: none; }
+}
+
+/* ── Install coach numbered steps ──────────────────────────────────────── */
+.coach-steps {
+  text-align: left;
+  margin: 6px 0 18px;
+  padding-left: 22px;
+  display: grid;
+  gap: 9px;
+  font-size: 1rem;
+  line-height: 1.35;
+}
+
+/* ── Guided walkthrough ("Show me around") ─────────────────────────────── */
+.tour-card {
+  text-align: center;
+  max-width: 360px;
+  width: 90%;
+  padding: 30px 24px 24px;
+  border: 2px solid var(--purple-spark, #bca9ff);
+  box-shadow:
+    0 0 0 4px color-mix(in oklab, var(--purple-bright, #6c4bd8) 28%, transparent),
+    var(--shadow-md, 0 8px 28px -8px rgba(0, 0, 0, 0.65));
+}
+.tour-spark { font-size: 2.6rem; line-height: 1; }
+.tour-title {
+  font-family: var(--font-display, system-ui);
+  font-size: 1.5rem;
+  line-height: 1.12;
+  margin: 8px 0;
+  color: var(--purple-spark, #bca9ff);
+}
+.tour-body { margin: 0 0 10px; font-size: 1.02rem; line-height: 1.45; }
+.tour-tip {
+  margin: 0 0 6px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--route, #f0b35a);
+}
+.tour-dots { display: flex; justify-content: center; gap: 7px; margin: 14px 0 16px; }
+.tour-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: color-mix(in oklab, var(--text, #e8e6f0) 28%, transparent);
+  transition: background 0.2s, transform 0.2s;
+}
+.tour-dot.on { background: var(--route, #f0b35a); transform: scale(1.25); }
+.tour-nav { display: flex; gap: 10px; align-items: center; }
+.tour-next { flex: 1; font-size: 1.1rem; padding: 13px; }
+.tour-back[hidden] { display: none; }
+@media (prefers-reduced-motion: reduce) {
+  .tour-dot { transition: none; }
+}

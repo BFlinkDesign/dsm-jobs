@@ -326,6 +326,86 @@ function toast(msg: string, undo?: () => void): void {
   toastTimer = setTimeout(() => t.classList.remove("show"), undo ? 5000 : 2000);
 }
 
+/** True if any popup overlay is currently open — used so two popups never stack
+ * (the update modal was burying the install coach). */
+function anyModalOpen(): boolean {
+  return !!document.querySelector(".modal-back:not([hidden])");
+}
+
+/** Big, centered, splashy "new version" modal — one button that reloads. */
+function showUpdateModal(): void {
+  const back = $("#update-modal");
+  const go = $("#update-go");
+  if (!back || !go) { location.reload(); return; }
+  back.hidden = false;
+  go.addEventListener("click", () => { location.reload(); }, { once: true });
+}
+
+// ── Guided "Show me around" walkthrough (Wispr-Flow-style: one idea per card,
+// learn-by-doing tips, progress dots). Re-openable from Help; auto on first run.
+type TourStep = { emoji: string; title: string; body: string; tip?: string };
+const TOUR_STEPS: TourStep[] = [
+  { emoji: "👋", title: "Welcome — let me show you around",
+    body: "This finds safe, daytime, no-degree jobs near you and remote. Every single job is scam-checked before you ever see it. Here's the whole app in 7 quick taps.",
+    tip: "You can reopen this any time from the Help tab." },
+  { emoji: "🗂️", title: "Jobs — newest on top",
+    body: "The Jobs tab shows safe jobs with the freshest on top. Tap any job to read it and apply.",
+    tip: "Try the Sort buttons: Newest, Best match, Remote first, or Closest." },
+  { emoji: "⭐", title: "Today — your 3 best picks",
+    body: "Each morning the Today tab hands you just three strong leads chosen for you, each with a line on why it fits. Small and doable — no pressure to do all three." },
+  { emoji: "✅", title: "Apply, then follow up",
+    body: "Tap Apply on a job. The Apps tab remembers everything you applied to and nudges you to follow up in a few days — that follow-up is how people get callbacks." },
+  { emoji: "💚", title: "Money & help — when bills are tight",
+    body: "The Money tab has real local help: rent, utilities, food, child care, and free classes to earn more. Each one has a tap-to-call button and exactly what to say.",
+    tip: "If money is the worry right now, start there — one call to 211 opens a lot of doors." },
+  { emoji: "📝", title: "Rudy & your résumé",
+    body: "In My corner, paste your résumé and Rudy tailors it to any job in seconds, and answers questions kindly. Rudy only uses what you wrote — it never makes things up." },
+  { emoji: "🛡️", title: "You're safe here",
+    body: "Scams are removed before they reach you, not just labeled. Real jobs never ask you to pay, buy gift cards, or interview off-app. The Help tab also has free crisis lines, any time.",
+    tip: "That's the tour — you've got this. ✦" },
+];
+
+let tourIdx = 0;
+function renderTour(): void {
+  const s = TOUR_STEPS[tourIdx];
+  if (!s) return;
+  const set = (sel: string, txt: string) => { const e = $(sel); if (e) e.textContent = txt; };
+  set("#tour-emoji", s.emoji);
+  set("#tour-title", s.title);
+  set("#tour-body", s.body);
+  const tip = $("#tour-tip");
+  if (tip) {
+    if (s.tip) { tip.textContent = s.tip; tip.hidden = false; }
+    else { tip.textContent = ""; tip.hidden = true; }
+  }
+  const dots = $("#tour-dots");
+  if (dots) dots.innerHTML = TOUR_STEPS.map((_, i) => `<span class="tour-dot${i === tourIdx ? " on" : ""}"></span>`).join("");
+  const back = $("#tour-back");
+  if (back) back.hidden = tourIdx === 0;
+  const next = $("#tour-next");
+  if (next) next.textContent = tourIdx === TOUR_STEPS.length - 1 ? "Done ✦" : "Next";
+}
+function startTour(): void {
+  tourIdx = 0;
+  const m = $("#tour-modal");
+  if (!m) return;
+  renderTour();
+  m.hidden = false;
+  localStorage.setItem("tour-seen", "1");
+}
+function closeTour(): void {
+  const m = $("#tour-modal");
+  if (m) m.hidden = true;
+}
+function tourNext(): void {
+  if (tourIdx >= TOUR_STEPS.length - 1) { closeTour(); return; }
+  tourIdx += 1;
+  renderTour();
+}
+function tourBack(): void {
+  if (tourIdx > 0) { tourIdx -= 1; renderTour(); }
+}
+
 function jobCategories(): string[] {
   return [...new Set(jobs.map((j) => j.category).filter(Boolean))].sort();
 }
@@ -912,12 +992,28 @@ function renderHelp(): void {
   const host = $("#view-host");
   if (!host) return;
   host.innerHTML = `
+    <div class="card card-glitter">
+      <h2 class="view-title">Help &amp; how-to</h2>
+      <p class="job-meta">New here, or want a refresher? Take the quick tour — it walks you through the whole app, one tap at a time.</p>
+      <button type="button" class="btn update-go" id="tour-start" style="margin-top:12px">✦ Show me around</button>
+    </div>
     <div class="card">
-      <h2 class="view-title">How she stays safe</h2>
+      <h3 class="section-title">What each tab does</h3>
       <ul class="job-meta help-list">
-        <li>Every job here was scam-checked before she sees it.</li>
-        <li>If pay isn't listed, that's normal — ask when she applies.</li>
-        <li>Real employers don't ask for gift cards, wire transfers, or upfront fees.</li>
+        <li><b>Jobs</b> — safe jobs, newest first. Tap <b>Sort</b> to change the order (Newest, Best match, Remote first, Closest).</li>
+        <li><b>Today</b> — your 3 best picks for the day, each with why it fits.</li>
+        <li><b>Apps</b> — everything you applied to, plus follow-up reminders.</li>
+        <li><b>My corner</b> — your résumé + <b>Rudy</b>, who tailors it to a job and answers questions.</li>
+        <li><b>Money</b> — local help with rent, food, and bills, plus <b>free</b> classes to earn more.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h3 class="section-title">How you stay safe</h3>
+      <ul class="job-meta help-list">
+        <li>Every job is scam-checked before you see it — scams are <b>removed</b>, not just labeled.</li>
+        <li>"Pay not listed" is normal and often a great lead — just ask when you apply.</li>
+        <li>Real employers never ask you to pay, buy gift cards, wire money, or interview off-app. If someone does, it's a scam — stop.</li>
+        <li>Worried about money this month? The <b>Money</b> tab has real local help — the fastest start is a free call to 2-1-1.</li>
       </ul>
     </div>
     <div class="crisis">
@@ -1055,7 +1151,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1078,6 +1174,10 @@ function handleViewClick(e: Event): void {
   }
   if (t.id === "open-rudy") {
     openRudy();
+    return;
+  }
+  if (t.id === "tour-start") {
+    startTour();
     return;
   }
   if (t.id === "print-log") {
@@ -2158,9 +2258,20 @@ function maybeIosInstallCoach(): void {
   const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
   if (!isIOS || nav.standalone) return;
   if (localStorage.getItem("ios-install-shown")) return;
-  localStorage.setItem("ios-install-shown", "1");
-  const m = $("#ios-install-modal");
-  if (m) m.hidden = false;
+  // Wait for a clear screen so it never stacks under the update modal or the
+  // first-run tour (which is exactly what buried it before). Retry a few times.
+  let tries = 0;
+  const tryShow = (): void => {
+    if (localStorage.getItem("ios-install-shown")) return;
+    if (anyModalOpen()) {
+      if (tries++ < 20) setTimeout(tryShow, 1500);
+      return;
+    }
+    localStorage.setItem("ios-install-shown", "1");
+    const m = $("#ios-install-modal");
+    if (m) m.hidden = false;
+  };
+  setTimeout(tryShow, 1600);
 }
 
 function wirePullToRefresh(): void {
@@ -2598,6 +2709,15 @@ async function boot(): Promise<void> {
   $("#ios-install-close")?.addEventListener("click", () => { const m = $("#ios-install-modal"); if (m) m.hidden = true; });
   $("#ios-install-ok")?.addEventListener("click", () => { const m = $("#ios-install-modal"); if (m) m.hidden = true; });
 
+  // Guided walkthrough controls + first-run auto-show (sequenced so it never
+  // stacks under another popup).
+  $("#tour-next")?.addEventListener("click", tourNext);
+  $("#tour-back")?.addEventListener("click", tourBack);
+  $("#tour-close")?.addEventListener("click", closeTour);
+  if (!localStorage.getItem("tour-seen")) {
+    setTimeout(() => { if (!anyModalOpen()) startTour(); }, 900);
+  }
+
   const base = import.meta.env.BASE_URL;
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register(`${base}sw.js`).then((reg) => {
@@ -2605,7 +2725,7 @@ async function boot(): Promise<void> {
         const nw = reg.installing;
         nw?.addEventListener("statechange", () => {
           if (nw.state === "installed" && navigator.serviceWorker.controller) {
-            toast("New version ready — tap to refresh", () => { location.reload(); });
+            showUpdateModal();
           }
         });
       });
