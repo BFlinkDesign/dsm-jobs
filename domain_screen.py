@@ -73,6 +73,14 @@ _TLD_WHOIS = {
     "info": "whois.afilias.net",
 }
 
+# A real DNS hostname: dot-separated alnum/hyphen labels, letters-only TLD. The
+# letters-only TLD also rejects IP literals. We only ever open a port-43 socket
+# to a string that matches this — so an attacker-chosen apply host, or a poisoned
+# IANA referral, can't redirect the WHOIS lookup to an internal name or IP (SSRF).
+_VALID_HOSTNAME = re.compile(
+    r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
+)
+
 _lookup_budget = MAX_WHOIS_LOOKUPS_PER_SCAN
 
 
@@ -139,18 +147,22 @@ def _whois_raw(query: str, server: str) -> str:
 
 
 def _whois_server_for_domain(domain: str) -> str:
-    labels = domain.lower().split(".")
-    tld = labels[-1] if labels else ""
+    """Resolve the WHOIS server for a host, or "" to skip. Never guesses an
+    unvalidated host: a referral is honored only if it is itself a real
+    hostname, and the old `whois.nic.{tld}` guess is dropped entirely."""
+    tld = domain.rsplit(".", 1)[-1] if "." in domain else ""
     if tld in _TLD_WHOIS:
         return _TLD_WHOIS[tld]
     try:
         ref = _whois_raw(tld, "whois.iana.org")
-        match = re.search(r"whois:\s+(\S+)", ref, re.I)
+        match = re.search(r"whois:\s*(\S+)", ref, re.I)
         if match:
-            return match.group(1)
+            server = match.group(1).strip().lower().rstrip(".")
+            if _VALID_HOSTNAME.match(server):  # reject IP / internal / poisoned referral
+                return server
     except OSError:
         pass
-    return f"whois.nic.{tld}"
+    return ""
 
 
 def _parse_whois_date(raw: str) -> datetime | None:
@@ -161,7 +173,11 @@ def _parse_whois_date(raw: str) -> datetime | None:
         token = match.group(1).strip().rstrip(")")
         iso = token.replace("Z", "+00:00")
         try:
-            return datetime.fromisoformat(iso).astimezone(timezone.utc)
+            dt = datetime.fromisoformat(iso)
+            # WHOIS dates are UTC by convention; a naive value must NOT be read as
+            # the runner's local time (that shifts the age across the < 45d cutoff).
+            dt = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+            return dt
         except ValueError:
             pass
         for fmt in ("%Y-%m-%d", "%d-%b-%Y", "%d.%m.%Y", "%Y.%m.%d"):
@@ -184,12 +200,16 @@ def domain_creation_utc(host: str, cache: dict[str, datetime | None] | None = No
     if _lookup_budget <= 0:
         store[host] = None
         return None
+    if not _VALID_HOSTNAME.match(host):  # only ever query a real hostname (SSRF guard)
+        store[host] = None
+        return None
     _lookup_budget -= 1
     created: datetime | None = None
     try:
         server = _whois_server_for_domain(host)
-        raw = _whois_raw(host, server)
-        created = _parse_whois_date(raw)
+        if server:                       # unknown TLD with no valid referral -> skip
+            raw = _whois_raw(host, server)
+            created = _parse_whois_date(raw)
         time.sleep(_WHOIS_SLEEP_S)
     except OSError:
         created = None

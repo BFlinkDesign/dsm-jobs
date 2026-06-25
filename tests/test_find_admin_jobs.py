@@ -99,6 +99,23 @@ def test_verdict_below_when_under_floor():
     assert fa.normalize(_job(31200, 33280), "local")["verdict"] == "below"
 
 
+def test_verdict_max_only_never_meets():
+    # "up to $25/hr" has no known LOW end — it must NOT earn the $19+ badge
+    # off its ceiling (invariant #1: never claim a floor we can't see).
+    assert fa.salary_verdict(None, 25.0, stated=True) == "unlisted"
+    assert fa.salary_verdict(None, 12.0, stated=True) == "unlisted"
+    # A real low end still works in both directions.
+    assert fa.salary_verdict(20.0, 25.0, stated=True) == "meets"
+    assert fa.salary_verdict(12.0, 25.0, stated=True) == "below"
+
+
+def test_phone_not_lifted_from_long_digit_run():
+    # An order/ID number must not be sliced into a fake one-tap "Call" contact.
+    assert fa.extract_contact_hints("Order #80012345551234 ships today")["contactPhone"] == ""
+    # A genuine formatted number is still extracted.
+    assert fa.extract_contact_hints("Call 515-244-0198 to apply")["contactPhone"] == "(515) 244-0198"
+
+
 # ── formatting + sorting ──────────────────────────────────────────────
 
 
