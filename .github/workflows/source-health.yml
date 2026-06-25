@@ -33,7 +33,9 @@ jobs:
         run: |
           set -o pipefail
           python scripts/source_health.py | tee /tmp/report.txt
-          code=$?
+          # Read the PYTHON exit (the 0/1/2 state machine), not the pipeline's:
+          # `tee` exiting 0 would otherwise mask a probe failure under pipefail.
+          code=${PIPESTATUS[0]}
           echo "code=$code" >> "$GITHUB_OUTPUT"
           echo "report<<EOF" >> "$GITHUB_OUTPUT"
           cat /tmp/report.txt >> "$GITHUB_OUTPUT"
@@ -50,6 +52,13 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Belt-and-suspenders: never commit a providers.py that won't import
+          # (auto_prune already guards, but this commit lands on the default
+          # branch, so a corrupt file would break every scan until reverted).
+          if ! python -m compileall -q providers.py; then
+            echo "::error::providers.py does not compile — refusing to commit the prune"
+            git checkout -- providers.py
+          fi
           git add scripts/source_health_state.json providers.py
           git diff --staged --quiet || git commit -m "chore: source-health state + auto-prune empty feeds"
           git push || true

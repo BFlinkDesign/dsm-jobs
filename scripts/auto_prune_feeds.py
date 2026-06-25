@@ -8,6 +8,7 @@ the matching providers.py list. Core metro feeds are never auto-pruned.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -99,6 +100,14 @@ def prune_providers(slugs: list[str]) -> list[str]:
     text, r = _remove_list_tokens(text, "lever", "lever", slug_set)
     removed.extend(r)
     if removed:
+        # Never write a providers.py that won't parse: a broad regex match could
+        # corrupt unintended lines, and this prune is committed straight to main
+        # (source-health.yml), so a SyntaxError would silently break every scan.
+        try:
+            ast.parse(text)
+        except SyntaxError as err:
+            print(f"auto-prune: ABORTED — edit would break providers.py ({err}); no write", file=sys.stderr)
+            return []
         with open(PROVIDERS_PATH, "w", encoding="utf-8") as fh:
             fh.write(text)
     return removed

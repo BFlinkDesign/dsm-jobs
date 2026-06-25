@@ -81,12 +81,18 @@ _VALID_HOSTNAME = re.compile(
     r"^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$"
 )
 
+# A count budget alone can't bound runtime: each lookup can stall on socket
+# timeouts (8s connect + 8s/recv-chunk), so 40 slow lookups could blow past the
+# scan's 540s step timeout. A wall-clock deadline caps total WHOIS time per scan.
+MAX_WHOIS_SECONDS_PER_SCAN = 120
 _lookup_budget = MAX_WHOIS_LOOKUPS_PER_SCAN
+_deadline_monotonic: float | None = None
 
 
 def reset_lookup_budget() -> None:
-    global _lookup_budget
+    global _lookup_budget, _deadline_monotonic
     _lookup_budget = MAX_WHOIS_LOOKUPS_PER_SCAN
+    _deadline_monotonic = time.monotonic() + MAX_WHOIS_SECONDS_PER_SCAN
 
 
 def apply_host(url: str) -> str:
@@ -199,6 +205,9 @@ def domain_creation_utc(host: str, cache: dict[str, datetime | None] | None = No
     global _lookup_budget
     if _lookup_budget <= 0:
         store[host] = None
+        return None
+    if _deadline_monotonic is not None and time.monotonic() > _deadline_monotonic:
+        store[host] = None       # WHOIS time budget for this scan is spent — fail open
         return None
     if not _VALID_HOSTNAME.match(host):  # only ever query a real hostname (SSRF guard)
         store[host] = None

@@ -69,6 +69,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          # Only publish a REAL render. camera.py runs continue-on-error so an
+          # invariant *check* failure still leaves full shots worth seeing — but a
+          # crashed render (no report.json, or no PNGs) must not push partial/
+          # garbage frames as "the rendered reality" (invariant #7).
+          if [ ! -f verify/report.json ] || [ -z "$(ls -A verify/shots/*.png 2>/dev/null)" ]; then
+            echo "::warning::No complete render (missing report.json or shots) — not publishing."
+            exit 0
+          fi
           git config user.name "camera-bot"
           git config user.email "camera-bot@users.noreply.github.com"
           git switch -c camera-shots

@@ -58,3 +58,23 @@ def test_auto_prune_neogov_slug(tmp_path, monkeypatch):
 def test_auto_prune_protects_grimes():
     state = {"neogov/grimes": {"empty_weeks": 10, "last_checked": "x"}}
     assert "grimes" not in ap._prune_candidates(state)
+
+
+def test_auto_prune_aborts_on_syntax_break(tmp_path, monkeypatch):
+    # If a regex prune would leave providers.py unparseable, it must NOT write
+    # (the file is committed straight to main — a SyntaxError breaks every scan).
+    providers = tmp_path / "providers.py"
+    original = (
+        'NEOGOV_AGENCIES = [\n'
+        '    ("iowa", "State of Iowa"),\n'
+        '    ("ankeny", "City of Ankeny"),\n'
+        ']\n'
+    )
+    providers.write_text(original, encoding="utf-8")
+    monkeypatch.setattr(ap, "PROVIDERS_PATH", str(providers))
+    # Force the post-edit text to be invalid Python, simulating an over-broad match.
+    monkeypatch.setattr(ap, "_remove_neogov_slugs",
+                        lambda text, slugs: ("def broken(:\n", ["neogov/ankeny"]))
+    removed = ap.prune_providers(["ankeny"])
+    assert removed == []                                   # aborted
+    assert providers.read_text(encoding="utf-8") == original  # file untouched
