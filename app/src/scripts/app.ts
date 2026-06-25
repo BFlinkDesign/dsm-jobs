@@ -237,32 +237,79 @@ function maybeNotifyFollowUps(): void {
 
 const $ = (sel: string) => document.querySelector(sel) as HTMLElement | null;
 
+// ---- Modal focus management (a11y) -----------------------------------------
+// Trap Tab inside the open overlay and restore focus to the trigger on close,
+// so keyboard / switch-control users can't tab into the page behind the modal.
+let trapEl: HTMLElement | null = null;
+let trapReturn: HTMLElement | null = null;
+
+function setModalTrap(overlay: HTMLElement | null): void {
+  trapReturn = document.activeElement as HTMLElement | null;
+  trapEl = overlay;
+}
+
+function clearModalTrap(): void {
+  trapEl = null;
+  const ret = trapReturn;
+  trapReturn = null;
+  try { ret?.focus(); } catch { /* element may be gone */ }
+}
+
+function handleTrapTab(e: KeyboardEvent): void {
+  if (e.key !== "Tab" || !trapEl) return;
+  const items = [...trapEl.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), ' +
+    'textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+  )].filter((el) => el.offsetParent !== null);
+  if (!items.length) return;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const active = document.activeElement as HTMLElement;
+  if (e.shiftKey && (active === first || !trapEl.contains(active))) {
+    e.preventDefault();
+    last.focus();
+  } else if (!e.shiftKey && (active === last || !trapEl.contains(active))) {
+    e.preventDefault();
+    first.focus();
+  }
+}
+
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
 function toast(msg: string, undo?: () => void): void {
   const t = $("#toast");
   if (!t) return;
+  // Clear any prior timer so a new toast doesn't get hidden early by the old
+  // one's countdown, and a live "Undo" toast isn't silently clobbered.
+  if (toastTimer) clearTimeout(toastTimer);
   if (undo) {
     t.innerHTML = `${esc(msg)} <button type="button" class="toast-undo">Undo</button>`;
     t.querySelector(".toast-undo")?.addEventListener("click", () => {
       undo();
+      if (toastTimer) clearTimeout(toastTimer);
       t.classList.remove("show");
     }, { once: true });
   } else {
     t.textContent = msg;
   }
   t.classList.add("show");
-  setTimeout(() => t.classList.remove("show"), undo ? 5000 : 2000);
+  toastTimer = setTimeout(() => t.classList.remove("show"), undo ? 5000 : 2000);
 }
 
 function jobCategories(): string[] {
   return [...new Set(jobs.map((j) => j.category).filter(Boolean))].sort();
 }
 
+// Baseline of job ids seen on a PRIOR visit, captured once at app start. Held
+// for the whole session so an in-session refresh (pull-to-refresh, online
+// event, feed retry) re-marks "New" against the same baseline instead of
+// wiping the badges the first refresh would otherwise clear.
+let seenBaseline: Set<string> | null = null;
 function markJobsSeen(): void {
-  const prev = new Set(getState().seen);
-  const firstVisit = prev.size === 0;
+  if (seenBaseline === null) seenBaseline = new Set(getState().seen);
+  const firstVisit = seenBaseline.size === 0;
   isNewJobs = {};
   for (const j of jobs) {
-    if (!firstVisit && !prev.has(j.id)) isNewJobs[j.id] = true;
+    if (!firstVisit && !seenBaseline.has(j.id)) isNewJobs[j.id] = true;
   }
   patchState((s) => { s.seen = jobs.map((j) => j.id); });
 }
@@ -876,7 +923,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1417,6 +1464,7 @@ function openAuth(): void {
     setAuthMode("signin");
     back.hidden = false;
     document.body.style.overflow = "hidden";
+    setModalTrap(back);
     setTimeout(() => { (document.getElementById("auth-email") as HTMLInputElement | null)?.focus(); }, 50);
   }
 }
@@ -1425,20 +1473,21 @@ function closeAuth(): void {
   const back = $("#auth-modal");
   if (back) back.hidden = true;
   document.body.style.overflow = "";
+  clearModalTrap();
   resetAllPasswordVisibility();
 }
 
 function openRudy(): void {
   if (!authed) return openAuth();
   const ov = $("#rudy-overlay");
-  if (ov) { ov.hidden = false; document.body.style.overflow = "hidden"; }
+  if (ov) { ov.hidden = false; document.body.style.overflow = "hidden"; setModalTrap(ov); }
   void renderRudyLog();
   setTimeout(() => { ($("#rudy-input") as HTMLInputElement | null)?.focus(); }, 50);
 }
 
 function closeRudy(): void {
   const ov = $("#rudy-overlay");
-  if (ov) { ov.hidden = true; document.body.style.overflow = ""; }
+  if (ov) { ov.hidden = true; document.body.style.overflow = ""; clearModalTrap(); }
   try { window.speechSynthesis?.cancel(); } catch { /* no-op */ }
 }
 
@@ -1581,6 +1630,7 @@ function openTailor(job: Job): void {
   if (!modal || !body) return;
   modal.hidden = false;
   document.body.style.overflow = "hidden";
+  setModalTrap(modal);
   const full = (job.descFull || "").trim();
   if (full.length >= 200) {
     startTailorLoader(job);
@@ -1594,6 +1644,7 @@ function closeTailor(): void {
   const modal = $("#tailor-modal");
   if (modal) modal.hidden = true;
   document.body.style.overflow = "";
+  clearModalTrap();
   stopTailorLoader();
 }
 
@@ -1607,6 +1658,7 @@ function openApplicationPack(job: Job): void {
   if (!modal) return;
   modal.hidden = false;
   document.body.style.overflow = "hidden";
+  setModalTrap(modal);
   renderTailorResult(job, packToTailorResult(pack));
 }
 
@@ -2026,6 +2078,7 @@ async function boot(): Promise<void> {
   window.addEventListener("online", () => { updateOfflineBanner(); void loadFeed().then((ok) => { if (ok) render(); }); });
   window.addEventListener("offline", updateOfflineBanner);
   document.addEventListener("keydown", (e) => {
+    if (e.key === "Tab") { handleTrapTab(e); return; }
     if (e.key === "Escape") {
       if ($("#auth-modal") && !($("#auth-modal") as HTMLElement).hidden) closeAuth();
       if ($("#ios-install-modal") && !($("#ios-install-modal") as HTMLElement).hidden) {
