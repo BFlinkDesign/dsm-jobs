@@ -40,8 +40,14 @@ jobs:
       PYTHONUNBUFFERED: "1"
       # Portal (all optional; push + sign-in UI self-disable when unset).
       # SUPABASE_SERVICE_KEY never reaches the page; PUBLISHABLE is browser-safe.
+      # The SERVICE_KEY (full RLS bypass over every user's data) is exposed ONLY
+      # on the scheduled/manual runs that actually need to upsert rows. On a
+      # `push` to main (which an auto-merged PR can trigger) it's empty, so a
+      # merged change can't run with the all-powerful key in its environment;
+      # --push-supabase self-disables when the key is unset. The daily cron still
+      # does the upsert.
       SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-      SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+      SUPABASE_SERVICE_KEY: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && secrets.SUPABASE_SERVICE_KEY || '' }}
       SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
       SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}

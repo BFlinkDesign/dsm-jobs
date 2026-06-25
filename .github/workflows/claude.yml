@@ -46,6 +46,19 @@ concurrency:
 
 jobs:
   claude:
+    # Defense-in-depth author gate enforced by GitHub BEFORE the action runs, so
+    # safety doesn't rest solely on claude-code-action's internal write-access
+    # check. Per event type, require the TRIGGERING author (commenter / reviewer /
+    # issue opener — not some other field on the payload) to be a trusted member.
+    if: >-
+      (github.event_name == 'issues' &&
+       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association)) ||
+      (github.event_name == 'issue_comment' &&
+       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review_comment' &&
+       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+      (github.event_name == 'pull_request_review' &&
+       contains(fromJson('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:

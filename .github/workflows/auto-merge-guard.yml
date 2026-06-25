@@ -1,20 +1,24 @@
 # Auto-merge guard for Claude's self-repair PRs.
 #
 # Decides — by WHICH FILES changed — whether a bot fix may auto-merge or must go
-# to a human. AI replaces human-in-the-loop for code paths CI + Semgrep protect.
-# Only stateful backend (supabase/, portal/) still escalates — her saved data.
+# to a human. This uses an ALLOWLIST, not a denylist: only low-blast-radius
+# DATA paths auto-merge; everything else (all code, all workflows, providers,
+# stateful backend) escalates to a human.
 #
-#   AUTO-MERGE (armed, then GitHub merges only when required checks pass):
-#     code + tests + the web shell. A regression here FAILS the invariant tests
-#     / Semgrep / CI, so a bad change can't merge, and the pre-publish gate is a
-#     second backstop before the live site.
+# Why an allowlist: this is a PUBLIC repo and the upstream repair agent is
+# driven by public issue text. A denylist auto-merged `.github/**` and
+# `providers.py` — so a bot PR could weaken its own gates or add an outbound-
+# request line and merge with no human, then run on `main` with production
+# secrets. CI/Semgrep/invariant tests are real but NOT a sufficient trust
+# boundary for arbitrary code changes (a PR can pass its own weakened checks).
+#
+#   AUTO-MERGE (armed, then GitHub merges only when required checks pass) — ONLY:
+#     - scam_blocklist_autogen.txt  -> machine-generated scam-domain growth.
+#     - tests/**                    -> test-only changes (can't ship runtime code).
 #
 #   ESCALATE to a human (label `needs-human`, never auto-merge):
-#     - supabase/** or portal/**  -> stateful backend: her saved data + auth.
-#     - scam_blocklist.txt         -> manual data: removing an entry un-hides scams.
-#
-#   AUTO-MERGE also covers scam_blocklist_autogen.txt, providers.py feed lists,
-#   and .github/ workflow fixes when CI + Semgrep pass.
+#     - ANYTHING else, including code (find_admin_jobs.py, providers.py, app/**),
+#       .github/** workflows, supabase/**, portal/**, scam_blocklist.txt.
 #
 # Only acts on branches Claude creates (claude/*). Human PRs are untouched.
 
@@ -51,16 +55,18 @@ jobs:
           set -euo pipefail
           files="$(gh pr view "$PR" --json files --jq '.files[].path')"
           echo "Changed files:"; echo "$files"
-          critical="$(printf '%s\n' "$files" | grep -E '^(supabase/|portal/|scam_blocklist\.txt$)' || true)"
-          if [ -n "$critical" ]; then
-            echo "::notice::Escalating PR #$PR — touches safety-critical paths."
+          # ALLOWLIST: a PR auto-merges only if EVERY changed file is a low-blast-
+          # radius data/test path. Any file outside the allowlist -> escalate.
+          outside="$(printf '%s\n' "$files" | grep -vE '^(scam_blocklist_autogen\.txt$|tests/)' || true)"
+          if [ -n "$outside" ]; then
+            echo "::notice::Escalating PR #$PR — changes paths outside the auto-merge allowlist."
             gh pr edit "$PR" --add-label needs-human || true
             gh pr comment "$PR" --body "$(printf '%s\n' \
-              '🛑 **Escalated for human review** — this automated fix changes safety-critical paths:' \
-              '```' "$critical" '```' \
-              'These are not auto-merged: stateful backend (`supabase/`, `portal/`) or manual `scam_blocklist.txt`. `scam_blocklist_autogen.txt`, `providers.py` feed pruning, and workflow fixes auto-merge when CI passes.'"
+              '🛑 **Escalated for human review** — this automated fix changes paths outside the auto-merge allowlist:' \
+              '```' "$outside" '```' \
+              'Only `scam_blocklist_autogen.txt` and `tests/**` auto-merge. All code, workflows, providers, and stateful backend require a human review before merge.'"
           else
-            echo "::notice::Arming auto-merge for PR #$PR — code/test paths only."
-            gh pr comment "$PR" --body '🤖 **Auto-merge armed** — this fix touches only code/test paths the invariant tests + Semgrep + CI protect. It will merge automatically **only when all required checks pass**; otherwise it stays open for review.'
+            echo "::notice::Arming auto-merge for PR #$PR — allowlisted data/test paths only."
+            gh pr comment "$PR" --body '🤖 **Auto-merge armed** — this fix touches only allowlisted data/test paths (`scam_blocklist_autogen.txt`, `tests/**`). It will merge automatically **only when all required checks pass**; otherwise it stays open for review.'
             gh pr merge "$PR" --squash --auto
           fi
