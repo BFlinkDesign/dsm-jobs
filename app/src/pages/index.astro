@@ -200,18 +200,39 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
     </div>
 
     <div class="modal-back" id="ios-install-modal" hidden>
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="ios-install-title">
+      <div class="modal update-modal card-glitter" role="dialog" aria-modal="true" aria-labelledby="ios-install-title">
         <button type="button" class="modal-x" id="ios-install-close" aria-label="Close">&times;</button>
-        <h2 id="ios-install-title">Add to your home screen ✦</h2>
-        <p class="job-meta">On iPhone: tap <b>Share</b> at the bottom of Safari, then <b>Add to Home Screen</b>. That keeps jobs one tap away — like a real app.</p>
-        <button type="button" class="btn btn-primary" id="ios-install-ok" style="width:100%;margin-top:12px">Got it</button>
+        <div class="update-spark" aria-hidden="true">✦</div>
+        <h2 id="ios-install-title" class="update-title">Keep this on your phone</h2>
+        <p class="update-sub">Two taps and jobs live right on your home screen — just like a real app.</p>
+        <ol class="coach-steps">
+          <li>Tap the <b>Share</b> button at the bottom of Safari <span aria-hidden="true">⬆️</span></li>
+          <li>Scroll and tap <b>Add to Home Screen</b></li>
+          <li>Tap <b>Add</b> — done! ✦</li>
+        </ol>
+        <button type="button" class="btn update-go" id="ios-install-ok">Got it!</button>
+      </div>
+    </div>
+
+    <!-- Guided "Show me around" walkthrough — populated by renderTour() -->
+    <div class="modal-back tour-back" id="tour-modal" hidden>
+      <div class="modal tour-card card-glitter" role="dialog" aria-modal="true" aria-labelledby="tour-title">
+        <button type="button" class="modal-x" id="tour-close" aria-label="Close tour">&times;</button>
+        <div class="tour-spark" id="tour-emoji" aria-hidden="true">✦</div>
+        <h2 id="tour-title" class="tour-title"></h2>
+        <p class="tour-body" id="tour-body"></p>
+        <p class="tour-tip" id="tour-tip" hidden></p>
+        <div class="tour-dots" id="tour-dots" aria-hidden="true"></div>
+        <div class="tour-nav">
+          <button type="button" class="btn btn-ghost" id="tour-back">Back</button>
+          <button type="button" class="btn update-go tour-next" id="tour-next">Next</button>
+        </div>
       </div>
     </div>
 
     <input type="file" id="resume-file" accept=".docx,.pdf,.txt,.md,.markdown" hidden />
 
     <footer class="app-foot" id="app-foot">
-      <a class="btn btn-ghost call-btn" id="call-btn" hidden></a>
       <p class="field-hint">Tip: tap Share on a job, then <b>Add to Home Screen</b> to keep this on your phone.</p>
       <button type="button" class="btn btn-ghost install-btn" id="install-btn" hidden>Add this app to your phone</button>
     </footer>
@@ -260,6 +281,15 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
 
     <!-- Iowa printable work-search log — populated by printWorkLog(), shown only during window.print() -->
     <div id="print-worklog" hidden></div>
+
+    <div class="modal-back update-back" id="update-modal" hidden>
+      <div class="modal update-modal card-glitter" role="dialog" aria-modal="true" aria-labelledby="update-title">
+        <div class="update-spark" aria-hidden="true">✦</div>
+        <h2 id="update-title" class="update-title">Fresh update is here!</h2>
+        <p class="update-sub">New jobs and improvements just landed for you.</p>
+        <button type="button" class="btn update-go" id="update-go">LETTSSSS GOO!</button>
+      </div>
+    </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
