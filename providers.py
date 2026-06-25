@@ -111,7 +111,7 @@ def _request_json(url: str, *, headers: "dict[str, str] | None" = None, body: ob
         try:
             # nosemgrep - url allowlist-pinned above; HTTPS hosts only.
             with urllib.request.urlopen(req, timeout=30) as resp:  # noqa: S310
-                raw = resp.read().decode("utf-8")
+                raw = resp.read().decode("utf-8", "replace")
                 if not raw.strip():
                     return []
                 return json.loads(raw)
@@ -183,6 +183,8 @@ def _usajobs_hourly(remuneration):
 
 def _usajobs_rows(payload, source, verdict_fn):
     rows = []
+    if not isinstance(payload, dict):  # API gave a list/error envelope, not a result object
+        return rows
     items = ((payload.get("SearchResult") or {}).get("SearchResultItems")) or []
     for item in items:
         d = item.get("MatchedObjectDescriptor") or {}
@@ -212,16 +214,22 @@ def fetch_usajobs(titles, location, verdict_fn, log):
             "HiringPath": "public", "WhoMayApply": "public",
             "ResultsPerPage": "100",
         })
-        payload = _request_json(USAJOBS_HOST + "?" + q, headers=_usajobs_headers())
-        rows.extend(_usajobs_rows(payload, "local", verdict_fn))
+        try:  # one bad page must not drop the rows already collected (fail-soft)
+            payload = _request_json(USAJOBS_HOST + "?" + q, headers=_usajobs_headers())
+            rows.extend(_usajobs_rows(payload, "local", verdict_fn))
+        except Exception as err:  # noqa: BLE001
+            log(f"  usajobs: skipped '{kw}' ({err})")
         time.sleep(0.5)
     # Remote pass: RemoteIndicator=True returns only remote postings.
     q = urllib.parse.urlencode({
         "Keyword": "administrative assistant", "RemoteIndicator": "True",
         "HiringPath": "public", "WhoMayApply": "public", "ResultsPerPage": "100",
     })
-    payload = _request_json(USAJOBS_HOST + "?" + q, headers=_usajobs_headers())
-    rows.extend(_usajobs_rows(payload, "remote", verdict_fn))
+    try:
+        payload = _request_json(USAJOBS_HOST + "?" + q, headers=_usajobs_headers())
+        rows.extend(_usajobs_rows(payload, "remote", verdict_fn))
+    except Exception as err:  # noqa: BLE001
+        log(f"  usajobs: skipped remote pass ({err})")
     log(f"  usajobs: {len(rows)} postings")
     return rows
 
@@ -234,6 +242,8 @@ def jooble_enabled():
 
 def _jooble_rows(payload, verdict_fn):
     rows = []
+    if not isinstance(payload, dict):
+        return rows
     for j in payload.get("jobs") or []:
         # Jooble's salary is an unflagged free-text string ("17,600 UAH") with
         # no stated-vs-estimated provenance -> invariant #1 says it is NEVER
@@ -279,8 +289,11 @@ def fetch_jooble(titles, location, verdict_fn, log):
     # bounded per-title pass for breadth.
     for kw in titles:
         body = {"keywords": kw, "location": location, "radius": "40", "page": "1"}
-        payload = _request_json(JOOBLE_HOST + key, body=body)
-        rows.extend(_jooble_rows(payload, verdict_fn))
+        try:  # one bad page must not drop the rows already collected (fail-soft)
+            payload = _request_json(JOOBLE_HOST + key, body=body)
+            rows.extend(_jooble_rows(payload, verdict_fn))
+        except Exception as err:  # noqa: BLE001
+            log(f"  jooble : skipped '{kw}' ({err})")
         time.sleep(0.5)
     log(f"  jooble : {len(rows)} postings")
     return rows
@@ -336,6 +349,8 @@ def _jsearch_apply_url(j):
 
 def _jsearch_rows(payload, source, verdict_fn):
     rows = []
+    if not isinstance(payload, dict):
+        return rows
     for j in payload.get("data") or []:
         lo, hi = _jsearch_hourly(j)
         stated = lo is not None or hi is not None
@@ -367,15 +382,21 @@ def fetch_jsearch(titles, location, verdict_fn, log):
             "query": q, "page": "1", "num_pages": "1",
             "date_posted": "week", "country": "us",
         })
-        payload = _request_json(JSEARCH_HOST + "?" + params, headers=headers)
-        rows.extend(_jsearch_rows(payload, "local", verdict_fn))
+        try:  # a 429 (200/month cap) or bad page is a no-op, not a scan-killer
+            payload = _request_json(JSEARCH_HOST + "?" + params, headers=headers)
+            rows.extend(_jsearch_rows(payload, "local", verdict_fn))
+        except Exception as err:  # noqa: BLE001
+            log(f"  jsearch: skipped '{q}' ({err})")
         time.sleep(0.5)
     params = urllib.parse.urlencode({
         "query": JSEARCH_REMOTE_QUERY, "page": "1", "num_pages": "1",
         "date_posted": "week", "country": "us", "work_from_home": "true",
     })
-    payload = _request_json(JSEARCH_HOST + "?" + params, headers=headers)
-    rows.extend(_jsearch_rows(payload, "remote", verdict_fn))
+    try:
+        payload = _request_json(JSEARCH_HOST + "?" + params, headers=headers)
+        rows.extend(_jsearch_rows(payload, "remote", verdict_fn))
+    except Exception as err:  # noqa: BLE001
+        log(f"  jsearch: skipped remote pass ({err})")
     log(f"  jsearch: {len(rows)} postings")
     return rows
 

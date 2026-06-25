@@ -859,10 +859,12 @@ def salary_verdict(hourly_min, hourly_max, *, stated):
     SAFETY: providers *predict* pay when the employer didn't post it (Adzuna
     flags it; Jooble doesn't even say). A non-stated wage NEVER earns a number
     or a $19+ badge. Wage FLOOR test: the LOW end of a stated range must clear
-    $19 ("$16-$23" does not count)."""
-    floor = hourly_min if hourly_min is not None else hourly_max
+    $19 ("$16-$23" does not count). A max-ONLY range ("up to $25") has no known
+    low end, so it can never earn 'meets' — we will not claim a floor we can't
+    see (invariant #1)."""
+    floor = hourly_min                  # the $19+ claim rests on the LOW end only
     if floor is None or not stated:
-        return "unlisted"               # no pay, or only a guess
+        return "unlisted"               # no pay, only a guess, or max-only (no floor)
     if floor >= MIN_HOURLY:
         return "meets"
     return "below"
@@ -906,6 +908,20 @@ def normalize(job, source):
 # Collection
 # --------------------------------------------------------------------------
 
+def _passes_filters(r):
+    """The single keep/drop predicate for a normalized row. Shared by the live
+    (`collect`) and `--mock` (`collect_mock`) paths so the camera — which renders
+    the --mock build — exercises the exact gates that ship, including the
+    night-shift and US-only filters that the mock path used to skip."""
+    return (is_admin_title(r["title"])
+            and is_attainable(r["title"])
+            and not title_excluded(r["title"])
+            and not requires_degree(r)
+            and (is_remote_row(r) or is_day_shift(r))
+            and passes_us_filter(r)
+            and (r["source"] != "local" or commute_minutes(r["location"]) is not None))
+
+
 def collect(verbose=True):
     seen = {}
     def add(jobs, source):
@@ -939,14 +955,7 @@ def collect(verbose=True):
             seen[r["id"]] = r
 
     all_rows = list(seen.values())
-    rows = [r for r in all_rows
-            if is_admin_title(r["title"])
-            and is_attainable(r["title"])
-            and not title_excluded(r["title"])
-            and not requires_degree(r)
-            and (is_remote_row(r) or is_day_shift(r))
-            and passes_us_filter(r)
-            and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
+    rows = [r for r in all_rows if _passes_filters(r)]
     dropped = len(all_rows) - len(rows)
     if verbose and dropped:
         print(f"  (filtered out {dropped} non-admin / senior / skilled / degree / "
@@ -1061,7 +1070,9 @@ def will_train(description):
 # Never guessed: only text that appears in the job description survives.
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}")
 _PHONE_RE = re.compile(
-    r"(?:\+?1[-.\s]?)?(?:\((\d{3})\)|(\d{3}))[-.\s]?(\d{3})[-.\s]?(\d{4})\b"
+    # (?<!\d) stops a 10-digit slice being lifted out of a longer digit run
+    # (order numbers, IDs) and surfaced as a fake one-tap "Call" contact.
+    r"(?<!\d)(?:\+?1[-.\s]?)?(?:\((\d{3})\)|(\d{3}))[-.\s]?(\d{3})[-.\s]?(\d{4})\b"
 )
 _JUNK_EMAIL = re.compile(
     r"(noreply|no-reply|donotreply|mailer-daemon|example\.com|sentry\.io|wixpress|"
@@ -4172,13 +4183,8 @@ def mock_results():
 def collect_mock():
     seen = {}
     for j in mock_results():
-        if requires_degree(j):
-            continue
         seen[j["id"]] = normalize(j, "remote" if looks_remote(j) else "local")
-    rows = [r for r in seen.values()
-            if is_admin_title(r["title"]) and is_attainable(r["title"])
-            and not title_excluded(r["title"])
-            and (r["source"] != "local" or commute_minutes(r["location"]) is not None)]
+    rows = [r for r in seen.values() if _passes_filters(r)]
     return dedupe_rows(rows)[0]
 
 

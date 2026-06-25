@@ -48,6 +48,29 @@ def test_scam_hides_young_remote_domain(monkeypatch):
     assert any("registered 10 days ago" in r for r in out["reasons"])
 
 
+def test_whois_never_queries_non_hostname(monkeypatch):
+    # SSRF guard: an IP-literal or junk "host" must never open a port-43 socket.
+    def _boom(*_a, **_k):
+        raise AssertionError("WHOIS socket must not be opened for an invalid host")
+    monkeypatch.setattr(ds, "_whois_raw", _boom)
+    ds.reset_lookup_budget()
+    assert ds.domain_creation_utc("127.0.0.1", {}) is None
+    assert ds.domain_creation_utc("localhost", {}) is None
+    assert ds.domain_creation_utc("169.254.169.254", {}) is None  # cloud metadata IP
+
+
+def test_whois_server_drops_unknown_tld_guess(monkeypatch):
+    # Unknown TLD with no usable IANA referral -> skip, never guess whois.nic.{tld}.
+    monkeypatch.setattr(ds, "_whois_raw", lambda *_a, **_k: "no referral here")
+    assert ds._whois_server_for_domain("evil.somethingmade-up") == ""
+
+
+def test_whois_server_rejects_poisoned_referral(monkeypatch):
+    # A referral pointing at an IP / internal name is rejected (SSRF pivot guard).
+    monkeypatch.setattr(ds, "_whois_raw", lambda *_a, **_k: "whois: 10.0.0.5")
+    assert ds._whois_server_for_domain("foo.bartld") == ""
+
+
 def test_dedupe_collapses_same_apply_url():
     a = {
         "id": "1", "title": "Admin Assistant", "company": "Co A", "location": "Des Moines, IA",
