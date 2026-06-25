@@ -139,6 +139,33 @@ Deno.test("costForUsage: claude-opus-4-8 priced from RATES", () => {
   );
 });
 
+Deno.test("costForUsage: prices cached tokens (write 1.25x, read 0.10x base input)", () => {
+  // Both paid functions cache the system prompt, so input_tokens is only the
+  // uncached remainder — cache_* classes must be billed or the cap trips late.
+  // sonnet base in = $3/1M. 1M cache-write = 3*1.25 = 3.75; 1M cache-read = 3*0.10 = 0.30.
+  assertAlmostEquals(
+    costForUsage("claude-sonnet-4-6", { cache_creation_input_tokens: 1_000_000 }),
+    3.75,
+    1e-9,
+  );
+  assertAlmostEquals(
+    costForUsage("claude-sonnet-4-6", { cache_read_input_tokens: 1_000_000 }),
+    0.30,
+    1e-9,
+  );
+  // Mixed: 100k uncached in + 1M cache-read + 50k out (sonnet)
+  //   = (100000*3 + 1000000*3*0.10 + 50000*15) / 1e6 = (300000 + 300000 + 750000)/1e6 = 1.35
+  assertAlmostEquals(
+    costForUsage("claude-sonnet-4-6", {
+      input_tokens: 100_000,
+      cache_read_input_tokens: 1_000_000,
+      output_tokens: 50_000,
+    }),
+    1.35,
+    1e-9,
+  );
+});
+
 Deno.test("costForUsage: unknown model and missing usage => 0 (never throws)", () => {
   assertEquals(costForUsage("gpt-imaginary", { input_tokens: 1_000_000, output_tokens: 1_000_000 }), 0);
   assertEquals(costForUsage("claude-opus-4-8", null), 0);

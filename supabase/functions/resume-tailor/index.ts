@@ -383,8 +383,17 @@ async function handle(req: Request): Promise<Response> {
   spendCalls.push({ model: WRITER_MODEL, usage: (firstWrite.data as { usage?: Usage })?.usage });
   let draft = parseFirstJson(firstWrite.data) as WriterOut | null;
   if (!draft?.resume) {
+    // A truncated (max_tokens) response yields invalid/partial JSON — tell her
+    // it was a length problem so a real qualification isn't silently dropped.
+    const stop = (firstWrite.data as { stop_reason?: string })?.stop_reason;
+    if (stop === "max_tokens") {
+      console.error("resume-tailor: writer hit max_tokens (résumé + posting too long); output truncated");
+    }
     await recordSpendAndAlert(supabase, accumulateCost(spendCalls));  // the write still billed
-    return json({ error: "I couldn't put that together cleanly — try once more?" }, 502);
+    const msg = stop === "max_tokens"
+      ? "That posting was a bit long for one pass — trim it down and try again so nothing gets cut off."
+      : "I couldn't put that together cleanly — try once more?";
+    return json({ error: msg }, 502);
   }
 
   // ── 2-3. CRITIQUE → REVISE loop, bounded ───────────────────────────────

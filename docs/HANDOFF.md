@@ -11,7 +11,7 @@
 
 This session moved the PWA from “strong beta” toward **production-complete sync and leverage UX**. Three read-only audits mapped gaps (frontier features, subconscious polish, operational sync). A full “build all gaps” subagent hit API limits twice; fixes were completed in the parent session.
 
-**Honest status after this session:** Core loop is shippable (feed, auth, apply/save/hide, Rudy, tailor, follow-ups with **done** state). External config still needed for reliable email (Resend), Google OAuth, Web Push on iOS, and passkeys enabled in Supabase dashboard. **Collapsible filters** from legacy HTML were **not** ported — filters are always expanded on Jobs tab (known gap Lilly may feel on small screens).
+**Honest status after this session:** Core loop is shippable (feed, auth, apply/save/hide, Rudy, tailor, follow-ups with **done** state). External config still needed for reliable email (Resend), Google OAuth, Web Push on iOS, and passkeys enabled in Supabase dashboard. **Collapsible filters** have since been ported to Astro (`#filter-toggle` / `.filter-panel.is-collapsed`, collapsed by default) — the "always expanded" note below is superseded.
 
 ---
 
@@ -22,7 +22,7 @@ This session moved the PWA from “strong beta” toward **production-complete s
 | Face ID / fingerprint ready? | **Wired in code** (`auth.ts` passkey experimental). Needs Supabase passkeys ON + one email sign-in to enroll. Not E2E-tested on her iPhone this session. |
 | PWA auto-update? | **No reinstall.** Network-first `jobs.json` / `index.html`; hashed `_astro/*` bundles. SW uses `skipWaiting` + `clients.claim`. Toast prompts reload when new SW installs. Tab left open hours may need close/reopen. |
 | Everything synced, no stubs? | **Was NO** before fixes. **Closer now** — see “Shipped this session”. Still no Web Push; `user_job_status` is migrate-only. |
-| Collapsing filters? | **Never in Astro app.** Legacy `APP_TEMPLATE` had `#filtertoggle` / `#filterpanel` collapsed by default. Astro shows all filter rows inline. **TODO.** |
+| Collapsing filters? | **Ported (done).** Astro has `#filter-toggle` / `.filter-panel.is-collapsed` with `filtersExpanded` persisted to localStorage, collapsed by default. |
 
 ---
 
@@ -65,7 +65,7 @@ This session moved the PWA from “strong beta” toward **production-complete s
 | Google OAuth client + Supabase provider | Operator |
 | Passkeys enabled in Supabase Auth | Operator |
 | Web Push + VAPID + `notificationclick` | Code + secrets |
-| **Collapsible filter panel** | Code (legacy pattern in `find_admin_jobs.py` ~2225, ~2626) |
+| ~~Collapsible filter panel~~ | **Done** — ported to Astro (`#filter-toggle`). |
 | `user_job_status` ongoing writes | Deferred — profile blob is source of truth |
 | Astro CSS in `verify/css/lint_css.py` CI gate | CI |
 | Camera gates for authed flows / forgot-password | verify/ |
