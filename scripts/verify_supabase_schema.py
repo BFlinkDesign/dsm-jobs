@@ -207,6 +207,36 @@ def rest_table_ok(base_url: str, service_key: str, table: str) -> bool:
         raise RuntimeError(f"PostgREST probe failed for {table}: HTTP {err.code}") from err
 
 
+def verify_reachable() -> bool:
+    """Lightweight 'is Supabase up?' check using the publishable (anon) key.
+
+    Used on push-triggered deploys, where the powerful service key is
+    intentionally withheld (security). It can't verify schema depth, but it
+    confirms the REST backend is reachable so a freshly published frontend
+    isn't pointed at a dead API. Any HTTP response (incl. 401/403/404 from RLS)
+    proves the host is up; only a 5xx or a connection error counts as down.
+    """
+    url = (os.environ.get("SUPABASE_URL") or "").rstrip("/")
+    key = os.environ.get("SUPABASE_PUBLISHABLE_KEY") or ""
+    if not URL_RE.match(url) or not key:
+        print("FAIL: need SUPABASE_URL + SUPABASE_PUBLISHABLE_KEY for reachability check")
+        return False
+    req = urllib.request.Request(
+        f"{url}/rest/v1/", headers={"apikey": key}, method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=20.0) as resp:
+            print(f"Supabase REST reachable: HTTP {resp.status}")
+            return 200 <= resp.status < 500
+    except urllib.error.HTTPError as err:
+        # An HTTP error status still proves the host responded (it's up).
+        print(f"Supabase REST reachable: HTTP {err.code}")
+        return 200 <= err.code < 500
+    except (urllib.error.URLError, TimeoutError, OSError) as err:
+        print(f"FAIL: Supabase unreachable: {err}")
+        return False
+
+
 def print_rows(label: str, rows: list[dict]) -> None:
     print("")
     print(f"=== {label} ===")
@@ -303,8 +333,8 @@ def main(argv: list[str] | None = None) -> int:
 
     go = False
     mode = "none"
-    mgmt_failed = False
 
+    # 1) Full schema verify — Management API (access token) or direct Postgres.
     if keys["SUPABASE_ACCESS_TOKEN"]:
         print("")
         print("Mode: Management API (read-only SQL via api.supabase.com)")
@@ -313,51 +343,55 @@ def main(argv: list[str] | None = None) -> int:
             mode = "full"
         except RuntimeError as err:
             print(f"WARN: Management API unavailable ({err})")
-            if keys["SUPABASE_DB_PASSWORD"]:
-                print("")
-                print("Mode: direct Postgres via Supabase session pooler (read-only schema checks)")
-                try:
-                    go = verify_full(postgres_query)
-                    mode = "full"
-                except RuntimeError as pg_err:
-                    print(f"WARN: direct Postgres unavailable ({pg_err})")
-            if mode != "full" and keys["SUPABASE_SERVICE_KEY"] and keys["SUPABASE_URL"]:
-                print("Falling back to PostgREST table probes...")
-                mgmt_failed = True
-            elif mode != "full":
-                print("FAIL: no PostgREST fallback (need SUPABASE_SERVICE_KEY)")
-                return 1
-    else:
-        mgmt_failed = False
-
-    if mode != "full" and keys["SUPABASE_SERVICE_KEY"] and keys["SUPABASE_URL"]:
-        if mode == "none":
-            print("")
-            print("Mode: PostgREST probes (tables only)")
+    if mode != "full" and keys["SUPABASE_DB_PASSWORD"] and keys["SUPABASE_POOLER_HOST"]:
+        print("")
+        print("Mode: direct Postgres via Supabase session pooler (read-only schema checks)")
         try:
-            go = verify_partial(mgmt_failed=mgmt_failed)
+            go = verify_full(postgres_query)
+            mode = "full"
+        except RuntimeError as pg_err:
+            print(f"WARN: direct Postgres unavailable ({pg_err})")
+
+    # 2) Partial — PostgREST table probes (needs the service key).
+    if mode != "full" and keys["SUPABASE_SERVICE_KEY"] and keys["SUPABASE_URL"]:
+        print("")
+        print("Mode: PostgREST table probes (tables only; RLS not checked)")
+        try:
+            go = verify_partial(mgmt_failed=bool(keys["SUPABASE_ACCESS_TOKEN"]))
             mode = "partial"
         except RuntimeError as err:
             print(f"FAIL: {err}")
             return 1
-    elif mode == "none":
+
+    # 3) Reachability only — publishable/anon key. Used on push-triggered
+    #    deploys, where the powerful service key is intentionally withheld
+    #    (PR #129 security gate). Confirms the backend is UP so the freshly
+    #    published frontend isn't pointed at a dead API; the daily cron and
+    #    manual dispatch (which carry full creds) still run the deep verify.
+    if mode == "none" and keys["SUPABASE_PUBLISHABLE_KEY"] and keys["SUPABASE_URL"]:
         print("")
+        print("Mode: reachability ping (publishable key — no service key on this run)")
+        go = verify_reachable()
+        mode = "reachable"
+
+    print("")
+    if mode == "none":
         print(
-            "NO-GO: set SUPABASE_URL plus SUPABASE_ACCESS_TOKEN (full verify) "
-            "or SUPABASE_SERVICE_KEY (partial table probe) in .env"
+            "NO-GO: set SUPABASE_URL plus one of SUPABASE_ACCESS_TOKEN (full verify), "
+            "SUPABASE_SERVICE_KEY (table probe), or SUPABASE_PUBLISHABLE_KEY (reachability)"
         )
         return 1
 
-    print("")
     if go and args.require_full and mode != "full":
         print("NO-GO: --require-full needs successful Management API or direct Postgres checks")
         return 1
 
     if go:
-        if mode == "full":
-            print("GO (full schema verify)")
-        else:
-            print("GO (partial — tables only; RLS/policies not checked)")
+        print({
+            "full": "GO (full schema verify)",
+            "partial": "GO (partial — tables only; RLS/policies not checked)",
+            "reachable": "GO (reachability only — backend is up; schema not deep-verified)",
+        }.get(mode, "GO"))
         return 0
     print("NO-GO: schema checks failed")
     return 1
