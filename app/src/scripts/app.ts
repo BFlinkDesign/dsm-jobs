@@ -149,9 +149,46 @@ function snoozedNow(id: string): boolean {
   return !!until && until > todayISO();
 }
 
-/** Speak text via SpeechSynthesis if the user has opted in. */
-function speakText(text: string): void {
-  if (!speakOn || !speechSynthOK || !text) return;
+// ── Rudy's voice ──────────────────────────────────────────────────────────
+// Prefer a warm ElevenLabs voice (via the `voice` edge function — key stays
+// server-side); fall back to the browser's built-in voice when the function or
+// key isn't set up yet. Repeated lines are cached so they don't re-bill.
+let voiceUnconfigured = false;             // set once the function reports no key
+const ttsCache = new Map<string, string>(); // text -> object URL
+let rudyAudio: HTMLAudioElement | null = null;
+
+function stopRudyVoice(): void {
+  try { rudyAudio?.pause(); } catch { /* no-op */ }
+  rudyAudio = null;
+  try { window.speechSynthesis?.cancel(); } catch { /* no-op */ }
+}
+
+/** Try the ElevenLabs voice. Returns false if unavailable (caller falls back). */
+async function elevenSpeak(text: string): Promise<boolean> {
+  const sb = getClient();
+  if (!sb || voiceUnconfigured) return false;
+  try {
+    let url = ttsCache.get(text);
+    if (!url) {
+      const { data, error } = await sb.functions.invoke("voice", { body: { mode: "tts", text } });
+      if (error) return false;
+      if (data?.unconfigured) { voiceUnconfigured = true; return false; }
+      if (!data?.audio) return false;
+      const bytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
+      url = URL.createObjectURL(new Blob([bytes], { type: data.mime || "audio/mpeg" }));
+      ttsCache.set(text, url);
+    }
+    stopRudyVoice();
+    const a = new Audio(url);
+    rudyAudio = a;
+    await a.play();
+    return true;
+  } catch { return false; }
+}
+
+/** The browser's built-in voice — the fallback only. */
+function synthSpeak(text: string): void {
+  if (!speechSynthOK) return;
   try {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
@@ -159,6 +196,15 @@ function speakText(text: string): void {
     u.rate = 0.96; u.pitch = 1.0; u.volume = 1.0;
     window.speechSynthesis.speak(u);
   } catch { /* no-op */ }
+}
+
+/** Speak Rudy's text aloud if the user has the voice on. */
+function speakText(text: string): void {
+  if (!speakOn || !text) return;
+  void (async () => {
+    const ok = await elevenSpeak(text);
+    if (!ok) synthSpeak(text);
+  })();
 }
 
 /** How strong a lead is FOR HER — her quiz answers weigh most, then remote,
@@ -1836,7 +1882,7 @@ function openRudy(): void {
 function closeRudy(): void {
   const ov = $("#rudy-overlay");
   if (ov) { ov.hidden = true; document.body.style.overflow = ""; clearModalTrap(); }
-  try { window.speechSynthesis?.cancel(); } catch { /* no-op */ }
+  stopRudyVoice();
 }
 
 async function renderRudyLog(): Promise<void> {
@@ -2676,9 +2722,11 @@ async function boot(): Promise<void> {
     });
   }
 
-  // ── Voice: SpeechSynthesis (read-aloud toggle) ──────────────────────────
+  // ── Voice OUT: "Rudy reads replies aloud" toggle. Voice itself is ElevenLabs
+  // (speakText), with the browser voice as fallback — so keep the toggle even
+  // when SpeechSynthesis is missing (ElevenLabs may still work). ──────────────
   speechSynthOK = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
-  speakOn = speechSynthOK && localStorage.getItem("rudySpeak") === "1";
+  speakOn = localStorage.getItem("rudySpeak") === "1";
   const pickVoice = (): void => {
     if (!speechSynthOK) return;
     try {
@@ -2697,11 +2745,11 @@ async function boot(): Promise<void> {
     try { window.speechSynthesis.onvoiceschanged = pickVoice; } catch { /* no-op */ }
   }
   const spkBtn = $("#rudy-spk");
+  const spkState = $("#rudy-spk-state");
   const syncSpeaker = (): void => {
     if (!spkBtn) return;
-    spkBtn.hidden = !speechSynthOK;
     spkBtn.setAttribute("aria-pressed", speakOn ? "true" : "false");
-    spkBtn.title = speakOn ? "Turn Rudy voice off" : "Read Rudy aloud";
+    if (spkState) spkState.textContent = speakOn ? "On" : "Off";
   };
   if (spkBtn) {
     syncSpeaker();
@@ -2709,61 +2757,82 @@ async function boot(): Promise<void> {
       speakOn = !speakOn;
       localStorage.setItem("rudySpeak", speakOn ? "1" : "0");
       syncSpeaker();
-      toast(speakOn ? "Rudy voice on" : "Rudy voice off");
-      if (!speakOn) { try { window.speechSynthesis.cancel(); } catch { /* no-op */ } }
+      if (!speakOn) stopRudyVoice();
+      else toast("Rudy will read replies aloud");
     });
   }
 
-  // ── Voice: SpeechRecognition (mic input) ────────────────────────────────
-  // SpeechRecognition is not in strict TS lib; cast via unknown throughout.
-  type AnyRec = Record<string, unknown>;
-  const winRec = window as unknown as AnyRec;
-  const SRClass: (new () => AnyRec) | null =
-    typeof winRec["SpeechRecognition"] === "function"
-      ? (winRec["SpeechRecognition"] as new () => AnyRec)
-      : typeof winRec["webkitSpeechRecognition"] === "function"
-      ? (winRec["webkitSpeechRecognition"] as new () => AnyRec)
-      : null;
+  // ── Voice IN: tap the mic to talk to Rudy. Records with MediaRecorder and
+  // transcribes via the `voice` edge function (ElevenLabs) — works on iOS,
+  // unlike the old SpeechRecognition. Hidden where the mic API is unavailable. ─
   const micBtn = $("#rudy-mic");
-  if (SRClass && micBtn) {
+  const listenEl = $("#rudy-listen");
+  const micOK = !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
+  if (micBtn && micOK) {
     micBtn.hidden = false;
-    let rec: AnyRec | null = null;
-    let listening = false;
-    const listenEl = $("#rudy-listen");
-    const setListening = (on: boolean): void => {
-      listening = on;
+    let rec: MediaRecorder | null = null;
+    let chunks: BlobPart[] = [];
+    let stream: MediaStream | null = null;
+    let autostop: ReturnType<typeof setTimeout> | undefined;
+    let recording = false;
+    const setRec = (on: boolean): void => {
+      recording = on;
       micBtn.classList.toggle("on", on);
+      micBtn.setAttribute("aria-pressed", on ? "true" : "false");
       if (listenEl) listenEl.hidden = !on;
     };
-    micBtn.addEventListener("click", () => {
-      if (listening) { try { (rec?.stop as (() => void) | undefined)?.(); } catch { /* no-op */ } return; }
-      try { window.speechSynthesis?.cancel(); } catch { /* no-op */ }
+    const endStream = (): void => {
+      if (autostop) clearTimeout(autostop);
+      try { stream?.getTracks().forEach((t) => t.stop()); } catch { /* no-op */ }
+      stream = null;
+    };
+    const stop = (): void => {
+      if (autostop) clearTimeout(autostop);
+      try { if (rec && rec.state === "recording") rec.stop(); } catch { /* no-op */ }
+    };
+    const transcribe = async (blob: Blob): Promise<void> => {
+      const sb = getClient();
+      if (!sb || !blob.size) return;
+      const b64 = await new Promise<string>((res) => {
+        const fr = new FileReader();
+        fr.onload = () => res(String(fr.result).split(",")[1] || "");
+        fr.onerror = () => res("");
+        fr.readAsDataURL(blob);
+      });
+      if (!b64) return;
       try {
-        rec = new SRClass();
-        rec["lang"] = "en-US";
-        rec["interimResults"] = false;
-        rec["maxAlternatives"] = 1;
-        rec["continuous"] = false;
-        rec["onresult"] = (ev: unknown) => {
-          let said = "";
-          try {
-            const e = ev as AnyRec;
-            const results = e["results"] as unknown[];
-            const first = results[0] as unknown[];
-            said = String(first[0] && (first[0] as AnyRec)["transcript"] || "");
-          } catch { /* no-op */ }
-          if (said) {
-            const inp = $("#rudy-input") as HTMLInputElement | null;
-            if (inp) inp.value = said;
-            setListening(false);
-            void sendRudy();
-          }
-        };
-        rec["onerror"] = () => { setListening(false); };
-        rec["onend"] = () => { setListening(false); };
-        setListening(true);
-        (rec["start"] as () => void)();
-      } catch { setListening(false); }
+        const { data, error } = await sb.functions.invoke("voice", { body: { mode: "stt", audio: b64, mime: blob.type } });
+        if (error || data?.unconfigured || !data?.text) {
+          toast(data?.unconfigured ? "Voice typing isn't set up yet" : "Didn't catch that — try typing");
+          return;
+        }
+        const inp = $("#rudy-input") as HTMLInputElement | null;
+        if (inp) inp.value = data.text;
+        void sendRudy();
+      } catch { toast("Didn't catch that — try typing"); }
+    };
+    micBtn.addEventListener("click", async () => {
+      if (recording) { stop(); return; }
+      stopRudyVoice();
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch { toast("Let the app use your mic to talk to Rudy"); return; }
+      chunks = [];
+      const mime = MediaRecorder.isTypeSupported("audio/webm") ? "audio/webm"
+        : MediaRecorder.isTypeSupported("audio/mp4") ? "audio/mp4" : "";
+      try {
+        rec = mime ? new MediaRecorder(stream, { mimeType: mime }) : new MediaRecorder(stream);
+      } catch { rec = new MediaRecorder(stream); }
+      rec.ondataavailable = (e) => { if (e.data && e.data.size) chunks.push(e.data); };
+      rec.onstop = () => {
+        setRec(false);
+        const blob = new Blob(chunks, { type: rec?.mimeType || "audio/webm" });
+        endStream();
+        void transcribe(blob);
+      };
+      setRec(true);
+      rec.start();
+      autostop = setTimeout(stop, 15000);   // never record forever
     });
   } else if (micBtn) {
     micBtn.hidden = true;
