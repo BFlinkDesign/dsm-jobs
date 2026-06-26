@@ -48,7 +48,10 @@ def test_rudy_voice_and_spicy_modes_are_explicit_opt_in():
     page = _read("app/src/pages/index.astro")
     fn = _read("supabase/functions/companion/index.ts")
 
-    assert 'aria-pressed="false" title="Read Rudy aloud"' in page
+    # Rudy's read-aloud voice is opt-in: the toggle defaults to off
+    # (aria-pressed="false") and its visible state label reads "Off".
+    assert 'id="rudy-spk" aria-pressed="false"' in page
+    assert 'id="rudy-spk-state">Off' in page
     assert 'localStorage.getItem("rudySpeak") === "1"' in app
     assert 'localStorage.getItem("rudySpicy") === "1"' in app
     assert 'body: { message: msg, spicy: spicyOn }' in app

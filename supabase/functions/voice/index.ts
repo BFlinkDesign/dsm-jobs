@@ -73,7 +73,9 @@ function b64encode(buf: ArrayBuffer): string {
   return btoa(bin);
 }
 
-function b64decode(b64: string): Uint8Array {
+// Returns Uint8Array<ArrayBuffer> (not the default ArrayBufferLike) so the
+// bytes are accepted directly as a BlobPart under Deno's strict lib.
+function b64decode(b64: string): Uint8Array<ArrayBuffer> {
   const bin = atob(b64);
   const out = new Uint8Array(bin.length);
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
