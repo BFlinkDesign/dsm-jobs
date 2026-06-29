@@ -113,3 +113,29 @@ Live site: https://bflinkdesign.github.io/dsm-jobs/ (repo rename breaks installe
 | Astro build | `cd app && npm run build` |
 
 When in doubt: **HANDOFF.md** for session truth, **CLAUDE.md** for system design and invariants.
+
+## Cursor Cloud specific instructions
+
+The startup update script already installs deps (`pip install -r requirements-dev.txt`
+and `npm --prefix app ci`). Python 3.12 + Node 22 on the VM match CI. Standard
+lint/test/build/run commands live in the **Commands cheat sheet** above and in
+`CLAUDE.md` — use those; notes below are only the non-obvious caveats.
+
+- **Generate feeds before building/serving.** The Astro UI reads
+  `app/public/{jobs,meta,portal}.json` at runtime. Run `python find_admin_jobs.py --mock`
+  first (no keys needed) — without it the build has stale/empty feeds. These JSON files
+  are gitignored, so they won't exist on a fresh checkout until the scan runs.
+- **Serving the built PWA needs the `/dsm-jobs/` base path.** `npm run build` emits to
+  `web/` with all asset URLs under `/dsm-jobs/`, so serving `web/` at the server root 404s.
+  Either serve via a symlink wrapper:
+  `mkdir -p local-serve && ln -sfn "$PWD/web" local-serve/dsm-jobs && python -m http.server 8137 --directory local-serve --bind 127.0.0.1`
+  then open `http://127.0.0.1:8137/dsm-jobs/`; **or** for dev mode just run
+  `cd app && npm run dev` (Astro dev server already serves under `/dsm-jobs/`). `local-serve/`
+  is gitignored.
+- **Save / Mark applied / Notes / Rudy tailor are auth-gated** (`authed = !!supabaseUser`,
+  `app/src/scripts/app.ts`). With no Supabase config (empty `portal.json`), those buttons are
+  intentionally hidden — this is expected, not a bug. The full **browse → search → filter →
+  sort → commute-radius → hide/snooze** discovery loop works anonymously via localStorage and
+  is the right path to verify the app end-to-end without external services.
+- Supabase/live-scan features need secrets (`ADZUNA_*`, `SUPABASE_*`, etc.) and follow the
+  **Supabase operating rules** above. The mock-scan + static-PWA path needs none.
