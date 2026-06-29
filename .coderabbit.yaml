@@ -3,6 +3,8 @@
 # Copy to a target repo root as `.coderabbit.yaml` only when CodeRabbit remains
 # installed for that repo. This template keeps CodeRabbit quiet unless requested,
 # avoiding paid-review/status noise while deterministic CI stays the merge gate.
+# Human-in-the-loop review remains available by explicitly requesting
+# `@coderabbitai review`; it is not an always-on source of email/status noise.
 #
 # Start from defaults: open any PR and comment `@coderabbitai configuration`,
 # then merge the pieces you want from this file.
