@@ -5,9 +5,11 @@ import {
   clearAutosave,
   clearChatHistory,
   debouncePushNote,
+  drainPendingSaves,
   initAutosave,
   loadChatHistory,
   loadPortal,
+  pendingSyncCount,
   pullLegacyTables,
   pullNotes,
   pullProfile,
@@ -605,6 +607,25 @@ function updateStaleBanner(): void {
 function updateOfflineBanner(): void {
   const el = document.getElementById("offline-banner");
   if (el) el.hidden = navigator.onLine;
+}
+
+async function updateSyncBanner(): Promise<void> {
+  const el = document.getElementById("sync-banner");
+  if (!el) return;
+  const pending = await pendingSyncCount();
+  if (pending <= 0) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.textContent = navigator.onLine
+    ? `Syncing ${pending} saved change${pending === 1 ? "" : "s"} to her account...`
+    : `${pending} saved change${pending === 1 ? "" : "s"} safe on this phone. They will sync when internet is back.`;
+}
+
+function updateConnectionBanners(): void {
+  updateOfflineBanner();
+  void updateSyncBanner();
 }
 
 function syncFilterChips(): void {
@@ -2566,11 +2587,14 @@ async function refreshAuth(): Promise<void> {
     await pullLegacyTables();
     await pullNotes();
     autosave();
+    await drainPendingSaves();
+    await updateSyncBanner();
     commuteMax = getState().commuteRadius;
     rudyHistoryLoaded = false;
     if (!wasAuthed) offerPasskeyNudge(user.id);
   } else {
     clearAutosave();
+    await updateSyncBanner();
   }
   render();
 }
@@ -2683,9 +2707,14 @@ async function boot(): Promise<void> {
   } catch { /* quota */ }
   commuteMax = getState().commuteRadius;
   bindViewHost();
-  updateOfflineBanner();
-  window.addEventListener("online", () => { updateOfflineBanner(); void loadFeed().then((ok) => { if (ok) render(); }); });
-  window.addEventListener("offline", updateOfflineBanner);
+  updateConnectionBanners();
+  window.addEventListener("dsm-jobs-outbox-change", () => { void updateSyncBanner(); });
+  window.addEventListener("online", () => {
+    updateConnectionBanners();
+    void drainPendingSaves().then(() => updateSyncBanner());
+    void loadFeed().then((ok) => { if (ok) render(); });
+  });
+  window.addEventListener("offline", updateConnectionBanners);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Tab") { handleTrapTab(e); return; }
     if (e.key === "Escape") {

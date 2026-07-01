@@ -186,6 +186,32 @@ def test_application_status_has_persistent_undo_and_custom_followup_date():
     assert ".app-status-field" in css
 
 
+def test_client_resilience_queues_account_sync_when_offline():
+    app = _read("app/src/scripts/app.ts")
+    autosave = _read("app/src/scripts/autosave.ts")
+    outbox = _read("app/src/scripts/outbox.ts")
+    page = _read("app/src/pages/index.astro")
+    css = _read("app/src/styles/app.css")
+
+    assert "indexedDB.open" in outbox
+    assert "dsm-jobs-outbox" in outbox
+    assert "enqueueOutbox" in outbox
+    assert "drainOutbox" in outbox
+    assert 'kind: "profile"' in autosave
+    assert 'kind: "note"' in autosave
+    assert 'kind: "chat"' in autosave
+    assert 'kind: "chat_clear"' in autosave
+    assert "drainPendingSaves" in autosave
+    assert "Saved on this phone" in autosave
+    assert 'delete().eq("job_id", jobId)' in autosave
+    assert 'id="sync-banner"' in page
+    assert "role=\"status\"" in page
+    assert "pendingSyncCount" in app
+    assert "dsm-jobs-outbox-change" in app
+    assert "safe on this phone" in app
+    assert ".banner-sync" in css
+
+
 def test_resume_document_manager_preserves_multiple_documents():
     app = _read("app/src/scripts/app.ts")
     types = _read("app/src/scripts/types.ts")
