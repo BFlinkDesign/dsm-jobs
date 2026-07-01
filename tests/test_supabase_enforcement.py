@@ -94,3 +94,31 @@ def test_edge_checks_are_not_path_limited():
     edge = _read(".github/workflows/edge-checks.yml")
     assert "pull_request:" in edge
     assert "paths:" not in edge
+
+
+def test_voice_deploy_workflow_is_snapshot_first_and_secret_blind():
+    workflow = _read(".github/workflows/voice-deploy.yml")
+    snapshot_pos = workflow.index("Snapshot Supabase before voice changes")
+    secret_set_pos = workflow.index("Configure voice provider secrets")
+    deploy_pos = workflow.index("Deploy voice function")
+
+    assert "workflow_dispatch:" in workflow
+    assert "SUPABASE_ACCESS_TOKEN" in workflow
+    assert "SUPABASE_SERVICE_KEY" in workflow
+    assert "REPLICATE_API_TOKEN" in workflow
+    assert "SNAPSHOT_ARCHIVE_PASSPHRASE" in workflow
+    assert "python scripts/verify_voice_readiness.py --source-only" in workflow
+    assert "python scripts/snapshot_supabase.py" in workflow
+    assert "python scripts/verify_supabase_schema.py --require-full" in workflow
+    assert snapshot_pos < secret_set_pos < deploy_pos
+    assert "openssl enc -aes-256-cbc -pbkdf2 -salt" in workflow
+    assert "Upload encrypted snapshot" in workflow
+    assert 'encrypted="$archive.enc"' in workflow
+    assert 'rm -f "$archive"' in workflow
+    assert "SNAP_ARCHIVE=$encrypted" in workflow
+    assert "${{ env.SNAP_ARCHIVE }}" in workflow
+    assert "supabase secrets set --env-file" in workflow
+    assert "supabase functions deploy voice" in workflow
+    assert "Verify JWT remains enforced" in workflow
+    assert "accepted an unauthenticated request" in workflow
+    assert "set -x" not in workflow
