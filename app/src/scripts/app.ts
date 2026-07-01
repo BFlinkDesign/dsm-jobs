@@ -3,6 +3,7 @@ import {
   appendChatToLocal,
   autosave,
   clearAutosave,
+  clearChatHistory,
   debouncePushNote,
   initAutosave,
   loadChatHistory,
@@ -1883,6 +1884,110 @@ function closeRudy(): void {
   const ov = $("#rudy-overlay");
   if (ov) { ov.hidden = true; document.body.style.overflow = ""; clearModalTrap(); }
   stopRudyVoice();
+  closeRudyMemory();
+}
+
+/** Human label for a saved quiz value, e.g. kind="home" -> "Working from home".
+ * Falls back to the raw value if it's not one of the known quiz options — this
+ * happens for a value the companion itself saved (e.g. a free-text `notes`). */
+function quizValueLabel(key: string, val: string): string {
+  const entry = QUIZ.find(([k]) => k === key);
+  const opt = entry?.[2].find(([v]) => v === val);
+  return opt ? opt[1] : val;
+}
+
+/** "What Rudy remembers" — a plain-language list of every fact Rudy actually
+ * has about her (preference flags the quiz/chat set, her saved résumé
+ * documents, and her recent chat history), each with a one-tap way to forget
+ * it. Nothing here is inferred; it mirrors exactly what companion/grounding.ts
+ * sends the model and what the chat log holds. */
+function renderRudyMemory(): void {
+  const body = $("#rudy-memory-body");
+  if (!body) return;
+  const p = getState().profile;
+  const quizEntries = Object.entries(p.quiz).filter(([, v]) => !!v);
+
+  const prefsHtml = quizEntries.length
+    ? `<div class="doc-list" aria-label="Preferences Rudy has picked up">
+        ${quizEntries.map(([key, val]) => {
+      const entry = QUIZ.find(([k]) => k === key);
+      const question = entry?.[1] ?? key;
+      return `<article class="doc-item">
+            <div class="doc-main">
+              <span class="doc-name">${esc(question)}</span>
+              <span class="doc-meta">${esc(quizValueLabel(key, val))}</span>
+            </div>
+            <div class="doc-actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-mem-forget-quiz="${esc(key)}">Forget</button>
+            </div>
+          </article>`;
+    }).join("")}
+      </div>`
+    : `<p class="field-hint doc-empty">No preferences saved yet — answer a few questions in My corner, or just tell Rudy in chat.</p>`;
+
+  const docsHtml = p.documents.length
+    ? `<div class="doc-list" aria-label="Résumé documents Rudy can read from">
+        ${p.documents.map((doc) => {
+      const active = doc.id === p.activeDocumentId;
+      return `<article class="doc-item${active ? " is-active" : ""}">
+            <div class="doc-main">
+              <span class="doc-name">${esc(doc.name)}</span>
+              <span class="doc-meta">${esc(documentStats(doc.text))}${active ? " · selected for tailoring" : ""}</span>
+            </div>
+            <div class="doc-actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-mem-forget-doc="${esc(doc.id)}">Delete</button>
+            </div>
+          </article>`;
+    }).join("")}
+      </div>`
+    : `<p class="field-hint doc-empty">No résumé saved yet — add one in My corner and Rudy can read it.</p>`;
+
+  body.innerHTML = `
+    <section class="mem-section">
+      <h4 class="section-title">Preferences she's told Rudy</h4>
+      ${prefsHtml}
+    </section>
+    <section class="mem-section">
+      <h4 class="section-title">Saved résumé</h4>
+      ${docsHtml}
+    </section>
+    <section class="mem-section">
+      <h4 class="section-title">Chat history</h4>
+      <p class="field-hint" id="rudy-memory-chat-count">Checking...</p>
+      <button type="button" class="btn btn-ghost btn-sm" id="rudy-memory-clear-chat">Clear conversation history</button>
+    </section>
+  `;
+
+  void loadChatHistory().then((msgs) => {
+    const el = $("#rudy-memory-chat-count");
+    if (!el) return;
+    el.textContent = msgs.length
+      ? `Rudy can see your last ${msgs.length} message${msgs.length === 1 ? "" : "s"} to keep the conversation going.`
+      : "No chat history saved yet.";
+  });
+}
+
+function openRudyMemory(): void {
+  const log = $("#rudy-log");
+  const prompts = $(".rudy-prompts") as HTMLElement | null;
+  const mem = $("#rudy-memory");
+  const btn = $("#rudy-memory-open");
+  if (log) log.hidden = true;
+  if (prompts) prompts.hidden = true;
+  if (mem) mem.hidden = false;
+  if (btn) btn.setAttribute("aria-pressed", "true");
+  renderRudyMemory();
+}
+
+function closeRudyMemory(): void {
+  const log = $("#rudy-log");
+  const prompts = $(".rudy-prompts") as HTMLElement | null;
+  const mem = $("#rudy-memory");
+  const btn = $("#rudy-memory-open");
+  if (log) log.hidden = false;
+  if (prompts) prompts.hidden = false;
+  if (mem) mem.hidden = true;
+  if (btn) btn.setAttribute("aria-pressed", "false");
 }
 
 async function renderRudyLog(): Promise<void> {
@@ -2691,6 +2796,39 @@ async function boot(): Promise<void> {
   });
 
   $("#rudy-close")?.addEventListener("click", closeRudy);
+  $("#rudy-memory-open")?.addEventListener("click", openRudyMemory);
+  $("#rudy-memory-close")?.addEventListener("click", closeRudyMemory);
+  $("#rudy-memory")?.addEventListener("click", (e) => {
+    const t = (e.target as HTMLElement).closest(
+      "[data-mem-forget-quiz], [data-mem-forget-doc], #rudy-memory-clear-chat"
+    ) as HTMLElement | null;
+    if (!t) return;
+    if (t.id === "rudy-memory-clear-chat") {
+      void clearChatHistory().then(() => {
+        toast("Chat history cleared");
+        rudyHistoryLoaded = false;
+        renderRudyMemory();
+      });
+      return;
+    }
+    const quizKey = t.getAttribute("data-mem-forget-quiz");
+    if (quizKey) {
+      patchState((s) => { delete s.profile.quiz[quizKey]; });
+      autosave();
+      toast("Forgotten");
+      renderRudyMemory();
+      return;
+    }
+    const docId = t.getAttribute("data-mem-forget-doc");
+    if (docId) {
+      patchState((s) => { removeResumeDocument(s.profile, docId); });
+      autosave();
+      toast("Résumé deleted");
+      renderRudyMemory();
+      if (view === "corner") renderCorner();
+      return;
+    }
+  });
   $("#rudy-send")?.addEventListener("click", () => { void sendRudy(); });
   $("#rudy-input")?.addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Enter") void sendRudy();
