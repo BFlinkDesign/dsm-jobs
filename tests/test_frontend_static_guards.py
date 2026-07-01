@@ -63,6 +63,26 @@ def test_rudy_voice_and_spicy_modes_are_explicit_opt_in():
     assert '/^me$/i.test(rawWho) ? "Brady" : rawWho' in app
 
 
+def test_rudy_voice_contract_uses_chatterbox_default_without_stale_client_copy():
+    app = _read("app/src/scripts/app.ts")
+    page = _read("app/src/pages/index.astro")
+    cfg = _read("supabase/config.toml")
+    voice = _read("supabase/functions/voice/index.ts")
+
+    assert "[functions.voice]" in cfg
+    voice_section = cfg.split("[functions.voice]", 1)[1].split("[", 1)[0]
+    assert "verify_jwt = true" in voice_section
+    assert 'if (env("REPLICATE_API_TOKEN")) return "chatterbox";' in voice
+    assert 'case "chatterbox": return await ttsChatterbox(clean);' in voice
+    assert 'default: return json({ unconfigured: true });' in voice
+    assert "edgeSpeak" in app
+    assert "elevenSpeak" not in app
+    assert "MediaRecorder -> voice Edge Function" in page
+    assert "ElevenLabs" not in app
+    assert "ElevenLabs" not in page
+    assert "ElevenLabs" not in cfg
+
+
 def test_rudy_thinking_bubbles_are_bound_by_element_reference():
     text = _read("app/src/scripts/app.ts")
     assert 'id="rudy-think"' not in text
@@ -272,6 +292,16 @@ def test_service_worker_only_caches_same_origin_gets():
     sw = _read("app/public/sw.js")
     assert "const url = new URL(req.url);" in sw
     assert "if (url.origin !== self.location.origin) return;" in sw
+
+
+def test_service_worker_notification_click_returns_to_app_window():
+    sw = _read("app/public/sw.js")
+    assert 'self.addEventListener("notificationclick"' in sw
+    assert "e.notification.close()" in sw
+    assert "clients.matchAll({ type: \"window\", includeUncontrolled: true })" in sw
+    assert 'url.pathname.includes("/dsm-jobs/")' in sw
+    assert "sameApp.focus()" in sw
+    assert "self.clients.openWindow(target)" in sw
 
 
 def test_github_pages_serves_astro_underscore_assets():

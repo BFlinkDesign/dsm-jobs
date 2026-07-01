@@ -277,7 +277,7 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
         <button type="button" class="btn btn-ghost btn-sm" data-rudy-prompt="What do you actually remember about me?">Memory check</button>
       </div>
       <div class="rudy-dock">
-        <!-- Tap to talk to Rudy (MediaRecorder -> ElevenLabs STT; wired in app.ts, hidden if mic unavailable) -->
+        <!-- Tap to talk to Rudy (MediaRecorder -> voice Edge Function; wired in app.ts, hidden if mic unavailable) -->
         <button type="button" class="rudy-mic" id="rudy-mic" aria-label="Tap to talk to Rudy" aria-pressed="false" title="Tap to talk" hidden>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10a7 7 0 0014 0M12 19v3M9 22h6"/></svg>
         </button>
@@ -285,7 +285,7 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
         <button type="button" class="btn btn-primary" id="rudy-send">Send</button>
       </div>
       <div class="rudy-voicebar">
-        <!-- One clear control: should Rudy speak her replies out loud? (ElevenLabs voice; wired in app.ts) -->
+        <!-- One clear control: should Rudy speak her replies out loud? (server voice with browser fallback; wired in app.ts) -->
         <button type="button" class="rudy-readaloud" id="rudy-spk" aria-pressed="false">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 5L6 9H2v6h4l5 4V5z"/><path d="M19.07 4.93a10 10 0 010 14.14M15.54 8.46a5 5 0 010 7.07"/></svg>
           <span>Rudy reads replies aloud</span>
