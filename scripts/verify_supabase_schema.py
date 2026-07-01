@@ -1,7 +1,9 @@
 """Read-only portal schema verification - no Supabase CLI login required.
 
 Loads keys from repo-root `.env`, then an optional explicit env file named by
-`DSM_JOBS_SUPABASE_ENV_FILE`. Key names are logged; values are never printed.
+`DSM_JOBS_SUPABASE_ENV_FILE`. By default it also checks
+`~/Secrets/dsm-jobs/supabase-admin.env` so live-operation credentials can stay
+outside the repo. Key names are logged; values are never printed.
 Preferred path: Supabase Management API (`SUPABASE_ACCESS_TOKEN` + project ref
 from `SUPABASE_URL`). Fallback: PostgREST table probes with
 `SUPABASE_SERVICE_KEY` (tables only - RLS/policy checks skipped).
@@ -72,8 +74,23 @@ ORDER BY tablename;
 """
 
 
-def load_env(path: Path) -> None:
-    """Read KEY=VALUE lines into os.environ (setdefault — first file wins)."""
+def default_secrets_dir() -> Path:
+    override = os.environ.get("DSM_JOBS_SECRETS_DIR")
+    if override:
+        return Path(override)
+    return Path.home() / "Secrets" / "dsm-jobs"
+
+
+def default_admin_env_path() -> Path:
+    return default_secrets_dir() / "supabase-admin.env"
+
+
+def load_env(path: Path, *, override: bool = False) -> None:
+    """Read KEY=VALUE lines into os.environ.
+
+    Defaults are first-file-wins. Explicit env-file overrides are intentional
+    because operators may point at a fresh snapshot/deploy credential bundle.
+    """
     if not path.is_file():
         return
     try:
@@ -86,7 +103,20 @@ def load_env(path: Path) -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, val = line.partition("=")
-        os.environ.setdefault(key.strip(), val.strip().strip('"').strip("'"))
+        key = key.strip()
+        val = val.strip().strip('"').strip("'")
+        if override:
+            os.environ[key] = val
+        else:
+            os.environ.setdefault(key, val)
+
+
+def load_standard_env(root: Path = REPO_ROOT) -> None:
+    load_env(root / ".env")
+    load_env(default_admin_env_path())
+    extra_env = os.environ.get("DSM_JOBS_SUPABASE_ENV_FILE")
+    if extra_env:
+        load_env(Path(extra_env), override=True)
 
 
 def present_keys() -> dict[str, bool]:
@@ -312,10 +342,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    load_env(REPO_ROOT / ".env")
-    extra_env = os.environ.get("DSM_JOBS_SUPABASE_ENV_FILE")
-    if extra_env:
-        load_env(Path(extra_env))
+    load_standard_env()
 
     keys = present_keys()
     print(f"Repo: {REPO_ROOT}")

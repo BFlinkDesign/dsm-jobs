@@ -1,4 +1,8 @@
 .env
+Secrets/
+edge-voice.env
+supabase-admin.env
+*.local.env
 admin-jobs-*.csv
 admin-jobs-*.html
 data/
