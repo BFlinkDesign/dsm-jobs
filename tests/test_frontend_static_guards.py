@@ -191,6 +191,14 @@ def test_application_status_has_persistent_undo_and_custom_followup_date():
     assert "fu.done = false" in app
     assert ".follow-date-label" in css
     assert ".app-status-field" in css
+    assert "renderApplicationCockpit" in app
+    assert "Application cockpit" in app
+    assert "What needs attention" in app
+    assert "data-follow-copy" in app
+    assert "Copy message" in app
+    assert "Follow-up message copied" in app
+    assert ".app-cockpit" in css
+    assert ".app-action-card" in css
 
 
 def test_client_resilience_queues_account_sync_when_offline():

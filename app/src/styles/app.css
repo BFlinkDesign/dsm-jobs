@@ -1024,6 +1024,70 @@ body::after {
   color: var(--ink);
 }
 
+.app-cockpit {
+  border: 1px solid color-mix(in srgb, var(--route) 24%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--route) 7%, var(--surface));
+  padding: var(--space-4);
+  margin: var(--space-4) 0;
+}
+.app-cockpit-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  margin-bottom: var(--space-3);
+}
+.app-cockpit-head h3,
+.app-action-card h3 {
+  margin: 0;
+  font-size: var(--text-lg);
+  line-height: 1.2;
+}
+.app-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: var(--space-3);
+}
+.app-stat-grid > div {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: color-mix(in srgb, var(--surface) 84%, #000);
+}
+.app-stat-grid b {
+  display: block;
+  font-family: var(--font-display);
+  font-size: var(--text-xl);
+  line-height: 1;
+}
+.app-stat-grid span {
+  display: block;
+  margin-top: 4px;
+  color: var(--ink-muted);
+  font-size: var(--text-xs);
+}
+.app-next-list {
+  display: grid;
+  gap: 10px;
+}
+.app-action-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  border-top: 1px solid color-mix(in srgb, var(--route) 24%, var(--line));
+  padding-top: 12px;
+}
+.app-action-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.app-action-buttons .btn {
+  min-height: 42px;
+}
+
 /* ── Hidden job card (dim when shown in show-all mode) ──────────────────── */
 .card-hidden {
   opacity: 0.55;
