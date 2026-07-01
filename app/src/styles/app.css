@@ -1424,6 +1424,11 @@ body::after {
   border: 1px solid rgba(251, 191, 36, 0.35);
   color: var(--ink);
 }
+.banner-sync {
+  background: color-mix(in srgb, var(--mint) 10%, var(--surface));
+  border: 1px solid color-mix(in srgb, var(--mint) 35%, var(--line));
+  color: var(--ink);
+}
 .banner-stale {
   background: color-mix(in oklab, var(--purple-bright) 12%, var(--surface));
   border: 1px solid var(--line);

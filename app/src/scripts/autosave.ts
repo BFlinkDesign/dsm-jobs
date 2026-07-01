@@ -1,4 +1,5 @@
 import { defaultState, getState, setState } from "./store";
+import { drainOutbox, enqueueOutbox, pendingOutboxCount, type OutboxOperation } from "./outbox";
 import type { AppliedEntry, FilterPrefs, PortalCfg } from "./types";
 import { defaultFilters } from "./types";
 import { todayISO } from "./util";
@@ -17,6 +18,7 @@ type LegacyStatusRow = {
 let sb: Sb | null = null;
 let userId: string | null = null;
 let onToast: ((msg: string) => void) | null = null;
+let drainingOutbox = false;
 
 // Tracks the Supabase row UUID for each job's note (job_id -> row.id).
 const noteRowIds: Record<string, string> = {};
@@ -45,6 +47,55 @@ export function clearAutosave(): void {
   sb = null;
   userId = null;
   onToast = null;
+}
+
+export async function pendingSyncCount(): Promise<number> {
+  return pendingOutboxCount(userId ?? undefined);
+}
+
+async function queueProfile(profile: Record<string, unknown>): Promise<void> {
+  const uid = userId;
+  if (!uid) return;
+  await enqueueOutbox({
+    key: `profile:${uid}`,
+    kind: "profile",
+    userId: uid,
+    payload: { profile },
+  });
+}
+
+async function queueNote(jobId: string, body: string): Promise<void> {
+  const uid = userId;
+  if (!uid) return;
+  await enqueueOutbox({
+    key: `note:${uid}:${jobId}`,
+    kind: "note",
+    userId: uid,
+    payload: { jobId, body },
+  });
+}
+
+async function queueChat(role: "user" | "assistant", body: string): Promise<void> {
+  const uid = userId;
+  if (!uid) return;
+  const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  await enqueueOutbox({
+    key: `chat:${uid}:${suffix}`,
+    kind: "chat",
+    userId: uid,
+    payload: { role, body },
+  });
+}
+
+async function queueChatClear(): Promise<void> {
+  const uid = userId;
+  if (!uid) return;
+  await enqueueOutbox({
+    key: `chat_clear:${uid}`,
+    kind: "chat_clear",
+    userId: uid,
+    payload: {},
+  });
 }
 
 /** Pull all job notes for this user into state.notes + populate noteRowIds. */
@@ -84,47 +135,62 @@ export function debouncePushNote(jobId: string): void {
 }
 
 async function pushNoteNow(jobId: string): Promise<void> {
-  const client = sb;
-  const uid = userId;
-  if (!client || !uid) return;
   const body = getState().notes[jobId] ?? "";
   try {
-    if (!body) {
-      if (noteRowIds[jobId]) {
-        const { error } = await client.from("job_notes").delete().eq("id", noteRowIds[jobId]);
-        if (error) throw error;
-        delete noteRowIds[jobId];
-      }
-      return;
-    }
-    if (noteRowIds[jobId]) {
-      const { error } = await client.from("job_notes").update({ body }).eq("id", noteRowIds[jobId]);
-      if (error) throw error;
-    } else {
-      const { data, error } = await client
-        .from("job_notes")
-        .insert({ job_id: jobId, body })
-        .select("id")
-        .single();
-      if (error) throw error;
-      if (data?.id) noteRowIds[jobId] = String(data.id);
-    }
+    await writeNoteNow(jobId, body);
+    void drainPendingSaves();
   } catch {
-    onToast?.("Couldn't sync that note — still saved on this phone");
+    await queueNote(jobId, body);
+    onToast?.("Saved on this phone — will sync when internet is back");
+  }
+}
+
+async function writeNoteNow(jobId: string, body: string): Promise<void> {
+  const client = sb;
+  const uid = userId;
+  if (!client || !uid) throw new Error("not signed in");
+  if (!body) {
+    if (noteRowIds[jobId]) {
+      const { error } = await client.from("job_notes").delete().eq("id", noteRowIds[jobId]);
+      if (error) throw error;
+      delete noteRowIds[jobId];
+    } else {
+      const { error } = await client.from("job_notes").delete().eq("job_id", jobId);
+      if (error) throw error;
+    }
+    return;
+  }
+  if (noteRowIds[jobId]) {
+    const { error } = await client.from("job_notes").update({ body }).eq("id", noteRowIds[jobId]);
+    if (error) throw error;
+  } else {
+    const { data, error } = await client
+      .from("job_notes")
+      .insert({ job_id: jobId, body })
+      .select("id")
+      .single();
+    if (error) throw error;
+    if (data?.id) noteRowIds[jobId] = String(data.id);
   }
 }
 
 /** Insert a single chat message into Supabase chat_messages. Fail-silent. */
 export async function pushChatMessage(role: "user" | "assistant", body: string): Promise<void> {
+  try {
+    await writeChatMessage(role, body);
+    void drainPendingSaves();
+  } catch {
+    await queueChat(role, body);
+    onToast?.("Chat saved on this phone — will sync when internet is back");
+  }
+}
+
+async function writeChatMessage(role: "user" | "assistant", body: string): Promise<void> {
   const client = sb;
   const uid = userId;
-  if (!client || !uid) return;
-  try {
-    const { error } = await client.from("chat_messages").insert({ role, body });
-    if (error) throw error;
-  } catch {
-    onToast?.("Couldn't sync chat — still saved on this phone");
-  }
+  if (!client || !uid) throw new Error("not signed in");
+  const { error } = await client.from("chat_messages").insert({ role, body });
+  if (error) throw error;
 }
 
 function chatLocalKey(): string {
@@ -179,21 +245,24 @@ export async function loadChatHistory(): Promise<Array<{ role: string; body: str
  */
 export async function clearChatHistory(): Promise<void> {
   localStorage.removeItem(chatLocalKey());
-  const client = sb;
-  const uid = userId;
-  if (!client || !uid) return;
   try {
-    const { error } = await client.from("chat_messages").delete().eq("user_id", uid);
-    if (error) throw error;
+    await writeChatClear();
+    void drainPendingSaves();
   } catch {
-    onToast?.("Cleared on this phone — couldn't reach the account copy, try again later");
+    await queueChatClear();
+    onToast?.("Cleared on this phone — account copy will clear when internet is back");
   }
 }
 
-async function pushProfileNow(): Promise<void> {
+async function writeChatClear(): Promise<void> {
   const client = sb;
   const uid = userId;
-  if (!client || !uid) return;
+  if (!client || !uid) throw new Error("not signed in");
+  const { error } = await client.from("chat_messages").delete().eq("user_id", uid);
+  if (error) throw error;
+}
+
+async function pushProfileNow(): Promise<void> {
   const s = getState();
   const profile = {
     ...s.profile,
@@ -211,16 +280,26 @@ async function pushProfileNow(): Promise<void> {
     seen: s.seen,
     filters: s.filters,
   };
+  try {
+    await writeProfileNow(profile as Record<string, unknown>);
+    onToast?.("Saved");
+    void drainPendingSaves();
+  } catch {
+    await queueProfile(profile as Record<string, unknown>);
+    onToast?.("Saved on this phone — will sync when internet is back");
+  }
+}
+
+async function writeProfileNow(profile: Record<string, unknown>): Promise<void> {
+  const client = sb;
+  const uid = userId;
+  if (!client || !uid) throw new Error("not signed in");
   const { error } = await client.from("user_profile").upsert({
     user_id: uid,
     profile,
     updated_at: new Date().toISOString(),
   });
-  if (error) {
-    onToast?.("Couldn't save to account — still saved on this phone");
-  } else {
-    onToast?.("Saved");
-  }
+  if (error) throw error;
 }
 
 export function autosave(): void {
@@ -322,6 +401,51 @@ export async function pullLegacyTables(): Promise<void> {
     localStorage.setItem(GUARD, "1");
   } catch {
     /* legacy tables may be absent or inaccessible — retry next sign-in */
+  }
+}
+
+export async function drainPendingSaves(): Promise<number> {
+  const client = sb;
+  const uid = userId;
+  if (!client || !uid || drainingOutbox) return 0;
+  if (typeof navigator !== "undefined" && !navigator.onLine) return 0;
+  drainingOutbox = true;
+  try {
+    const drained = await drainOutbox(client, uid, async (op: OutboxOperation, _client: SupabaseClient) => {
+      try {
+        switch (op.kind) {
+          case "profile": {
+            const profile = op.payload.profile;
+            if (!profile || typeof profile !== "object" || Array.isArray(profile)) return true;
+            await writeProfileNow(profile as Record<string, unknown>);
+            return true;
+          }
+          case "note": {
+            const jobId = typeof op.payload.jobId === "string" ? op.payload.jobId : "";
+            const body = typeof op.payload.body === "string" ? op.payload.body : "";
+            if (!jobId) return true;
+            await writeNoteNow(jobId, body);
+            return true;
+          }
+          case "chat": {
+            const role = op.payload.role === "assistant" ? "assistant" : "user";
+            const body = typeof op.payload.body === "string" ? op.payload.body : "";
+            if (!body) return true;
+            await writeChatMessage(role, body);
+            return true;
+          }
+          case "chat_clear":
+            await writeChatClear();
+            return true;
+        }
+      } catch {
+        return false;
+      }
+    });
+    if (drained > 0) onToast?.("Account synced");
+    return drained;
+  } finally {
+    drainingOutbox = false;
   }
 }
 
