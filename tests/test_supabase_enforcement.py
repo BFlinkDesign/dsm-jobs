@@ -21,6 +21,8 @@ def test_supabase_verifier_has_no_legacy_local_fallback():
     assert "admin-job-finder" not in verifier
     assert "LEGACY_ENV" not in verifier
     assert "DSM_JOBS_SUPABASE_ENV_FILE" in verifier
+    assert "DSM_JOBS_SECRETS_DIR" in verifier
+    assert "supabase-admin.env" in verifier
 
 
 def test_supabase_verifier_never_prints_secret_values():
@@ -58,6 +60,8 @@ def test_supabase_snapshot_script_preserves_data_and_settings():
         assert table in snapshot
     assert "SUPABASE_SERVICE_KEY" in snapshot
     assert "sha256" in snapshot
+    assert "load_standard_env" in snapshot
+    assert "supabase-admin.env" in snapshot
 
 
 def test_supabase_preservation_runbook_requires_seeded_cutover():
@@ -67,6 +71,23 @@ def test_supabase_preservation_runbook_requires_seeded_cutover():
     assert "Do not accept count-only validation" in runbook
     for table in ("user_profile", "chat_messages", "job_notes", "user_job_status", "ai_usage", "jobs"):
         assert table in runbook
+
+
+def test_local_secret_drop_path_is_documented_and_ignored():
+    docs = _read("docs/LOCAL-SECRETS.md")
+    gitignore = _read(".gitignore")
+    checker = _read("scripts/verify_voice_readiness.py")
+
+    assert "%USERPROFILE%\\Secrets\\dsm-jobs\\" in docs
+    assert "edge-voice.env" in docs
+    assert "supabase-admin.env" in docs
+    assert "never secret values" in docs
+    assert "supabase secrets set --env-file" in docs
+    assert "Secrets/" in gitignore
+    assert "edge-voice.env" in gitignore
+    assert "supabase-admin.env" in gitignore
+    assert "present_keys" in checker
+    assert "replace-with-token" not in checker
 
 
 def test_edge_checks_are_not_path_limited():
