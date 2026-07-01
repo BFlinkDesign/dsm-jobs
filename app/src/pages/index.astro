@@ -254,12 +254,23 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
           <strong style="font-family:var(--font-display)">Rudy</strong>
           <div class="job-meta" style="font-size:var(--text-xs)">Emotional support cow for jobs, nerves, and real life</div>
         </div>
+        <button type="button" class="btn btn-ghost rudy-tone-btn" id="rudy-memory-open" aria-pressed="false" title="See and clear what Rudy remembers">
+          Memory
+        </button>
         <button type="button" class="btn btn-ghost rudy-tone-btn" id="rudy-spicy" aria-pressed="false" title="Spicy mode is off">
           Spicy
         </button>
         <button type="button" class="btn btn-ghost" id="rudy-close">Close</button>
       </div>
       <div class="rudy-log" id="rudy-log"></div>
+      <div class="rudy-memory" id="rudy-memory" hidden>
+        <div class="rudy-memory-head">
+          <h3 class="section-title">What Rudy remembers</h3>
+          <button type="button" class="btn btn-ghost btn-sm" id="rudy-memory-close">Back to chat</button>
+        </div>
+        <p class="job-meta">This is everything Rudy actually knows about you — nothing more. Delete anything you want forgotten.</p>
+        <div id="rudy-memory-body"></div>
+      </div>
       <div class="rudy-prompts" aria-label="Quick Rudy prompts">
         <button type="button" class="btn btn-ghost btn-sm" data-rudy-prompt="I'm overwhelmed. Help me pick one tiny next step.">Overwhelmed</button>
         <button type="button" class="btn btn-ghost btn-sm" data-rudy-prompt="Give me a spicy pep talk, but keep it useful.">Pep talk</button>

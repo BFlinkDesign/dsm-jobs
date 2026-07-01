@@ -169,6 +169,27 @@ export async function loadChatHistory(): Promise<Array<{ role: string; body: str
   return loadChatFromLocal();
 }
 
+/**
+ * "What Rudy remembers" — delete her whole chat history from both Supabase
+ * (chat_messages, RLS-scoped to her own rows) and this phone's localStorage
+ * copy. Used by the memory viewer's "Clear conversation history" control.
+ * Best-effort on the Supabase side: even if that fails (offline, etc.) the
+ * local copy still clears so the UI reflects "forgotten" immediately, and
+ * onToast tells her the account copy may still need a retry.
+ */
+export async function clearChatHistory(): Promise<void> {
+  localStorage.removeItem(chatLocalKey());
+  const client = sb;
+  const uid = userId;
+  if (!client || !uid) return;
+  try {
+    const { error } = await client.from("chat_messages").delete().eq("user_id", uid);
+    if (error) throw error;
+  } catch {
+    onToast?.("Cleared on this phone — couldn't reach the account copy, try again later");
+  }
+}
+
 async function pushProfileNow(): Promise<void> {
   const client = sb;
   const uid = userId;

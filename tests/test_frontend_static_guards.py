@@ -276,3 +276,62 @@ def test_service_worker_only_caches_same_origin_gets():
 
 def test_github_pages_serves_astro_underscore_assets():
     assert (ROOT / "app/public/.nojekyll").is_file()
+
+
+def test_rudy_memory_viewer_renders_and_deletes_clear_local_and_supabase_state():
+    """'What Rudy remembers' — a transparency panel inside the Rudy overlay
+    (docs/plans/2026-06-27-fable5-task-queue.md item 2). It must actually
+    render (a toggle button + a dedicated panel, distinct from the chat log)
+    and every delete control must clear the item from BOTH localStorage and
+    the Supabase user_profile blob / chat_messages table — not just hide it
+    in the UI.
+    """
+    page = _read("app/src/pages/index.astro")
+    app = _read("app/src/scripts/app.ts")
+    autosave = _read("app/src/scripts/autosave.ts")
+
+    # The panel exists inside the Rudy overlay and is reachable/closeable.
+    assert 'id="rudy-memory-open"' in page
+    assert 'id="rudy-memory"' in page
+    assert 'id="rudy-memory-body"' in page
+    assert 'id="rudy-memory-close"' in page
+    assert "What Rudy remembers" in page
+    assert "renderRudyMemory" in app
+    assert "openRudyMemory" in app
+    assert "closeRudyMemory" in app
+    # Opening the panel hides the chat log rather than stacking on top of it
+    # (calm UI — one thing on screen at a time, no overlapping panels).
+    assert 'if (log) log.hidden = true;' in app
+
+    # It lists what's actually remembered: preference flags (the quiz Rudy's
+    # chat and My-corner quiz both write to), saved résumé documents, and a
+    # chat-history summary — not a placeholder.
+    assert "Preferences she's told Rudy" in app
+    assert "Saved résumé" in app
+    assert "Chat history" in app
+    assert "quizValueLabel" in app
+
+    # Deleting a preference clears it from local AppState (profile.quiz) and
+    # autosave() pushes that change to the Supabase user_profile blob (see
+    # pushProfileNow in autosave.ts, which serializes s.profile wholesale).
+    assert "data-mem-forget-quiz" in app
+    assert "delete s.profile.quiz[quizKey]" in app
+
+    # Deleting a résumé document reuses the existing removeResumeDocument
+    # helper (same one wired to My corner's own delete button) and autosaves.
+    assert "data-mem-forget-doc" in app
+    assert "removeResumeDocument(s.profile, docId)" in app
+
+    # Clearing chat history must remove it from BOTH the Supabase chat_messages
+    # table (RLS-scoped delete) and this phone's localStorage copy — not just
+    # the in-memory render — via clearChatHistory in autosave.ts.
+    assert "clearChatHistory" in app
+    assert "export async function clearChatHistory" in autosave
+    assert 'localStorage.removeItem(chatLocalKey())' in autosave
+    assert 'client.from("chat_messages").delete().eq("user_id", uid)' in autosave
+
+    # All dynamic memory text goes through esc() (XSS-safe rendering, per
+    # CLAUDE.md invariant #5) rather than raw interpolation.
+    assert "esc(question)" in app
+    assert "esc(quizValueLabel(key, val))" in app
+    assert "esc(doc.name)" in app
