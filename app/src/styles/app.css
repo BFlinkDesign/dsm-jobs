@@ -996,6 +996,27 @@ body::after {
   padding-left: 10px;
 }
 
+.today-action {
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--line));
+  border-radius: var(--radius);
+  background: color-mix(in srgb, var(--accent) 9%, var(--surface));
+  padding: var(--space-4);
+  margin: var(--space-4) 0;
+}
+.today-action h3 {
+  margin: 0 0 6px;
+  font-size: var(--text-xl);
+  line-height: 1.15;
+}
+.today-action .btn {
+  margin-top: 12px;
+  min-height: 44px;
+}
+.today-action.is-calm {
+  border-color: color-mix(in srgb, var(--route) 20%, var(--line));
+  background: color-mix(in srgb, var(--route) 6%, var(--surface));
+}
+
 /* ── Follow-up due badge on nav tabs ────────────────────────────────────── */
 .tab { position: relative; }
 .follow-badge {

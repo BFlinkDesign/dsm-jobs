@@ -909,6 +909,48 @@ function renderApplicationCockpit(applied: Job[]): string {
   </section>`;
 }
 
+function weeklyApplicationCount(): number {
+  const ws = weekStart();
+  return Object.values(getState().appliedLog).filter((e) => (e.d || "") >= ws).length;
+}
+
+function dueFollowUpJobs(): Job[] {
+  const s = getState();
+  const today = todayISO();
+  return trackedApplicationJobs()
+    .filter((j) => {
+      const fu = s.followUps[j.id];
+      return !!fu && !fu.done && !!fu.on && fu.on <= today;
+    })
+    .sort((a, b) => (s.followUps[a.id]?.on || "").localeCompare(s.followUps[b.id]?.on || ""));
+}
+
+function todayNextActionHtml(): string {
+  const due = dueFollowUpJobs();
+  const appsThisWeek = weeklyApplicationCount();
+  const remainingApps = Math.max(0, 3 - appsThisWeek);
+  if (due.length) {
+    return `<section class="today-action" aria-label="Today's first action">
+      <p class="tailor-kicker">Start here</p>
+      <h3>${due.length} follow-up${due.length === 1 ? "" : "s"} due</h3>
+      <p class="job-meta">Follow-ups count as work-search activity and keep quiet applications from disappearing.</p>
+      <button type="button" class="btn btn-primary" data-view-jump="apps">Open My applications</button>
+    </section>`;
+  }
+  if (remainingApps > 0) {
+    return `<section class="today-action" aria-label="Today's first action">
+      <p class="tailor-kicker">Today's move</p>
+      <h3>${remainingApps} more application${remainingApps === 1 ? "" : "s"} keeps the week on track</h3>
+      <p class="job-meta">Pick one clear match below. Save the rest for later.</p>
+    </section>`;
+  }
+  return `<section class="today-action is-calm" aria-label="Today's first action">
+    <p class="tailor-kicker">Steady</p>
+    <h3>This week's application baseline is covered</h3>
+    <p class="job-meta">Review new leads or check follow-ups when you have bandwidth.</p>
+  </section>`;
+}
+
 function isLocked(v: ViewName): boolean {
   return !!LOCKED[v] && !authed;
 }
@@ -1277,6 +1319,7 @@ function renderToday(): void {
       <p class="job-meta" style="margin-top:${affirmation ? "8px" : "0"}">Three leads picked for her — closest fit first. No pressure to apply to all three.</p>
       ${!s.coachOff ? `<button type="button" class="btn btn-ghost" id="coach-off-btn" style="margin-top:8px;font-size:var(--text-xs)">Turn off affirmations</button>` : `<button type="button" class="btn btn-ghost" id="coach-on-btn" style="margin-top:8px;font-size:var(--text-xs)">Turn on affirmations</button>`}
     </div>
+    ${todayNextActionHtml()}
     <div class="jobs-grid">${picks.length
       ? picks.map((j) => `<div class="pick-wrap"><p class="pick-reason">${esc(pickReason(j))}</p>${jobCard(j)}</div>`).join("")
       : "<p class='job-meta'>You've worked through today's list — genuinely well done. New jobs arrive every morning.</p>"}</div>
@@ -1546,7 +1589,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1565,6 +1608,11 @@ function handleViewClick(e: Event): void {
     autosave();
     if (view === "jobs") refreshJobsView();
     else renderCorner();
+    return;
+  }
+  if (t.hasAttribute("data-view-jump")) {
+    const target = t.getAttribute("data-view-jump") as ViewName | null;
+    if (target) setView(target);
     return;
   }
   if (t.id === "open-rudy") {

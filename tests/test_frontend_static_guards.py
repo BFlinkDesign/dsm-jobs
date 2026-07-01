@@ -199,6 +199,11 @@ def test_application_status_has_persistent_undo_and_custom_followup_date():
     assert "Follow-up message copied" in app
     assert ".app-cockpit" in css
     assert ".app-action-card" in css
+    assert "todayNextActionHtml" in app
+    assert "Start here" in app
+    assert "Open My applications" in app
+    assert 'data-view-jump="apps"' in app
+    assert ".today-action" in css
 
 
 def test_client_resilience_queues_account_sync_when_offline():
