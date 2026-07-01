@@ -1,6 +1,21 @@
 # Rudy Frontier Experience Plan
 
-Date: 2026-06-24
+Date: 2026-06-24 (status refreshed 2026-06-27)
+
+## Status update (2026-06-27)
+
+Build-order item 1 shipped and was carried further than originally scoped;
+item 4 shipped under separate feature work; item 2 shipped via a cheaper,
+open-source route instead of the OpenAI Realtime path this plan originally
+proposed. Details below each item. Items 3, 5 (partial), 6, 7, 8 remain open.
+
+**Shipped beyond this plan's original scope, landed by other feature work
+in the same window (not tracked as build-order items here, noted for
+completeness):** personalized "Today's picks" ranking + reasons, newest-first
+sort, hard exclusion filters (no food service/retail/nights/weekends),
+a Money & Free-Skills resources hub, a splashy PWA update prompt, and a
+rebuilt interactive coachmark walkthrough (Wispr-Flow-grade step-by-step
+guidance). See `CLAUDE.md` "Shipped" log for the full list.
 
 ## Scope
 
@@ -50,8 +65,8 @@ ChatGPT, Claude, Gemini, and MCP-based agent tooling at the public feature/API l
 
 ## Public Implementation Route
 
-- Now: Astro + TypeScript + Supabase Edge Function companion, browser SpeechRecognition, browser SpeechSynthesis, Supabase storage/history.
-- Next voice: server-minted Realtime client secret endpoint, browser WebRTC, no OpenAI API key in browser.
+- Now: Astro + TypeScript + Supabase Edge Function companion; real TTS/STT via the provider-agnostic `voice` edge function (Chatterbox/Kokoro/MeloTTS/ElevenLabs for speech out, Groq/Cloudflare/ElevenLabs Whisper for speech in via `MediaRecorder`), falling back to browser SpeechSynthesis/SpeechRecognition only when no provider key is configured; Supabase storage/history.
+- Next voice (if needed): server-minted Realtime client secret endpoint, browser WebRTC, no OpenAI API key in browser — for interruption/barge-in, which the current REST-call approach doesn't support.
 - Next connector layer: MCP-style tool contracts with JSON schemas and explicit permissions.
 - Native iOS parity: SwiftUI `.refreshable`, safe-area-aware layouts, accessibility grouping, and native voice session shell if/when a Swift app exists.
 
@@ -88,17 +103,17 @@ ChatGPT, Claude, Gemini, and MCP-based agent tooling at the public feature/API l
 
 ## Promotion Decision
 
-Adopt Rudy v1 now: opt-in voice playback, opt-in spicy tone, broader emotional-support scope, prompt safety tests, and CI observability.
+Adopted Rudy v1 (shipped): opt-in voice playback, opt-in spicy tone, broader emotional-support scope, prompt safety tests, and CI observability.
 
-Prototype Rudy v2 next: Realtime/WebRTC voice with server-created ephemeral client secrets, interruption handling, transcript, cost/latency telemetry, and a visible action log.
+Rudy v2 voice shipped via a different route than originally proposed (see item 2 below) — real TTS/STT instead of browser `speechSynthesis`/`SpeechRecognition`, but through a provider-agnostic REST edge function rather than OpenAI Realtime/WebRTC. Cheaper, keeps with the project's $0-platform/open-source bias, and iOS Safari/PWA has no WebRTC-mic blocker to work around this way. Realtime/WebRTC barge-in interruption is not implemented; still a candidate if turn-taking latency becomes a real complaint.
 
 ## Build Order
 
-1. Rudy v1 opt-in voice playback and spicy tone.
-2. Realtime voice token Edge Function and WebRTC client shell.
-3. Rudy memory viewer: "What Rudy remembers" with delete/edit controls.
-4. Application artifacts: resume, cover note, follow-up, diff, ATS notes, version history.
-5. Document-aware chat: ask Rudy about uploaded resumes and application packs.
-6. MCP-style connector registry with contract tests and permission gates.
-7. Deep research/import flow for pasted job pages with citations and audit trail.
-8. Native iOS shell if a Swift project is added.
+1. **Shipped.** Rudy v1 opt-in voice playback and spicy tone (#124).
+2. **Shipped, different route than planned.** Real TTS/STT voice, not the OpenAI Realtime/WebRTC token flow this plan proposed. `supabase/functions/voice` is a provider-agnostic edge function: TTS defaults to **Chatterbox** (Resemble AI, MIT-licensed, open-source, served via Replicate) with Hugging Face Kokoro-82M, Cloudflare MeloTTS, and ElevenLabs as fallbacks; STT defaults to Groq Whisper with Cloudflare Whisper and ElevenLabs as fallbacks (#143, #144 — #144 open as of this update). Mic input moved from browser `SpeechRecognition` (unsupported on iOS Safari/PWA, her only device) to `MediaRecorder` + server-side transcription, which does work on iOS. No provider key configured yet → calls return `{ unconfigured: true }` and the client falls back to the old browser voice, so nothing is broken pre-deploy. Not done: interruption/barge-in, live transcript-while-speaking, cost/latency telemetry, a visible action log.
+3. **Not started.** Rudy memory viewer: "What Rudy remembers" with delete/edit controls.
+4. **Shipped, as separate feature work.** Application artifacts: resume, cover note, follow-up, diff, ATS notes, version history (#121, #122, #123; résumé tailor edge function).
+5. **Partially shipped.** Document-aware chat: the résumé tailor already reads the full job posting text (`descFull`) and the saved résumé to draft a tailored pack, but Rudy's general chat can't yet answer freeform questions about an uploaded résumé or an application pack outside that flow.
+6. **Not started.** MCP-style connector registry with contract tests and permission gates.
+7. **Not started.** Deep research/import flow for pasted job pages with citations and audit trail.
+8. **Not started, still out of scope.** Native iOS shell if a Swift project is added — no Swift/iOS project exists in this repo.
