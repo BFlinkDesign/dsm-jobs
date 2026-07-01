@@ -41,7 +41,7 @@ CI can't do that (no token, and cost). Once Brady has set
 to actually open the app, tap the Rudy read-aloud toggle, and listen.
 
 **Where:** `supabase/functions/voice/index.ts` (the function), `app/src/scripts/app.ts`
-(client — search `elevenSpeak`/`synthSpeak`/`rudyAudio`), `app/src/pages/index.astro`
+(client — search `edgeSpeak`/`synthSpeak`/`rudyAudio`), `app/src/pages/index.astro`
 (`.rudy-voicebar`, `#rudy-spk`).
 
 **Done when:** a real chat reply plays back in Chatterbox's voice (not the

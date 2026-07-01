@@ -12,7 +12,8 @@ verify_jwt = true
 [functions.resume-tailor]
 verify_jwt = true
 
-# Rudy's voice (ElevenLabs TTS + speech-to-text). Holds the paid
-# ELEVENLABS_API_KEY; only signed-in users reach it.
+# Rudy's provider-agnostic voice function. TTS defaults to Chatterbox when
+# REPLICATE_API_TOKEN is configured; STT uses the first configured backend.
+# Provider keys stay server-side; only signed-in users reach it.
 [functions.voice]
 verify_jwt = true

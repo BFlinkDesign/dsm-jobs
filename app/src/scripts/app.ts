@@ -151,9 +151,10 @@ function snoozedNow(id: string): boolean {
 }
 
 // ── Rudy's voice ──────────────────────────────────────────────────────────
-// Prefer a warm ElevenLabs voice (via the `voice` edge function — key stays
-// server-side); fall back to the browser's built-in voice when the function or
-// key isn't set up yet. Repeated lines are cached so they don't re-bill.
+// Prefer the provider-agnostic `voice` edge function (Chatterbox by default
+// when REPLICATE_API_TOKEN is configured); fall back to the browser's built-in
+// voice when the function or key is not set up yet. Repeated lines are cached
+// so they do not re-bill.
 let voiceUnconfigured = false;             // set once the function reports no key
 const ttsCache = new Map<string, string>(); // text -> object URL
 let rudyAudio: HTMLAudioElement | null = null;
@@ -164,8 +165,8 @@ function stopRudyVoice(): void {
   try { window.speechSynthesis?.cancel(); } catch { /* no-op */ }
 }
 
-/** Try the ElevenLabs voice. Returns false if unavailable (caller falls back). */
-async function elevenSpeak(text: string): Promise<boolean> {
+/** Try the server voice. Returns false if unavailable (caller falls back). */
+async function edgeSpeak(text: string): Promise<boolean> {
   const sb = getClient();
   if (!sb || voiceUnconfigured) return false;
   try {
@@ -203,7 +204,7 @@ function synthSpeak(text: string): void {
 function speakText(text: string): void {
   if (!speakOn || !text) return;
   void (async () => {
-    const ok = await elevenSpeak(text);
+    const ok = await edgeSpeak(text);
     if (!ok) synthSpeak(text);
   })();
 }
@@ -2860,9 +2861,9 @@ async function boot(): Promise<void> {
     });
   }
 
-  // ── Voice OUT: "Rudy reads replies aloud" toggle. Voice itself is ElevenLabs
-  // (speakText), with the browser voice as fallback — so keep the toggle even
-  // when SpeechSynthesis is missing (ElevenLabs may still work). ──────────────
+  // ── Voice OUT: "Rudy reads replies aloud" toggle. Voice uses the server
+  // edge function first, with browser speech as fallback, so keep the toggle
+  // even when SpeechSynthesis is missing. ────────────────────────────────────
   speechSynthOK = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
   speakOn = localStorage.getItem("rudySpeak") === "1";
   const pickVoice = (): void => {
@@ -2901,8 +2902,8 @@ async function boot(): Promise<void> {
   }
 
   // ── Voice IN: tap the mic to talk to Rudy. Records with MediaRecorder and
-  // transcribes via the `voice` edge function (ElevenLabs) — works on iOS,
-  // unlike the old SpeechRecognition. Hidden where the mic API is unavailable. ─
+  // transcribes via the `voice` edge function, which works on iOS unlike the
+  // old SpeechRecognition path. Hidden where the mic API is unavailable. ─────
   const micBtn = $("#rudy-mic");
   const listenEl = $("#rudy-listen");
   const micOK = !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";
