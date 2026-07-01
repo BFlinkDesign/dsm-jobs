@@ -1,4 +1,4 @@
-import type { AppState, ApplicationPack, AtsAlignment, FilterPrefs, Job, Meta, Resource, ResourceHub, ResumeDocument, ViewName } from "./types";
+import type { AppState, ApplicationPack, ApplicationStatus, AtsAlignment, FilterPrefs, Job, Meta, Resource, ResourceHub, ResumeDocument, ViewName } from "./types";
 import {
   appendChatToLocal,
   autosave,
@@ -37,6 +37,14 @@ import {
 } from "./util";
 
 const LOCKED: Record<string, boolean> = { today: true, apps: true, corner: true };
+const APP_STATUS_LABELS: Record<ApplicationStatus, string> = {
+  applied: "Applied",
+  followed_up: "Followed up",
+  interview: "Interview",
+  rejected: "Not a fit",
+  offer: "Offer",
+  ghosted: "Quiet / no reply",
+};
 
 let jobs: Job[] = [];
 let meta: Meta = { contact: "", phone: "", generated: "", hidden: 0, total: 0, safe: 0 };
@@ -675,6 +683,63 @@ function callScriptHtml(j: Job, appliedOn: string): string {
     `<p class="job-meta" style="margin-top:6px">That's the whole call. Short is perfect.</p></details>`;
 }
 
+function jobFromAppliedLog(id: string, entry: AppState["appliedLog"][string]): Job {
+  return {
+    id,
+    title: entry.t || "Job no longer listed",
+    company: entry.c || "Saved application",
+    location: "Tracked from earlier job list",
+    pay: "Pay not listed",
+    payNum: 0,
+    remote: false,
+    trusted: false,
+    trustLabel: "",
+    good: false,
+    tagLabel: "",
+    posted: entry.d || "",
+    url: entry.u || "",
+    category: "tracked",
+    commute: "",
+    commuteMin: null,
+    about: "This job is no longer in today's feed, but the application, notes, pack, and follow-up stay here.",
+    descFull: "",
+    trains: false,
+    contactPhone: "",
+    contactEmail: "",
+    contactName: "",
+  };
+}
+
+function trackedApplicationJobs(): Job[] {
+  const s = getState();
+  const byId = new Map(jobs.map((j) => [j.id, j]));
+  const ids = new Set([...Object.keys(s.appliedLog), ...Object.keys(s.applied)]);
+  return [...ids]
+    .filter((id) => !!s.applied[id])
+    .sort((a, b) => {
+      const aEntry = s.appliedLog[a];
+      const bEntry = s.appliedLog[b];
+      return ((bEntry?.ts || bEntry?.d || "")).localeCompare(aEntry?.ts || aEntry?.d || "");
+    })
+    .map((id) => byId.get(id) ?? jobFromAppliedLog(id, s.appliedLog[id] ?? { t: "", c: "", d: "", u: "" }));
+}
+
+function appStatusValue(id: string): ApplicationStatus {
+  const raw = getState().applicationStatus[id];
+  return raw && APP_STATUS_LABELS[raw] ? raw : "applied";
+}
+
+function statusStopsFollowUps(status: ApplicationStatus): boolean {
+  return status === "followed_up" || status === "interview" || status === "rejected" || status === "offer" || status === "ghosted";
+}
+
+function statusOptions(id: string): string {
+  const current = appStatusValue(id);
+  return (Object.keys(APP_STATUS_LABELS) as ApplicationStatus[])
+    .map((status) => `<option value="${esc(status)}"${status === current ? " selected" : ""}>${esc(APP_STATUS_LABELS[status])}</option>`)
+    .join("");
+}
+
 function isLocked(v: ViewName): boolean {
   return !!LOCKED[v] && !authed;
 }
@@ -876,10 +941,12 @@ function followUpHtml(j: Job): string {
   if (!getState().applied[j.id] || !fu) return "";
   const appliedDate = getState().appliedLog[j.id]?.d || todayISO();
   const appliedDays = daysSince(appliedDate);
+  const status = appStatusValue(j.id);
   let html = `<div class="job-actions follow-block">`;
+  html += `<label class="field-hint app-status-label">Status <select class="field app-status-field" data-app-status="${esc(j.id)}">${statusOptions(j.id)}</select></label>`;
   if (fu.done) {
-    html += `<span class="badge-safe">Followed up ✓</span>`;
-    html += `<button type="button" class="btn btn-ghost btn-sm" data-follow-undo="${esc(j.id)}">Mark not done</button>`;
+    html += `<span class="badge-safe">${esc(APP_STATUS_LABELS[status])} ✓</span>`;
+    html += `<button type="button" class="btn btn-ghost btn-sm" data-follow-undo="${esc(j.id)}">Resume reminders</button>`;
   } else {
     const phone = fu.phone || j.contactPhone;
     const email = fu.email || j.contactEmail;
@@ -1055,7 +1122,7 @@ function renderApps(): void {
     return;
   }
   const s = getState();
-  const applied = jobs.filter((j) => s.applied[j.id]);
+  const applied = trackedApplicationJobs();
   const ws = weekStart();
   const appsThisWeek = Object.values(s.appliedLog).filter((e) => (e.d || "") >= ws).length;
   const weekMsg = appsThisWeek >= 3
@@ -1395,6 +1462,7 @@ function handleViewClick(e: Event): void {
     patchState((s) => {
       const fu = s.followUps[id];
       if (fu) fu.done = true;
+      s.applicationStatus[id] = "followed_up";
     });
     autosave();
     render();
@@ -1406,6 +1474,7 @@ function handleViewClick(e: Event): void {
     patchState((s) => {
       const fu = s.followUps[id];
       if (fu) fu.done = false;
+      s.applicationStatus[id] = "applied";
     });
     autosave();
     render();
@@ -1418,6 +1487,7 @@ function handleViewClick(e: Event): void {
       applied: !!getState().applied[id],
       log: getState().appliedLog[id] ? { ...getState().appliedLog[id] } : undefined,
       fu: getState().followUps[id] ? { ...getState().followUps[id] } : undefined,
+      status: getState().applicationStatus[id],
     };
     patchState((s) => {
       s.applied[id] = true;
@@ -1442,6 +1512,7 @@ function handleViewClick(e: Event): void {
           done: false,
         };
       }
+      if (!s.applicationStatus[id]) s.applicationStatus[id] = "applied";
     });
     autosave();
     if (typeof navigator.vibrate === "function") navigator.vibrate(50);
@@ -1453,6 +1524,8 @@ function handleViewClick(e: Event): void {
         else delete s.appliedLog[id];
         if (prev.fu) s.followUps[id] = prev.fu;
         else delete s.followUps[id];
+        if (prev.status) s.applicationStatus[id] = prev.status;
+        else delete s.applicationStatus[id];
       });
       autosave();
       render();
@@ -1465,11 +1538,13 @@ function handleViewClick(e: Event): void {
       applied: !!getState().applied[id],
       log: getState().appliedLog[id] ? { ...getState().appliedLog[id] } : undefined,
       fu: getState().followUps[id] ? { ...getState().followUps[id] } : undefined,
+      status: getState().applicationStatus[id],
     };
     patchState((s) => {
       delete s.applied[id];
       delete s.appliedLog[id];
       delete s.followUps[id];
+      delete s.applicationStatus[id];
     });
     autosave();
     render();
@@ -1478,6 +1553,8 @@ function handleViewClick(e: Event): void {
         if (prev.applied) s.applied[id] = true;
         if (prev.log) s.appliedLog[id] = prev.log;
         if (prev.fu) s.followUps[id] = prev.fu;
+        if (prev.status) s.applicationStatus[id] = prev.status;
+        else if (prev.applied) s.applicationStatus[id] = "applied";
       });
       autosave();
       render();
@@ -1499,6 +1576,7 @@ function handleViewClick(e: Event): void {
       if (fu) {
         fu.on = addDaysISO(s.appliedLog[id]?.d || todayISO(), days);
         fu.done = false;
+        s.applicationStatus[id] = "applied";
       }
     });
     autosave();
@@ -1651,7 +1729,7 @@ function bindViewHost(): void {
   if (!host || host.dataset.bound) return;
   host.dataset.bound = "1";
   host.addEventListener("click", handleViewClick);
-  host.addEventListener("input", (e) => {
+  const handleField = (e: Event) => {
     const t = e.target as HTMLElement;
     if (t.id === "job-search") { onSearchInput(e); return; }
     if (t.hasAttribute("data-note")) {
@@ -1679,6 +1757,19 @@ function bindViewHost(): void {
       autosave();
       return;
     }
+    if (t.hasAttribute("data-app-status")) {
+      const id = t.getAttribute("data-app-status")!;
+      const value = (t as HTMLSelectElement).value as ApplicationStatus;
+      if (!APP_STATUS_LABELS[value]) return;
+      patchState((s) => {
+        s.applicationStatus[id] = value;
+        const fu = s.followUps[id];
+        if (fu) fu.done = statusStopsFollowUps(value);
+      });
+      autosave();
+      renderFollowBadge();
+      return;
+    }
     if (t.hasAttribute("data-follow-date")) {
       const id = t.getAttribute("data-follow-date")!;
       const value = (t as HTMLInputElement).value;
@@ -1701,7 +1792,9 @@ function bindViewHost(): void {
       return;
     }
     onProfileInput(e);
-  });
+  };
+  host.addEventListener("input", handleField);
+  host.addEventListener("change", handleField);
 }
 
 function setAuthMsg(text: string, isErr = false): void {

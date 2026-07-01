@@ -1450,6 +1450,20 @@ body::after {
   width: 100%;
   margin-top: 6px;
 }
+.app-status-label {
+  display: grid;
+  grid-template-columns: minmax(74px, max-content) minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 2px;
+}
+.app-status-field {
+  min-height: 38px;
+  margin: 0;
+  border-color: color-mix(in srgb, var(--route) 35%, var(--line));
+  background: color-mix(in srgb, var(--route) 8%, var(--surface));
+}
 .follow-date-label {
   display: block;
   margin-top: 8px;
