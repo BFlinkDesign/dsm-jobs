@@ -44,3 +44,8 @@ Deno.test("the save path still drops time/confidence (no availability override)"
     "save_profile must keep dropping time/confidence so a stored value can't reopen 'open on hours'",
   );
 });
+
+Deno.test("resume/document answers are locked to saved resume facts", () => {
+  assertStringIncludes(src, "SAVED RÉSUMÉ DOCUMENTS");
+  assertStringIncludes(src, "Never infer résumé content from vibes");
+});

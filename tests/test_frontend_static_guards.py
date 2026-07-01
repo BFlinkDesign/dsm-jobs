@@ -415,3 +415,18 @@ def test_rudy_memory_viewer_renders_and_deletes_clear_local_and_supabase_state()
     assert "esc(question)" in app
     assert "esc(quizValueLabel(key, val))" in app
     assert "esc(doc.name)" in app
+
+
+def test_rudy_chat_is_document_aware_without_guessing():
+    grounding = _read("supabase/functions/companion/grounding.ts")
+    companion = _read("supabase/functions/companion/index.ts")
+    grounding_test = _read("supabase/functions/companion/grounding_test.ts")
+
+    assert "SAVED RÉSUMÉ DOCUMENTS Rudy may discuss" in grounding
+    assert "documents" in grounding
+    assert "activeDocumentId" in grounding
+    assert "MAX_ACTIVE_RESUME_CHARS" in grounding
+    assert "If the answer is not in this text, say you do not see it" in grounding
+    assert "Never infer résumé content from vibes" in companion
+    assert "saved active resume document is grounded for document-aware chat" in grounding_test
+    assert "[object Object]" in grounding_test

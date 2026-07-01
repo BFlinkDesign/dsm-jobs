@@ -47,3 +47,31 @@ Deno.test("source-tagged object form uses v + src", () => {
   const out = knownFacts({ pay: { v: "must", src: "confirmed-in-chat" } });
   assertStringIncludes(out, "pay priority: must [confirmed-in-chat]");
 });
+
+Deno.test("saved active resume document is grounded for document-aware chat", () => {
+  const out = knownFacts({
+    documents: [
+      {
+        id: "doc-1",
+        name: "Main resume",
+        text: "Customer service at Jackson Hewitt and careful tax document handling.",
+      },
+    ],
+    activeDocumentId: "doc-1",
+  });
+  assertStringIncludes(out, "SAVED RÉSUMÉ DOCUMENTS Rudy may discuss");
+  assertStringIncludes(out, "Main resume (active)");
+  assertStringIncludes(out, "Customer service at Jackson Hewitt");
+  assert(!out.includes("[object Object]"), "document arrays must not render as generic objects");
+});
+
+Deno.test("legacy resume text still grounds document questions", () => {
+  const out = knownFacts({ resume: "Legacy pasted resume with receptionist experience." });
+  assertStringIncludes(out, "Legacy saved résumé (active)");
+  assertStringIncludes(out, "receptionist experience");
+});
+
+Deno.test("document block tells Rudy when no resume is saved", () => {
+  const out = knownFacts({});
+  assertStringIncludes(out, "SAVED RÉSUMÉ DOCUMENTS Rudy may discuss: none saved.");
+});
