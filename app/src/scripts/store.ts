@@ -100,6 +100,7 @@ export function defaultState(): AppState {
     notes: {},
     followUps: {},
     appliedLog: {},
+    applicationStatus: {},
     applicationPacks: {},
     followAlertDay: "",
     seen: [],
@@ -177,6 +178,7 @@ export function migrateLocalV1(): void {
       saved: {},
       hidden: {},
       appliedLog: {},
+      applicationStatus: {},
       followUps: {},
       applicationPacks: {},
       profile: defaultProfile(),
@@ -217,6 +219,10 @@ export function migrateLocalV1(): void {
     // followUps: same shape
     if (old.followUps && typeof old.followUps === "object") {
       Object.assign(patch.followUps!, old.followUps);
+    }
+    // applicationStatus: job id -> lifecycle state
+    if (old.applicationStatus && typeof old.applicationStatus === "object" && !Array.isArray(old.applicationStatus)) {
+      Object.assign(patch.applicationStatus!, old.applicationStatus);
     }
     // applicationPacks: additive v3-ish field; keep if already present in a copied profile blob
     if (old.applicationPacks && typeof old.applicationPacks === "object" && !Array.isArray(old.applicationPacks)) {
@@ -269,6 +275,7 @@ export function migrateLocalV1(): void {
       snoozedUntil: { ...(patch.snoozedUntil ?? {}), ...cur.snoozedUntil },
       notes: { ...(patch.notes ?? {}), ...cur.notes },
       appliedLog: { ...patch.appliedLog, ...cur.appliedLog },
+      applicationStatus: { ...patch.applicationStatus, ...cur.applicationStatus },
       followUps: { ...patch.followUps, ...cur.followUps },
       applicationPacks: { ...patch.applicationPacks, ...cur.applicationPacks },
       followAlertDay: cur.followAlertDay || "",

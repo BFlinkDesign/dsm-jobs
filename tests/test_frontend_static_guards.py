@@ -158,15 +158,32 @@ def test_application_pack_is_saved_and_reopenable():
 
 def test_application_status_has_persistent_undo_and_custom_followup_date():
     app = _read("app/src/scripts/app.ts")
+    types = _read("app/src/scripts/types.ts")
+    store = _read("app/src/scripts/store.ts")
+    autosave = _read("app/src/scripts/autosave.ts")
     css = _read("app/src/styles/app.css")
 
+    assert "export type ApplicationStatus" in types
+    assert "applicationStatus: Record<string, ApplicationStatus>" in types
+    assert "applicationStatus: {}" in store
+    assert "applicationStatus: s.applicationStatus" in autosave
+    assert "trackedApplicationJobs" in app
+    assert "Object.keys(s.applied)" in app
+    assert "jobFromAppliedLog" in app
+    assert "This job is no longer in today's feed" in app
     assert "Undo applied" in app
     assert "data-unapply" in app
     assert "Applied status removed" in app
+    assert "data-app-status" in app
+    assert "APP_STATUS_LABELS" in app
+    assert "s.applicationStatus[id] = value" in app
+    assert 'status === "interview"' in app
+    assert 'host.addEventListener("change", handleField)' in app
     assert "data-follow-date" in app
     assert "Follow up on" in app
     assert "fu.done = false" in app
     assert ".follow-date-label" in css
+    assert ".app-status-field" in css
 
 
 def test_resume_document_manager_preserves_multiple_documents():
