@@ -432,6 +432,18 @@ function toast(msg: string, undo?: () => void): void {
   toastTimer = setTimeout(() => t.classList.remove("show"), undo ? 5000 : 2000);
 }
 
+async function copyText(text: string, success = "Copied"): Promise<boolean> {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+    await navigator.clipboard.writeText(text);
+    toast(success);
+    return true;
+  } catch {
+    toast("Copy failed — select text manually");
+    return false;
+  }
+}
+
 /** True if any popup overlay is currently open — used so two popups never stack
  * (the update modal was burying the install coach). */
 function anyModalOpen(): boolean {
@@ -807,6 +819,94 @@ function statusOptions(id: string): string {
   return (Object.keys(APP_STATUS_LABELS) as ApplicationStatus[])
     .map((status) => `<option value="${esc(status)}"${status === current ? " selected" : ""}>${esc(APP_STATUS_LABELS[status])}</option>`)
     .join("");
+}
+
+function followUpMessage(j: Job): string {
+  const saved = getState().applicationPacks[j.id]?.followUp?.trim();
+  return saved || fallbackFollowUp(j);
+}
+
+function followDueLabel(on: string): string {
+  if (!on) return "No reminder set";
+  const d = daysSince(on);
+  if (d == null) return `Reminder ${on}`;
+  if (d < -1) return `Due in ${Math.abs(d)} days`;
+  if (d === -1) return "Due tomorrow";
+  if (d === 0) return "Due today";
+  if (d === 1) return "1 day overdue";
+  return `${d} days overdue`;
+}
+
+function mailtoFollowHref(j: Job): string {
+  const fu = getState().followUps[j.id];
+  const email = (fu?.email || j.contactEmail || "").trim();
+  if (!email) return "";
+  const subject = `Following up on ${j.title}`;
+  return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(followUpMessage(j))}`;
+}
+
+function contactPhone(j: Job): string {
+  const fu = getState().followUps[j.id];
+  return (fu?.phone || j.contactPhone || "").trim();
+}
+
+function followActionCard(j: Job, label = "Next move"): string {
+  const fu = getState().followUps[j.id];
+  const status = appStatusValue(j.id);
+  const mail = mailtoFollowHref(j);
+  const phone = contactPhone(j);
+  const pack = !!getState().applicationPacks[j.id];
+  return `<article class="app-action-card" data-app-action="${esc(j.id)}">
+    <div>
+      <p class="tailor-kicker">${esc(label)} · ${esc(fu ? followDueLabel(fu.on) : APP_STATUS_LABELS[status])}</p>
+      <h3>${esc(j.title)}</h3>
+      <p class="job-meta">${esc(j.company)}${APP_STATUS_LABELS[status] ? ` · ${esc(APP_STATUS_LABELS[status])}` : ""}</p>
+    </div>
+    <div class="app-action-buttons">
+      <button type="button" class="btn btn-primary btn-sm" data-follow-copy="${esc(j.id)}">Copy message</button>
+      ${mail ? `<a class="btn btn-email btn-sm" href="${esc(mail)}">Email</a>` : ""}
+      ${phone ? `<a class="btn btn-call btn-sm" href="tel:${esc(phone)}">Call</a>` : ""}
+      ${pack ? `<button type="button" class="btn btn-ghost btn-sm" data-pack="${esc(j.id)}">Open pack</button>` : ""}
+      ${fu && !fu.done ? `<button type="button" class="btn btn-ghost btn-sm" data-follow-done="${esc(j.id)}">Done</button>` : ""}
+    </div>
+  </article>`;
+}
+
+function renderApplicationCockpit(applied: Job[]): string {
+  const s = getState();
+  const today = todayISO();
+  const due = applied
+    .filter((j) => {
+      const fu = s.followUps[j.id];
+      return !!fu && !fu.done && !!fu.on && fu.on <= today;
+    })
+    .sort((a, b) => (s.followUps[a.id]?.on || "").localeCompare(s.followUps[b.id]?.on || ""));
+  const open = applied.filter((j) => !statusStopsFollowUps(appStatusValue(j.id)));
+  const closed = applied.filter((j) => statusStopsFollowUps(appStatusValue(j.id)));
+  const nextScheduled = open
+    .filter((j) => !!s.followUps[j.id]?.on && !s.followUps[j.id]?.done)
+    .sort((a, b) => (s.followUps[a.id]?.on || "").localeCompare(s.followUps[b.id]?.on || ""))[0];
+  const next = due.length
+    ? due.slice(0, 2).map((j) => followActionCard(j, "Due follow-up")).join("")
+    : nextScheduled
+      ? followActionCard(nextScheduled, "Next scheduled follow-up")
+      : `<p class="field-hint">No follow-ups are due. Keep this list calm and current as applications move.</p>`;
+
+  return `<section class="app-cockpit" aria-label="Application next moves">
+    <div class="app-cockpit-head">
+      <div>
+        <p class="tailor-kicker">Application cockpit</p>
+        <h3>What needs attention</h3>
+      </div>
+      <span class="badge-safe">${esc(applied.length.toString())} tracked</span>
+    </div>
+    <div class="app-stat-grid" aria-label="Application status summary">
+      <div><b>${due.length}</b><span>due now</span></div>
+      <div><b>${open.length}</b><span>still open</span></div>
+      <div><b>${closed.length}</b><span>closed / paused</span></div>
+    </div>
+    <div class="app-next-list">${next}</div>
+  </section>`;
 }
 
 function isLocked(v: ViewName): boolean {
@@ -1202,6 +1302,7 @@ function renderApps(): void {
   const dueBanner = dueEntries.length
     ? `<div class="follow-alert"><b>${dueEntries.length} follow-up${dueEntries.length === 1 ? "" : "s"} due</b> — tap Call or Email on the job below.</div>`
     : "";
+  const appCockpit = renderApplicationCockpit(applied);
   const canNotify = typeof Notification !== "undefined";
   const notifPerm = canNotify ? (Notification as typeof Notification).permission : "denied";
   const notifyBtn = canNotify && notifPerm !== "granted" && Object.keys(s.applied).length > 0
@@ -1218,6 +1319,7 @@ function renderApps(): void {
       ${notifyBtn}
       <button type="button" class="btn btn-ghost" id="print-log" style="margin-top:12px">Print work-search log</button>
     </div>
+    ${appCockpit}
     <div class="jobs-grid">${applied.length ? applied.map(jobCard).join("") : "<p class='job-meta'>Nothing marked applied yet. Tap <b>Mark applied</b> on a job she likes.</p>"}</div>
   `;
   renderFollowBadge();
@@ -1444,7 +1546,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1536,6 +1638,12 @@ function handleViewClick(e: Event): void {
     autosave();
     render();
     toast("Follow-up marked done ✦");
+    return;
+  }
+  if (t.hasAttribute("data-follow-copy")) {
+    const id = t.getAttribute("data-follow-copy")!;
+    const job = trackedApplicationJobs().find((x) => x.id === id) || jobs.find((x) => x.id === id);
+    if (job) void copyText(followUpMessage(job), "Follow-up message copied");
     return;
   }
   if (t.hasAttribute("data-follow-undo")) {
@@ -2580,17 +2688,13 @@ function renderTailorResult(job: Job, data: TailorResult): void {
       else if (which === "both") text = downloadText;
       const button = btn as HTMLButtonElement;
       const original = button.textContent || "Copy";
-      try {
-        await navigator.clipboard?.writeText(text);
+      if (await copyText(text, "Copied")) {
         button.textContent = "Copied";
         button.classList.add("is-done");
-        toast("Copied");
         setTimeout(() => {
           button.textContent = original;
           button.classList.remove("is-done");
         }, 1400);
-      } catch {
-        toast("Copy failed — select text manually");
       }
     });
   });
