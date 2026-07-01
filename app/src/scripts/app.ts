@@ -168,6 +168,26 @@ function snoozedNow(id: string): boolean {
 let voiceUnconfigured = false;             // set once the function reports no key
 const ttsCache = new Map<string, string>(); // text -> object URL
 let rudyAudio: HTMLAudioElement | null = null;
+let voiceStatusEl: HTMLElement | null = null;
+
+function setVoiceStatus(kind: string, text: string): void {
+  if (!voiceStatusEl) voiceStatusEl = $("#rudy-voice-status");
+  if (!voiceStatusEl) return;
+  voiceStatusEl.dataset.voiceStatus = kind;
+  voiceStatusEl.textContent = text;
+}
+
+function syncVoiceIdleStatus(): void {
+  if (!speakOn) {
+    setVoiceStatus("off", "Voice is off.");
+  } else if (!getClient()) {
+    setVoiceStatus("fallback", "Sign in to use Rudy's real voice. Browser voice can still try.");
+  } else if (voiceUnconfigured) {
+    setVoiceStatus("fallback", "Chatterbox is not connected yet. Using this phone's browser voice.");
+  } else {
+    setVoiceStatus("ready", "Rudy will try her real voice first, then fall back if needed.");
+  }
+}
 
 function stopRudyVoice(): void {
   try { rudyAudio?.pause(); } catch { /* no-op */ }
@@ -178,14 +198,32 @@ function stopRudyVoice(): void {
 /** Try the server voice. Returns false if unavailable (caller falls back). */
 async function edgeSpeak(text: string): Promise<boolean> {
   const sb = getClient();
-  if (!sb || voiceUnconfigured) return false;
+  if (!sb) {
+    setVoiceStatus("fallback", "Sign in to use Rudy's real voice. Browser voice can still try.");
+    return false;
+  }
+  if (voiceUnconfigured) {
+    setVoiceStatus("fallback", "Chatterbox is not connected yet. Using this phone's browser voice.");
+    return false;
+  }
   try {
     let url = ttsCache.get(text);
     if (!url) {
+      setVoiceStatus("checking", "Checking Rudy's real voice...");
       const { data, error } = await sb.functions.invoke("voice", { body: { mode: "tts", text } });
-      if (error) return false;
-      if (data?.unconfigured) { voiceUnconfigured = true; return false; }
-      if (!data?.audio) return false;
+      if (error) {
+        setVoiceStatus("fallback", "Voice service stumbled. Browser voice is still ready.");
+        return false;
+      }
+      if (data?.unconfigured) {
+        voiceUnconfigured = true;
+        setVoiceStatus("fallback", "Chatterbox is not connected yet. Using this phone's browser voice.");
+        return false;
+      }
+      if (!data?.audio) {
+        setVoiceStatus("fallback", "Voice service returned no audio. Browser voice is still ready.");
+        return false;
+      }
       const bytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
       url = URL.createObjectURL(new Blob([bytes], { type: data.mime || "audio/mpeg" }));
       ttsCache.set(text, url);
@@ -193,19 +231,29 @@ async function edgeSpeak(text: string): Promise<boolean> {
     stopRudyVoice();
     const a = new Audio(url);
     rudyAudio = a;
+    a.addEventListener("ended", () => syncVoiceIdleStatus(), { once: true });
+    setVoiceStatus("playing", "Rudy's real voice is playing.");
     await a.play();
     return true;
-  } catch { return false; }
+  } catch {
+    setVoiceStatus("fallback", "Voice service stumbled. Browser voice is still ready.");
+    return false;
+  }
 }
 
 /** The browser's built-in voice — the fallback only. */
 function synthSpeak(text: string): void {
-  if (!speechSynthOK) return;
+  if (!speechSynthOK) {
+    setVoiceStatus("unavailable", "Voice is not available in this browser.");
+    return;
+  }
   try {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     if (speechVoice) u.voice = speechVoice;
     u.rate = 0.96; u.pitch = 1.0; u.volume = 1.0;
+    u.onend = () => syncVoiceIdleStatus();
+    setVoiceStatus("fallback", "Using this phone's browser voice.");
     window.speechSynthesis.speak(u);
   } catch { /* no-op */ }
 }
@@ -3007,10 +3055,12 @@ async function boot(): Promise<void> {
   }
   const spkBtn = $("#rudy-spk");
   const spkState = $("#rudy-spk-state");
+  voiceStatusEl = $("#rudy-voice-status");
   const syncSpeaker = (): void => {
     if (!spkBtn) return;
     spkBtn.setAttribute("aria-pressed", speakOn ? "true" : "false");
     if (spkState) spkState.textContent = speakOn ? "On" : "Off";
+    syncVoiceIdleStatus();
   };
   if (spkBtn) {
     syncSpeaker();

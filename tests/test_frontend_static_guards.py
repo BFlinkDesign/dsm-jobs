@@ -52,6 +52,8 @@ def test_rudy_voice_and_spicy_modes_are_explicit_opt_in():
     # (aria-pressed="false") and its visible state label reads "Off".
     assert 'id="rudy-spk" aria-pressed="false"' in page
     assert 'id="rudy-spk-state">Off' in page
+    assert 'id="rudy-voice-status" role="status" aria-live="polite"' in page
+    assert "Voice is off." in page
     assert 'localStorage.getItem("rudySpeak") === "1"' in app
     assert 'localStorage.getItem("rudySpicy") === "1"' in app
     assert 'body: { message: msg, spicy: spicyOn }' in app
@@ -76,6 +78,11 @@ def test_rudy_voice_contract_uses_chatterbox_default_without_stale_client_copy()
     assert 'case "chatterbox": return await ttsChatterbox(clean);' in voice
     assert 'default: return json({ unconfigured: true });' in voice
     assert "edgeSpeak" in app
+    assert "syncVoiceIdleStatus" in app
+    assert "Rudy's real voice is playing." in app
+    assert "Using this phone's browser voice." in app
+    assert "Chatterbox is not connected yet" in app
+    assert "Voice service stumbled. Browser voice is still ready." in app
     assert "elevenSpeak" not in app
     assert "MediaRecorder -> voice Edge Function" in page
     assert "ElevenLabs" not in app
