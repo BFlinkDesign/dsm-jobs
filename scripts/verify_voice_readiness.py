@@ -76,7 +76,7 @@ def source_checks() -> tuple[bool, list[str]]:
             failures.append("voice function verify_jwt is not pinned true")
     if 'if (env("REPLICATE_API_TOKEN")) return "chatterbox";' not in voice:
         failures.append("voice function does not select Chatterbox from REPLICATE_API_TOKEN")
-    if 'case "chatterbox": return await ttsChatterbox(clean);' not in voice:
+    if 'case "chatterbox": return await ttsChatterbox(clean, voiceId);' not in voice:
         failures.append("voice function does not dispatch to ttsChatterbox")
     if 'default: return json({ unconfigured: true });' not in voice:
         failures.append("voice function must fail open to browser fallback when unconfigured")

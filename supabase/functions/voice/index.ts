@@ -2,8 +2,16 @@
 // can use a paid OR a free/open backend; it picks by whichever key you set.
 //
 // Two modes on one POST endpoint:
-//   { mode: "tts", text }                  -> { audio: <base64>, mime }
-//   { mode: "stt", audio: <base64>, mime } -> { text }
+//   { mode: "tts", text, voice? }           -> { audio: <base64>, mime }
+//   { mode: "stt", audio: <base64>, mime }  -> { text }
+//
+// `voice` is an OPTIONAL short preset id from a small server-side allowlist
+// (see VOICE_PRESETS below) — never a raw provider value. The client can only
+// ever pick one of a handful of curated names; it cannot inject arbitrary
+// model params, sample URLs, or provider voice IDs this way. Omitting `voice`
+// (or sending an unknown one) resolves to "warm", which sends byte-for-byte
+// the same request every provider sent before presets existed — nothing
+// already deployed changes behavior.
 //
 // Why: the browser's speechSynthesis is robotic and its SpeechRecognition (mic)
 // is unsupported on iOS — her only device. This sends short clips/replies to a
@@ -24,6 +32,15 @@
 //     supabase secrets set CLOUDFLARE_ACCOUNT_ID=<id> CLOUDFLARE_API_TOKEN=<token>
 //   ElevenLabs (paid; lowest priority — only used if it's the only TTS key):
 //     supabase secrets set ELEVENLABS_API_KEY=<key> [ELEVENLABS_VOICE_ID=<id>]
+//
+// ── Voice picker (client-chosen preset: warm | bright | calm | spark) ──────
+//   The 4 presets are hardcoded (see VOICE_PRESETS) so nothing needs setting
+//   up to enable the picker. Optional per-preset overrides once you've
+//   recorded/confirmed real values, e.g.:
+//     CHATTERBOX_VOICE_URL_BRIGHT=<distinct clone sample for "bright">
+//     ELEVENLABS_VOICE_ID_CALM=<confirmed voice id for "calm">
+//   Unset overrides just use the built-in preset value (or the shared
+//   CHATTERBOX_VOICE_URL sample for Chatterbox presets without their own).
 //
 // Mic typing (STT):
 //   Groq Whisper (free, very fast): supabase secrets set GROQ_API_KEY=<key>
@@ -90,6 +107,57 @@ function b64decode(b64: string): Uint8Array<ArrayBuffer> {
   return out;
 }
 
+// ── Voice presets (server-side allowlist) ──────────────────────────────────
+// The ONLY voice-selection surface the client can reach. `voice` in the
+// request body is matched against this map's keys only; anything else (or
+// absent) becomes "warm". This is what makes the picker safe: the client
+// sends a short label, never a model param, sample URL, or provider voice id.
+type ChatterboxTune = { exaggeration: number; cfgWeight: number; temperature: number };
+type VoicePreset = {
+  label: string;
+  chatterbox: ChatterboxTune;
+  elevenlabsVoiceId: string;   // known-good premade ElevenLabs voice id
+  kokoroVoice?: string;        // Kokoro-82M named voice (best-effort, see ttsHuggingFace)
+};
+
+const DEFAULT_VOICE = "warm";
+
+const VOICE_PRESETS: Record<string, VoicePreset> = {
+  // "warm" MUST stay numerically identical to the pre-preset hardcoded
+  // defaults below (0.5 / 0.5 / 0.8, ElevenLabs "Rachel") — it is the
+  // fallback for every existing caller that never sends `voice` at all.
+  warm: {
+    label: "Warm",
+    chatterbox: { exaggeration: 0.5, cfgWeight: 0.5, temperature: 0.8 },
+    elevenlabsVoiceId: "21m00Tcm4TlvDq8ikWAM",   // "Rachel" — existing default
+    kokoroVoice: "af_heart",
+  },
+  bright: {
+    label: "Bright",
+    chatterbox: { exaggeration: 0.7, cfgWeight: 0.4, temperature: 0.9 },
+    elevenlabsVoiceId: "EXAVITQu4vr4xnSDxMaL",   // "Bella" — energetic premade voice
+    kokoroVoice: "af_bella",
+  },
+  calm: {
+    label: "Calm",
+    chatterbox: { exaggeration: 0.3, cfgWeight: 0.6, temperature: 0.6 },
+    elevenlabsVoiceId: "ErXwobaYiN019PkySvjV",   // "Antoni" — steady, lower-energy premade voice
+    kokoroVoice: "am_michael",
+  },
+  spark: {
+    label: "Spark",
+    chatterbox: { exaggeration: 0.8, cfgWeight: 0.35, temperature: 1.0 },
+    elevenlabsVoiceId: "MF3mGyEYCl7XYWbV9V6O",   // "Elli" — playful premade voice
+    kokoroVoice: "af_nicole",
+  },
+};
+
+/** Map an untrusted request-body value to a known preset id, defaulting safely. */
+function resolveVoiceId(raw: unknown): string {
+  const id = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return Object.prototype.hasOwnProperty.call(VOICE_PRESETS, id) ? id : DEFAULT_VOICE;
+}
+
 const cfReady = (): boolean => !!(env("CLOUDFLARE_ACCOUNT_ID") && env("CLOUDFLARE_API_TOKEN"));
 
 function ttsProvider(): string {
@@ -113,11 +181,17 @@ function sttProvider(): string {
 
 // ── TTS providers ──────────────────────────────────────────────────────────
 
-async function ttsElevenLabs(text: string): Promise<Response> {
-  const voiceId = env("ELEVENLABS_VOICE_ID") || "21m00Tcm4TlvDq8ikWAM";   // warm default ("Rachel")
+async function ttsElevenLabs(text: string, voiceId = DEFAULT_VOICE): Promise<Response> {
+  // "warm" keeps the exact pre-preset lookup (env override, else hardcoded
+  // "Rachel") so a request without `voice` is byte-for-byte unchanged. Any
+  // other preset uses its curated id, optionally overridden per-preset via
+  // ELEVENLABS_VOICE_ID_<NAME> once real sample ids are confirmed live.
+  const elId = voiceId === DEFAULT_VOICE
+    ? (env("ELEVENLABS_VOICE_ID") || VOICE_PRESETS[DEFAULT_VOICE].elevenlabsVoiceId)
+    : (env(`ELEVENLABS_VOICE_ID_${voiceId.toUpperCase()}`) || VOICE_PRESETS[voiceId].elevenlabsVoiceId);
   const modelId = env("ELEVENLABS_MODEL_ID") || "eleven_turbo_v2_5";
   const r = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`,
+    `https://api.elevenlabs.io/v1/text-to-speech/${elId}?output_format=mp3_44100_128`,
     {
       method: "POST",
       headers: { "xi-api-key": env("ELEVENLABS_API_KEY"), "Content-Type": "application/json", "Accept": "audio/mpeg" },
@@ -149,22 +223,35 @@ async function ttsCloudflare(text: string): Promise<Response> {
   return json({ audio, mime: "audio/mpeg" });
 }
 
-async function ttsHuggingFace(text: string): Promise<Response> {
+async function ttsHuggingFace(text: string, voiceId = DEFAULT_VOICE): Promise<Response> {
   // Kokoro-82M (Apache-2.0) — the best open voice. Serverless support varies, so
   // HF_TTS_URL lets you point at a dedicated Inference Endpoint.
   const url = env("HF_TTS_URL")
     || `https://api-inference.huggingface.co/models/${env("HF_TTS_MODEL") || "hexgrad/Kokoro-82M"}`;
+  // "warm" sends the exact same body as before presets existed. For other
+  // presets we *additionally* send Kokoro's documented voice-name field
+  // (kokoro's own API/pipeline accepts a `voice` string, e.g. "af_bella",
+  // "am_michael" — see hexgrad/kokoro README). The stock HF serverless
+  // Inference API for a standard text-to-speech pipeline does not read a
+  // custom `voice` parameter and will just ignore it — that's the intended
+  // "fall back to default silently" behavior on a dedicated endpoint that
+  // doesn't implement voice selection.
+  const preset = VOICE_PRESETS[voiceId];
+  const body: Record<string, unknown> = { inputs: text };
+  if (voiceId !== DEFAULT_VOICE && preset?.kokoroVoice) {
+    body.parameters = { voice: preset.kokoroVoice };
+  }
   const r = await fetch(url, {
     method: "POST",
     headers: { "Authorization": `Bearer ${env("HF_TOKEN")}`, "Content-Type": "application/json", "Accept": "audio/wav" },
-    body: JSON.stringify({ inputs: text }),
+    body: JSON.stringify(body),
   });
   if (!r.ok) return json({ error: "tts_failed", provider: "huggingface", status: r.status, detail: (await r.text()).slice(0, 200) }, 502);
   const mime = r.headers.get("content-type") || "audio/wav";
   return json({ audio: b64encode(await r.arrayBuffer()), mime });
 }
 
-async function ttsChatterbox(text: string): Promise<Response> {
+async function ttsChatterbox(text: string, voiceId = DEFAULT_VOICE): Promise<Response> {
   // Chatterbox (Resemble AI, MIT) via Replicate. Async predictions API: we ask
   // it to wait inline (Prefer: wait, up to 60s) and poll if it isn't done yet.
   const token = env("REPLICATE_API_TOKEN");
@@ -173,13 +260,31 @@ async function ttsChatterbox(text: string): Promise<Response> {
     const v = parseFloat(env(k));
     return Number.isFinite(v) ? v : d;
   };
-  const input: Record<string, unknown> = {
-    prompt: text,
-    exaggeration: num("CHATTERBOX_EXAGGERATION", 0.5),
-    cfg_weight: num("CHATTERBOX_CFG", 0.5),
-    temperature: num("CHATTERBOX_TEMPERATURE", 0.8),
-  };
-  const voiceSample = env("CHATTERBOX_VOICE_URL");
+  let input: Record<string, unknown>;
+  let voiceSample: string;
+  if (voiceId === DEFAULT_VOICE) {
+    // Byte-identical to the pre-preset request: same env keys, same defaults.
+    input = {
+      prompt: text,
+      exaggeration: num("CHATTERBOX_EXAGGERATION", 0.5),
+      cfg_weight: num("CHATTERBOX_CFG", 0.5),
+      temperature: num("CHATTERBOX_TEMPERATURE", 0.8),
+    };
+    voiceSample = env("CHATTERBOX_VOICE_URL");
+  } else {
+    // Other presets use their own tuned exaggeration/cfg_weight/temperature
+    // combo. A distinct clone sample per preset is optional
+    // (CHATTERBOX_VOICE_URL_<NAME>); until one is set we fall back to the
+    // single shared sample, so the voice still differs by tuning alone.
+    const preset = VOICE_PRESETS[voiceId].chatterbox;
+    input = {
+      prompt: text,
+      exaggeration: preset.exaggeration,
+      cfg_weight: preset.cfgWeight,
+      temperature: preset.temperature,
+    };
+    voiceSample = env(`CHATTERBOX_VOICE_URL_${voiceId.toUpperCase()}`) || env("CHATTERBOX_VOICE_URL");
+  }
   if (voiceSample) input.audio_prompt = voiceSample;   // clone Rudy's voice from a sample
 
   const create = await fetch(`https://api.replicate.com/v1/models/${model}/predictions`, {
@@ -216,14 +321,18 @@ async function ttsChatterbox(text: string): Promise<Response> {
   return json({ audio: b64encode(await audioRes.arrayBuffer()), mime });
 }
 
-async function doTTS(text: string): Promise<Response> {
+async function doTTS(text: string, voiceRaw?: unknown): Promise<Response> {
   const clean = (text || "").trim().slice(0, MAX_TTS_CHARS);
   if (!clean) return json({ error: "empty_text" }, 400);
+  const voiceId = resolveVoiceId(voiceRaw);
   switch (ttsProvider()) {
-    case "chatterbox": return await ttsChatterbox(clean);
-    case "elevenlabs": return await ttsElevenLabs(clean);
+    case "chatterbox": return await ttsChatterbox(clean, voiceId);
+    case "elevenlabs": return await ttsElevenLabs(clean, voiceId);
+    // Cloudflare MeloTTS's public API only takes { prompt, lang } — it has no
+    // per-voice parameter, so every preset silently falls back to its one
+    // default voice here, per spec.
     case "cloudflare": return await ttsCloudflare(clean);
-    case "huggingface": return await ttsHuggingFace(clean);
+    case "huggingface": return await ttsHuggingFace(clean, voiceId);
     default: return json({ unconfigured: true });
   }
 }
@@ -290,7 +399,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405);
 
-  let body: { mode?: string; text?: string; audio?: string; mime?: string };
+  let body: { mode?: string; text?: string; audio?: string; mime?: string; voice?: string };
   try {
     body = await req.json();
   } catch {
@@ -298,7 +407,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
   }
 
   try {
-    if (body.mode === "tts") return await doTTS(body.text || "");
+    if (body.mode === "tts") return await doTTS(body.text || "", body.voice);
     if (body.mode === "stt") return await doSTT(body.audio || "", body.mime || "");
     return json({ error: "unknown_mode" }, 400);
   } catch (err) {

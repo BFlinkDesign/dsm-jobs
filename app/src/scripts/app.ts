@@ -1,4 +1,5 @@
 import type { AppState, ApplicationPack, ApplicationStatus, AtsAlignment, FilterPrefs, Job, Meta, Resource, ResourceHub, ResumeDocument, ViewName } from "./types";
+import { normalizeRudyVoice, RUDY_VOICE_DEFAULT } from "./types";
 import {
   appendChatToLocal,
   autosave,
@@ -70,6 +71,11 @@ let pushSubscribed = false;
 let pullRefreshing = false;
 let feedLoadFailed = false;
 let rudyHistoryLoaded = false;
+// The job she's currently chatting with Rudy about, if any — set by "Ask Rudy
+// about this job" on a card, cleared when she dismisses the context chip or
+// closes Rudy. Transient UI state only (never persisted): reopening Rudy from
+// the tab bar or My corner always starts with no job context.
+let rudyJobContext: Job | null = null;
 let tailorTimer: ReturnType<typeof setInterval> | null = null;
 let filtersExpanded = false;
 let lastTailorRequest: TailorRequest | null = null;
@@ -174,9 +180,15 @@ function snoozedNow(id: string): boolean {
 // voice when the function or key is not set up yet. Repeated lines are cached
 // so they do not re-bill.
 let voiceUnconfigured = false;             // set once the function reports no key
-const ttsCache = new Map<string, string>(); // text -> object URL
+// Keyed on "<voiceId>::<text>" so switching presets never replays stale audio
+// recorded under a different voice for the same line.
+const ttsCache = new Map<string, string>();
 let rudyAudio: HTMLAudioElement | null = null;
 let voiceStatusEl: HTMLElement | null = null;
+let rudyVoiceId = RUDY_VOICE_DEFAULT;      // her chosen read-aloud preset — synced to profile + localStorage
+let voicePreviewBusy = false;               // one in-flight preview at a time (cost guard)
+const RUDY_VOICE_PREVIEW_TEXT = "Hi, I'm Rudy. This is what I sound like.";
+let voicePickerEl: HTMLElement | null = null;
 
 function setVoiceStatus(kind: string, text: string): void {
   if (!voiceStatusEl) voiceStatusEl = $("#rudy-voice-status");
@@ -197,6 +209,23 @@ function syncVoiceIdleStatus(): void {
   }
 }
 
+/** Choose Rudy's read-aloud preset. Visible only while read-aloud is ON — it
+ * never coaxes her into turning that on, it just appears once she already
+ * has. Selection lives in profile.rudyVoice, riding the same AppState
+ * (localStorage) + Supabase profile-blob sync as commuteRadius/coachOff, so
+ * it follows her across devices. Re-callable after a profile pull so a
+ * choice made on another device shows up here too. */
+function syncVoicePicker(): void {
+  if (!voicePickerEl) voicePickerEl = $("#rudy-voice-picker");
+  rudyVoiceId = normalizeRudyVoice(getState().rudyVoice);
+  if (!voicePickerEl) return;
+  voicePickerEl.hidden = !speakOn;
+  voicePickerEl.querySelectorAll<HTMLButtonElement>(".rudy-voice-opt").forEach((btn) => {
+    const on = btn.dataset.voice === rudyVoiceId;
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
 function stopRudyVoice(): void {
   try { rudyAudio?.pause(); } catch { /* no-op */ }
   rudyAudio = null;
@@ -204,7 +233,7 @@ function stopRudyVoice(): void {
 }
 
 /** Try the server voice. Returns false if unavailable (caller falls back). */
-async function edgeSpeak(text: string): Promise<boolean> {
+async function edgeSpeak(text: string, voiceId: string = rudyVoiceId): Promise<boolean> {
   const sb = getClient();
   if (!sb) {
     setVoiceStatus("fallback", "Sign in to use Rudy's real voice. Browser voice can still try.");
@@ -215,10 +244,11 @@ async function edgeSpeak(text: string): Promise<boolean> {
     return false;
   }
   try {
-    let url = ttsCache.get(text);
+    const cacheKey = `${voiceId}::${text}`;
+    let url = ttsCache.get(cacheKey);
     if (!url) {
       setVoiceStatus("checking", "Checking Rudy's real voice...");
-      const { data, error } = await sb.functions.invoke("voice", { body: { mode: "tts", text } });
+      const { data, error } = await sb.functions.invoke("voice", { body: { mode: "tts", text, voice: voiceId } });
       if (error) {
         setVoiceStatus("fallback", "Voice service stumbled. Browser voice is still ready.");
         return false;
@@ -234,7 +264,7 @@ async function edgeSpeak(text: string): Promise<boolean> {
       }
       const bytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
       url = URL.createObjectURL(new Blob([bytes], { type: data.mime || "audio/mpeg" }));
-      ttsCache.set(text, url);
+      ttsCache.set(cacheKey, url);
     }
     stopRudyVoice();
     const a = new Audio(url);
@@ -273,6 +303,20 @@ function speakText(text: string): void {
     const ok = await edgeSpeak(text);
     if (!ok) synthSpeak(text);
   })();
+}
+
+/** Preview one voice preset with a short fixed line. Throttled to one
+ * in-flight preview at a time so tapping around the picker can't spam the
+ * provider — matches the cost-guard philosophy used elsewhere in this file. */
+async function previewVoice(voiceId: string): Promise<void> {
+  if (voicePreviewBusy) return;
+  voicePreviewBusy = true;
+  try {
+    const ok = await edgeSpeak(RUDY_VOICE_PREVIEW_TEXT, voiceId);
+    if (!ok) synthSpeak(RUDY_VOICE_PREVIEW_TEXT);
+  } finally {
+    voicePreviewBusy = false;
+  }
 }
 
 /** How strong a lead is FOR HER — her quiz answers weigh most, then remote,
@@ -1300,6 +1344,7 @@ function jobCard(j: Job): string {
       ${authed ? `<button type="button" class="btn btn-ghost" data-save="${esc(j.id)}">${s.saved[j.id] ? "Saved ✓" : "Save"}</button>` : ""}
       ${authed && j.url ? `<a class="btn btn-ghost" href="${esc(safeUrl(j.url))}" target="_blank" rel="noopener">Apply ↗</a>` : ""}
       ${authed && hasResume ? `<button type="button" class="btn btn-ghost" data-tailor="${esc(j.id)}">Rudy tailor résumé</button>` : ""}
+      ${authed ? `<button type="button" class="btn btn-ghost btn-sm" data-ask-rudy="${esc(j.id)}">Ask Rudy about this job</button>` : ""}
       ${authed && hasPack ? `<button type="button" class="btn btn-ghost" data-pack="${esc(j.id)}">Open pack</button>` : ""}
       <button type="button" class="btn btn-ghost btn-sm" data-snooze="${esc(j.id)}">${isSnoozed ? "👁 Napping" : "Not today"}</button>
       <button type="button" class="btn btn-ghost btn-sm" data-hide="${esc(j.id)}">${isHidden ? "Unhide" : "Hide"}</button>
@@ -1714,7 +1759,7 @@ function animateCardLeave(id: string, then: () => void): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #pushbtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt, #empty-clear-filters, [data-suggest-search]"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-ask-rudy], #rudy-job-chip-clear, [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #pushbtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt, #empty-clear-filters, [data-suggest-search]"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1983,6 +2028,17 @@ function handleViewClick(e: Event): void {
     const id = t.getAttribute("data-tailor")!;
     const job = jobs.find((x) => x.id === id);
     if (job) openTailor(job);
+    return;
+  }
+  if (t.hasAttribute("data-ask-rudy")) {
+    const id = t.getAttribute("data-ask-rudy")!;
+    const job = jobs.find((x) => x.id === id);
+    if (job) openRudy(job);
+    return;
+  }
+  if (t.id === "rudy-job-chip-clear") {
+    rudyJobContext = null;
+    renderRudyJobChip();
     return;
   }
   if (t.hasAttribute("data-pack")) {
@@ -2352,12 +2408,39 @@ function closeAuth(): void {
   resetAllPasswordVisibility();
 }
 
-function openRudy(): void {
+/** A short, gentle conversation-starter prefilled into the input when she taps
+ * "Ask Rudy about this job" — she can edit or replace it before sending; the
+ * app never sends anything to Rudy on her behalf. */
+function askRudyJobPrompt(job: Job): string {
+  return `Can you help me understand the ${job.title} job at ${job.company}?`;
+}
+
+/** The dismissible "Talking about: <job title> ✕" chip in the Rudy overlay.
+ * It mirrors exactly what rides along in the next chat turn (see sendRudy's
+ * jobContextPayload), so she always knows what Rudy can currently see about a
+ * specific posting and can clear it with one tap. */
+function renderRudyJobChip(): void {
+  const chip = $("#rudy-job-chip");
+  if (!chip) return;
+  if (!rudyJobContext) { chip.hidden = true; chip.innerHTML = ""; return; }
+  chip.hidden = false;
+  chip.innerHTML = `<span>Talking about: ${esc(rudyJobContext.title)}</span>` +
+    `<button type="button" class="btn btn-ghost btn-sm" id="rudy-job-chip-clear" aria-label="Stop talking about this job">✕</button>`;
+}
+
+function openRudy(job?: Job): void {
   if (!authed) return openAuth();
+  if (job) rudyJobContext = job;
   const ov = $("#rudy-overlay");
   if (ov) { ov.hidden = false; document.body.style.overflow = "hidden"; setModalTrap(ov); }
+  renderRudyJobChip();
   void renderRudyLog();
-  setTimeout(() => { ($("#rudy-input") as HTMLInputElement | null)?.focus(); }, 50);
+  setTimeout(() => {
+    const inp = $("#rudy-input") as HTMLInputElement | null;
+    if (!inp) return;
+    if (job && !inp.value.trim()) inp.value = askRudyJobPrompt(job);
+    inp.focus();
+  }, 50);
 }
 
 function closeRudy(): void {
@@ -2365,6 +2448,8 @@ function closeRudy(): void {
   if (ov) { ov.hidden = true; document.body.style.overflow = ""; clearModalTrap(); }
   stopRudyVoice();
   closeRudyMemory();
+  rudyJobContext = null;
+  renderRudyJobChip();
 }
 
 /** Human label for a saved quiz value, e.g. kind="home" -> "Working from home".
@@ -2491,6 +2576,28 @@ async function renderRudyLog(): Promise<void> {
   log.scrollTop = log.scrollHeight;
 }
 
+// Compact per-job snapshot sent to the companion edge function when a job is
+// active in Rudy chat (see rudyJobContext / "Ask Rudy about this job"). `pay`
+// is ALWAYS the already-computed verdict TEXT (never a raw number) — CLAUDE.md
+// invariant #1: a guessed wage must never be presented as a number. descFull
+// is capped client-side too (in addition to grounding.ts's own server-side
+// cap), mirroring MAX_ACTIVE_RESUME_CHARS's role for the résumé path, so a
+// huge posting can't balloon a single chat turn's request body.
+const MAX_JOB_CONTEXT_DESC_CHARS = 6000;
+
+function jobContextPayload(job: Job): Record<string, unknown> {
+  const desc = (job.descFull || "").trim();
+  return {
+    title: job.title,
+    company: job.company,
+    pay: job.pay,
+    location: job.remote ? "Remote" : job.location,
+    commute: job.commute,
+    posted: relativePosted(job.posted),
+    descFull: desc.length > MAX_JOB_CONTEXT_DESC_CHARS ? desc.slice(0, MAX_JOB_CONTEXT_DESC_CHARS) : desc,
+  };
+}
+
 async function sendRudy(): Promise<void> {
   const inp = $("#rudy-input") as HTMLInputElement | null;
   const log = $("#rudy-log");
@@ -2516,7 +2623,11 @@ async function sendRudy(): Promise<void> {
     return;
   }
   try {
-    const { data, error } = await sb.functions.invoke("companion", { body: { message: msg, spicy: spicyOn } });
+    // Only ride along a job snapshot when one is actually active — a plain
+    // chat turn (no job in view) sends nothing extra (see jobContextPayload).
+    const body: Record<string, unknown> = { message: msg, spicy: spicyOn };
+    if (rudyJobContext) body.activeJob = jobContextPayload(rudyJobContext);
+    const { data, error } = await sb.functions.invoke("companion", { body });
     const reply = (error?.message ? null : (data?.reply as string)) || "I'm here with you. Try again in a moment. 💜";
     thinkingBubble.classList.remove("think");
     thinkingBubble.textContent = reply;
@@ -2535,8 +2646,49 @@ function tailorLabel(job: Job): string {
   return `${job.title} at ${job.company}`;
 }
 
+// ── Bat swarm — the tailor loader's signature flourish ──────────────────────
+// One hand-authored wing (membrane + visible finger bones) is reused, mirrored,
+// for both sides of every bat: real flight is (near-)symmetric, and reusing the
+// same path + the same bat-flap-l keyframes for both wings keeps the flap
+// perfectly in sync without duplicating geometry. Six bats across three depth
+// layers (far/mid/near) each get their own flight-path + flutter + flap timing
+// (see app.css `.bat-a`..`.bat-f`) so nothing reads as one sprite cloned in a
+// loop. Decorative only: aria-hidden, pointer-events:none, never intercepts taps.
+const BAT_WING_MARKUP =
+  `<path class="bat-membrane" d="M58,30 Q46,10 36,8 Q40,20 40,20 Q26,10 14,14 Q24,26 22,30 Q14,30 10,34 Q18,38 20,42 Q16,48 18,50 Q30,44 34,46 Q44,42 48,38 Q54,34 58,30 Z"/>` +
+  `<path class="bat-finger" d="M58,30 L36,8 M58,30 L14,14 M58,30 L10,34 M58,30 L18,50"/>`;
+
+function batSvg(): string {
+  return `<svg class="bat-svg" viewBox="0 0 120 64" aria-hidden="true" focusable="false">
+    <g class="bat-wing bat-wing-l">${BAT_WING_MARKUP}</g>
+    <g transform="translate(120,0) scale(-1,1)"><g class="bat-wing bat-wing-l">${BAT_WING_MARKUP}</g></g>
+    <path class="bat-ear" d="M54,22 L50,9 L59,20 Z"/>
+    <path class="bat-ear" d="M66,22 L70,9 L61,20 Z"/>
+    <ellipse class="bat-torso" cx="60" cy="31" rx="5.5" ry="9.5"/>
+  </svg>`;
+}
+
+const BAT_LAYERS: Array<{ id: string; layer: "far" | "mid" | "near" }> = [
+  { id: "a", layer: "far" },
+  { id: "b", layer: "mid" },
+  { id: "c", layer: "near" },
+  { id: "d", layer: "far" },
+  { id: "e", layer: "mid" },
+  { id: "f", layer: "near" },
+];
+
+function batSwarmHTML(): string {
+  const bats = BAT_LAYERS
+    .map(({ id, layer }) => `<div class="bat bat--${layer} bat-${id}"><div class="bat-flutter">${batSvg()}</div></div>`)
+    .join("");
+  // Reduced-motion fallback: a single still silhouette, shown only when the
+  // animated swarm below is disabled (see app.css prefers-reduced-motion block).
+  return `<div class="bat-swarm" id="bat-swarm" aria-hidden="true">${bats}<div class="bat bat-static">${batSvg()}</div></div>`;
+}
+
 function tailorLoaderHTML(job: Job): string {
   return `<section class="tailor-load" aria-label="Rudy is tailoring this résumé">
+    ${batSwarmHTML()}
     <div class="tailor-load-head">
       <p class="tailor-kicker">Rudy is tailoring</p>
       <h3>${esc(job.title)}</h3>
@@ -2585,7 +2737,14 @@ function startTailorLoader(job: Job): void {
   }, 180);
 }
 
-function stopTailorLoader(): void {
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// Lets the bats visibly scatter off-screen before the loader panel is replaced
+// by the result/error view, instead of just vanishing mid-flight. Skipped
+// entirely under reduced motion (nothing to wait for — the swarm never ran).
+function stopTailorLoader(): Promise<void> {
   if (tailorTimer) {
     clearInterval(tailorTimer);
     tailorTimer = null;
@@ -2594,6 +2753,10 @@ function stopTailorLoader(): void {
   const meter = document.getElementById("tailor-meter");
   if (fill) fill.style.width = "100%";
   if (meter) meter.setAttribute("aria-valuenow", "100");
+  const swarm = document.getElementById("bat-swarm");
+  if (!swarm || prefersReducedMotion()) return Promise.resolve();
+  swarm.classList.add("is-leaving");
+  return new Promise((resolve) => setTimeout(resolve, 380));
 }
 
 function openTailor(job: Job): void {
@@ -2624,7 +2787,7 @@ function closeTailor(): void {
   if (modal) modal.hidden = true;
   document.body.style.overflow = "";
   clearModalTrap();
-  stopTailorLoader();
+  void stopTailorLoader();
 }
 
 function openApplicationPack(job: Job): void {
@@ -2914,7 +3077,7 @@ async function runTailor(job: Job, resume: string, jobText: string): Promise<voi
   const body = $("#tailor-body");
   lastTailorRequest = { job, resume, jobText };
   if (!sb || !body) {
-    stopTailorLoader();
+    await stopTailorLoader();
     if (body) renderTailorError(job, "Sign in to tailor. That keeps her résumé private and saved to her account.");
     return;
   }
@@ -2922,14 +3085,14 @@ async function runTailor(job: Job, resume: string, jobText: string): Promise<voi
     const { data, error } = await sb.functions.invoke("resume-tailor", {
       body: { resume, jobTitle: job.title, company: job.company, jobText },
     });
-    stopTailorLoader();
+    await stopTailorLoader();
     if (error || !data?.resume) {
       renderTailorError(job, friendlyTailorError(await extractTailorErrorMessage(data?.error, error)));
       return;
     }
     renderTailorResult(job, data as TailorResult);
   } catch {
-    stopTailorLoader();
+    await stopTailorLoader();
     renderTailorError(job, "No connection right now. Nothing was changed; try again when the connection is back.");
   }
 }
@@ -2951,6 +3114,7 @@ async function refreshAuth(): Promise<void> {
     await drainPendingSaves();
     await updateSyncBanner();
     commuteMax = getState().commuteRadius;
+    syncVoicePicker();
     rudyHistoryLoaded = false;
     if (!wasAuthed) offerPasskeyNudge(user.id);
   } else {
@@ -3369,11 +3533,27 @@ async function boot(): Promise<void> {
   const spkBtn = $("#rudy-spk");
   const spkState = $("#rudy-spk-state");
   voiceStatusEl = $("#rudy-voice-status");
+  voicePickerEl = $("#rudy-voice-picker");
+  syncVoicePicker();
+  voicePickerEl?.querySelectorAll<HTMLButtonElement>(".rudy-voice-opt").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = normalizeRudyVoice(btn.dataset.voice);
+      if (id !== rudyVoiceId) {
+        rudyVoiceId = id;
+        patchState((s) => { s.rudyVoice = id; });
+        autosave();
+        syncVoicePicker();
+      }
+      if (speakOn) void previewVoice(id);
+    });
+  });
+
   const syncSpeaker = (): void => {
     if (!spkBtn) return;
     spkBtn.setAttribute("aria-pressed", speakOn ? "true" : "false");
     if (spkState) spkState.textContent = speakOn ? "On" : "Off";
     syncVoiceIdleStatus();
+    syncVoicePicker();
   };
   if (spkBtn) {
     syncSpeaker();
