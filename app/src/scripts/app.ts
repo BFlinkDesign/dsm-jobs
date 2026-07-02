@@ -2675,15 +2675,15 @@ function tailorLabel(job: Job): string {
 // loop. Decorative only: aria-hidden, pointer-events:none, never intercepts taps.
 // Wing root ("shoulder") sits at (58,30) so the CSS transform-origin lines up
 // for both the left wing and its mirrored twin. The wrist (36,9) is where the
-// arm ends and four fingers fan out to tips T1..T4. The leading edge sweeps
-// shoulder -> wrist -> a sharp wingtip (T1, 5,20): each scallop's control
-// point is pulled back close to the WRIST itself (not just "toward the
-// body"), so the trailing edge swings in tight to the arm between fingers
-// before bowing back out to the next tip — that's what puts a hard, sharp
-// angle at every cusp instead of a smooth rounded lobe (the butterfly tell).
-// The last segment closes the membrane back to the shoulder along the body.
+// arm ends and four fingers fan out to tips T1..T4. The leading edge is a
+// smooth convex curve (shoulder -> wrist -> sharp wingtip T1), but the
+// TRAILING edge is straight-line notches cut deep toward the wrist between
+// each pair of finger tips — a hard angular zigzag, not a bowed curve — so
+// every cusp is a genuine sharp point instead of a rounded lobe (the
+// butterfly tell). The last segment closes the membrane back to the
+// shoulder along the body.
 const BAT_WING_MARKUP =
-  `<path class="bat-membrane" d="M58,30 Q46,12 36,9 Q18,8 5,20 Q28,16 12,38 Q34,26 20,48 Q42,36 32,55 Q50,50 58,30 Z"/>` +
+  `<path class="bat-membrane" d="M58,30 Q46,12 36,9 Q18,8 5,20 L24,18 L12,38 L30,28 L20,48 L38,38 L32,55 Q50,50 58,30 Z"/>` +
   `<path class="bat-finger" d="M36,9 L5,20 M36,9 L12,38 M36,9 L20,48 M36,9 L32,55"/>`;
 
 function batSvg(): string {
