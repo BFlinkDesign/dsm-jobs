@@ -108,6 +108,7 @@ export function defaultState(): AppState {
     profile: defaultProfile(),
     commuteRadius: null,
     coachOff: false,
+    rudyVoice: "warm",
   };
 }
 

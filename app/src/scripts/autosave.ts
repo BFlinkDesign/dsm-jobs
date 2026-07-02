@@ -1,7 +1,7 @@
 import { defaultState, getState, setState } from "./store";
 import { drainOutbox, enqueueOutbox, pendingOutboxCount, type OutboxOperation } from "./outbox";
 import type { AppliedEntry, FilterPrefs, PortalCfg } from "./types";
-import { defaultFilters } from "./types";
+import { defaultFilters, normalizeRudyVoice } from "./types";
 import { todayISO } from "./util";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -277,6 +277,7 @@ async function pushProfileNow(): Promise<void> {
     followAlertDay: s.followAlertDay,
     commuteRadius: s.commuteRadius,
     coachOff: s.coachOff,
+    rudyVoice: s.rudyVoice,
     seen: s.seen,
     filters: s.filters,
   };
@@ -344,6 +345,7 @@ export async function pullProfile(): Promise<void> {
     followAlertDay: (p.followAlertDay as string) || cur.followAlertDay,
     commuteRadius: (p.commuteRadius as number | null) ?? cur.commuteRadius,
     coachOff: (p.coachOff as boolean) ?? cur.coachOff,
+    rudyVoice: typeof p.rudyVoice === "string" ? normalizeRudyVoice(p.rudyVoice) : cur.rudyVoice,
     seen: Array.isArray(p.seen) ? (p.seen as string[]) : cur.seen,
     filters: { ...defaultFilters(), ...cur.filters, ...((p.filters as FilterPrefs) || {}) },
   });
