@@ -102,12 +102,21 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 - **Leverage UX:** undo apply/hide, scroll restore per tab, SW update toast, offline banner, pull-to-refresh, iOS install coach, stale feed banner, tailor download.
 - **Companion renamed to Rudy** in edge function prompt (UI already said Rudy).
 
+## Shipped 2026-07-01 (#162–#171)
+
+- **Web Push for follow-ups** (#164) — `app/src/scripts/push.ts`, `send-followup-push` edge function (cron-authed via `x-cron-secret`, `verify_jwt=false` by design), `push_subscriptions` table (RLS, deliberately no SELECT policy), `.github/workflows/push-followups.yml` scheduled sender, SW `push`/`notificationclick` handlers (origin-checked).
+- **Application action cockpit** (#161) + **Today's next action** (#162).
+- **Voice deploy workflow** (#163) + **Rudy voice picker** (#165, warm/bright/calm/spark, tap-to-preview).
+- **Rudy chat grounded in the active job posting** (#166) — never a guessed wage in chat either.
+- **Bat swarm loader** in the résumé tailor (#167) + **standing design brief** `docs/DESIGN-BRIEF.md` (#168).
+- **Jobs UX + fit overhaul** (#169) — "Remote · Remote" fixed, II/III tier + license/cert + 4+-years walls filtered, zero-result suggestions, live safe-count pill.
+- **Ops fixes:** Supabase Management API calls need a real User-Agent (#170, Cloudflare bans urllib's default); camera CI installs app npm deps (#171 — it had been silently broken since the Astro rebuild).
+
 ## Planned / next
 
 - **Resend SMTP** for reliable password-reset + magic-link email (today's default Supabase mailer is spam-prone). Then "Confirm email" could go back ON.
 - **Google OAuth** (optional — needs a Google Cloud client; the button auto-appears once enabled). Apple intentionally skipped ($99/yr).
-- **Web Push** for follow-ups when app closed (especially iOS PWA limits on `Notification` alone).
-- **Passkeys** — enable in Supabase dashboard; verify on Lilly's iPhone after one password sign-in.
+- **Passkeys** — enable in Supabase dashboard; verify on Lilly's iPad after one password sign-in.
 - **Recover MercyOne/Hy-Vee/national-tenant sources** via better parsing (see rejected list in `providers.py`).
 - Malwarebytes reputation was tested and returns "unknown" for job/ATS domains (sparse coverage) — not used.
 - Figma design file: https://www.figma.com/design/HxvPka9GtLJYBJpHQwY0M7 (the live app captured for iteration).
