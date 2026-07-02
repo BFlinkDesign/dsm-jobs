@@ -56,8 +56,13 @@ def _load_env() -> None:
     verifier.load_standard_env(ROOT)
 
 
+# Same Cloudflare user-agent ban as verify_supabase_schema.py: the default
+# Python-urllib/3.x signature draws a 403/1010 at the edge.
+_USER_AGENT = "dsm-jobs-snapshot/1.0 (+https://github.com/BFlinkDesign/dsm-jobs)"
+
+
 def _json_request(url: str, headers: dict[str, str]) -> object:
-    req = urllib.request.Request(url, headers=headers)
+    req = urllib.request.Request(url, headers={"User-Agent": _USER_AGENT, **headers})
     with urllib.request.urlopen(req, timeout=30) as resp:
         raw = resp.read().decode("utf-8")
         return json.loads(raw) if raw.strip() else None
@@ -65,6 +70,7 @@ def _json_request(url: str, headers: dict[str, str]) -> object:
 
 def _fetch_table(base_url: str, service_key: str, table: str) -> list[dict]:
     headers = {
+        "User-Agent": _USER_AGENT,
         "apikey": service_key,
         "Authorization": f"Bearer {service_key}",
         "Accept": "application/json",
