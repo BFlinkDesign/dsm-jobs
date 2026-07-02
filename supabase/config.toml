@@ -16,3 +16,13 @@ verify_jwt = true
 # ELEVENLABS_API_KEY; only signed-in users reach it.
 [functions.voice]
 verify_jwt = true
+
+# Sends real Web Push notifications for due follow-up reminders. This is a
+# server-to-server cron job (GitHub Actions -> here), not a page-invoked
+# function — it needs the service role to read every user's due follow-ups,
+# so a per-user JWT gate is the wrong shape. verify_jwt is OFF; the function
+# authenticates the caller itself via the PUSH_CRON_SECRET shared secret
+# (`x-cron-secret` header) so the endpoint isn't left open just because JWT
+# verification is disabled.
+[functions.send-followup-push]
+verify_jwt = false

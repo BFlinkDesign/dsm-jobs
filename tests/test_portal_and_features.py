@@ -216,6 +216,19 @@ def test_browser_safe_key_allowlist():
     assert not faj._is_browser_safe_supabase_key("eyJx.@@@notb64@@@.z")  # unparseable payload
 
 
+# ── Web Push VAPID public key: browser-safe by design, merged onto portal_cfg
+
+
+def test_vapid_public_key_empty_when_unset(monkeypatch):
+    monkeypatch.delenv("VAPID_PUBLIC_KEY", raising=False)
+    assert faj._vapid_public_key() == ""
+
+
+def test_vapid_public_key_reads_env(monkeypatch):
+    monkeypatch.setenv("VAPID_PUBLIC_KEY", "BExamplePublicKey")
+    assert faj._vapid_public_key() == "BExamplePublicKey"
+
+
 # ── template: tokens, features, theme, no-portal regression ─────────────────
 
 

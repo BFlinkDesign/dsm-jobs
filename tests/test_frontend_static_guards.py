@@ -276,3 +276,45 @@ def test_service_worker_only_caches_same_origin_gets():
 
 def test_github_pages_serves_astro_underscore_assets():
     assert (ROOT / "app/public/.nojekyll").is_file()
+
+
+def test_service_worker_has_web_push_handlers():
+    """Web Push follow-up reminders (CLAUDE.md 'Planned / next') need the SW to
+    show a notification on `push` and route the tap on `notificationclick`.
+    Both must exist, and notificationclick must never navigate a client to a
+    different origin than the SW's own registration scope — a malicious or
+    malformed payload's `data.url` (only ever set by our own edge function
+    payload today, but defense in depth) must not be able to hijack the tap
+    into opening some other site."""
+    sw = _read("app/public/sw.js")
+    assert 'self.addEventListener("push", (e) => {' in sw
+    assert "self.registration.showNotification(title, options)" in sw
+    assert 'self.addEventListener("notificationclick", (e) => {' in sw
+    assert "e.notification.close();" in sw
+    # Scoped-open guard: the notificationclick handler compares the candidate
+    # client's origin against the SW's own scope origin before focusing it,
+    # and falls back to opening a URL derived from that same scope — never an
+    # arbitrary attacker-controlled origin.
+    assert "const scopeOrigin = new URL(self.registration.scope).origin;" in sw
+    assert "new URL(client.url).origin === scopeOrigin" in sw
+
+
+def test_push_subscription_is_separate_opt_in_from_in_app_notification():
+    """Push permission must be requested independently of the existing
+    Notification permission button (#notifybtn) — a user may want one without
+    the other, and the two APIs have different platform support. This also
+    guards that the push path is a soft add-on: pushSupported()/subscribeToPush
+    failures must never touch the #notifybtn code path or throw past the
+    caller, so the in-app fallback is always unaffected."""
+    app = _read("app/src/scripts/app.ts")
+    push_ts = _read("app/src/scripts/push.ts")
+    assert 'id="pushbtn"' in app
+    assert 't.id === "pushbtn"' in app
+    # Distinct from the plain-Notification button/handler.
+    assert 'id="notifybtn"' in app
+    assert 't.id === "notifybtn"' in app
+    # subscribeToPush never throws on failure (try/catch returns false) so a
+    # push failure can't break the surrounding UI flow or the fallback.
+    assert "export async function subscribeToPush" in push_ts
+    assert "return false;" in push_ts
+    assert "} catch {" in push_ts

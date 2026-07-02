@@ -32,7 +32,12 @@ export type Meta = {
   safe: number;
 };
 
-export type PortalCfg = { url?: string; key?: string };
+// vapidPublicKey is the PUBLIC half of the Web Push VAPID key pair — safe to
+// ship to the browser by design (it's what PushManager.subscribe needs; the
+// private half never leaves Supabase function secrets). Absent -> the "Turn on
+// push notifications" control never appears; the in-app Notification fallback
+// is unaffected either way.
+export type PortalCfg = { url?: string; key?: string; vapidPublicKey?: string };
 
 export type FollowUp = {
   name: string;
