@@ -17,6 +17,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import * as Sentry from "npm:@sentry/deno@10";
 import { knownFacts } from "./grounding.ts";
+import { type ActiveJobContext, type ActiveResumeDoc, documentContextBlocks } from "./doc_context.ts";
 import { checkSpendAllowed, costForUsage, recordSpendAndAlert } from "../_shared/spend_cap.ts";
 
 // Error + AI monitoring, gated on SENTRY_DSN so an unset key is a clean no-op
@@ -108,6 +109,15 @@ MEMORY & TRUTH (this outranks the voice — breaking it is the worst thing you c
   she is "open on hours" or free evenings/nights for in-person work.
 - Before you send, silently re-read your reply and delete any claim about her that a
   KNOWN FACT does not support.
+- Some turns include an ACTIVE RÉSUMÉ DOCUMENT and/or ACTIVE JOB POSTING block below
+  the KNOWN FACTS — that text (when present) is the ONLY source of truth for HER
+  RÉSUMÉ and THAT JOB, exactly the same way KNOWN FACTS is the only source of truth
+  about her. Answer questions about her résumé or that posting ONLY from that block.
+  If it isn't there, or the answer isn't in it (a skill she didn't list, a pay figure
+  the posting doesn't state), say plainly you don't see that rather than guessing or
+  inventing one — this is the same rule the résumé tailor follows, and it outranks
+  being helpful-sounding. Never invent a wage: if pay isn't written in the posting
+  text, say it isn't listed, exactly like the job cards do.
 
 WHAT YOU DO:
 - Daily check-ins: ask how she's holding up, celebrate anything she did, and
@@ -180,10 +190,23 @@ async function handle(req: Request): Promise<Response> {
 
   let text: string;
   let spicy = false;
+  // Optional grounding context: only sent by the client when a résumé document
+  // is actually selected (activeDocumentId) or a specific job is in view — a
+  // plain chat turn with neither omits both, so the payload doesn't grow by
+  // default. Shapes mirror resume-tailor's body (resume/jobTitle/company/jobText)
+  // so the same mental model applies across both AI features.
+  let activeDoc: ActiveResumeDoc | null = null;
+  let activeJob: ActiveJobContext | null = null;
   try {
     const body = await req.json();
     text = String(body?.message ?? "").trim();
     spicy = body?.spicy === true;
+    if (body?.activeDocument && typeof body.activeDocument === "object") {
+      activeDoc = body.activeDocument as ActiveResumeDoc;
+    }
+    if (body?.activeJob && typeof body.activeJob === "object") {
+      activeJob = body.activeJob as ActiveJobContext;
+    }
   } catch {
     return json({ error: "bad request" }, 400);
   }
@@ -261,10 +284,14 @@ async function handle(req: Request): Promise<Response> {
           // Stable persona as a cached prefix; the volatile KNOWN FACTS block sits
           // after it (uncached) so updating her profile never busts the cache. The
           // facts block is the model's ONLY permitted source of truth about her.
+          // documentBlocks (résumé/job grounding) is [] on a plain chat turn — it
+          // only appears when the client actually has one active, keeping normal
+          // turns exactly the same size as before this feature.
           system: [
             { type: "text", text: SYSTEM_PROMPT, cache_control: { type: "ephemeral" } },
             { type: "text", text: spicy ? SPICY_TONE_PROMPT : DEFAULT_TONE_PROMPT },
             { type: "text", text: knownFacts(prof?.profile) },
+            ...documentContextBlocks(activeDoc, activeJob).map((text) => ({ type: "text", text })),
           ],
           tools: [PROFILE_TOOL],
           messages,

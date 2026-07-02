@@ -54,13 +54,46 @@ def test_rudy_voice_and_spicy_modes_are_explicit_opt_in():
     assert 'id="rudy-spk-state">Off' in page
     assert 'localStorage.getItem("rudySpeak") === "1"' in app
     assert 'localStorage.getItem("rudySpicy") === "1"' in app
-    assert 'body: { message: msg, spicy: spicyOn }' in app
+    assert 'const body: Record<string, unknown> = { message: msg, spicy: spicyOn }' in app
     assert "Spicy mode is off" in page
     assert "body?.spicy === true" in fn
     assert "Spicy never means sexual" in fn
     assert "HARD RULES, crisis routing, anti-confabulation" in fn
     assert "private life-and-job app that Daddy built" in fn
     assert '/^me$/i.test(rawWho) ? "Brady" : rawWho' in app
+
+
+def test_rudy_chat_is_document_and_job_aware():
+    """Grounded chat context (résumé doc / active job) rides along ONLY when
+    active, and the companion function's anti-confabulation instructions still
+    hold — see docs/plans/2026-06-27-fable5-task-queue.md section 3."""
+    app = _read("app/src/scripts/app.ts")
+    astro = _read("app/src/pages/index.astro")
+    fn = _read("supabase/functions/companion/index.ts")
+
+    # Frontend: activeResumeDocument() only returns a doc with real text, and
+    # sendRudy only adds activeDocument/activeJob to the body when present —
+    # a plain chat turn (no doc, no job) sends nothing extra.
+    assert "function activeResumeDocument(): ResumeDocument | null" in app
+    assert "if (doc) body.activeDocument = { name: doc.name, text: doc.text }" in app
+    assert "if (rudyJobContext) {" in app
+    assert 'data-ask-rudy="${esc(j.id)}">Ask Rudy about this job</button>' in app
+    assert "let rudyJobContext: Job | null = null;" in app
+    assert 'id="rudy-job-chip"' in astro
+
+    # Backend: the optional context is parsed and passed through
+    # documentContextBlocks — never unconditionally on every turn.
+    assert "documentContextBlocks } from \"./doc_context.ts\"" in fn
+    assert "documentContextBlocks(activeDoc, activeJob)" in fn
+    assert "body?.activeDocument" in fn
+    assert "body?.activeJob" in fn
+
+    # Anti-confabulation: the system prompt explicitly says to answer only
+    # from the provided document/job text and admit not knowing otherwise —
+    # this is the load-bearing rule from CLAUDE.md invariant #8.
+    assert "the ONLY source of truth for HER" in fn
+    assert "say plainly you don't see that rather than guessing or" in fn
+    assert "Never invent a wage: if pay isn't written in the posting" in fn
 
 
 def test_rudy_thinking_bubbles_are_bound_by_element_reference():

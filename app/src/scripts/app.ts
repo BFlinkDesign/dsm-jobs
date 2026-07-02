@@ -51,6 +51,11 @@ let pullReady = false;
 let pullRefreshing = false;
 let feedLoadFailed = false;
 let rudyHistoryLoaded = false;
+// The job she's currently chatting with Rudy about, if any — set by "Ask Rudy
+// about this job" on a card, cleared by closing Rudy or the chip's own clear
+// button. Transient UI state only (not persisted): re-opening Rudy fresh from
+// the tab bar has no job context, matching "only send it when it's active".
+let rudyJobContext: Job | null = null;
 let tailorTimer: ReturnType<typeof setInterval> | null = null;
 let filtersExpanded = false;
 let lastTailorRequest: TailorRequest | null = null;
@@ -742,6 +747,18 @@ function addResumeDocument(profile: AppState["profile"], name: string, text: str
   return doc;
 }
 
+// The résumé document Rudy chat should ground answers in, if she has one
+// selected — used to pass a bounded activeDocument into the companion call so
+// "does my résumé mention X" can be answered directly in chat (not just via
+// the separate tailor flow). Returns null when there's no active document with
+// real text, so a plain chat turn sends nothing extra.
+function activeResumeDocument(): ResumeDocument | null {
+  const p = getState().profile;
+  const doc = p.documents.find((item) => item.id === p.activeDocumentId);
+  if (doc && doc.text.trim()) return doc;
+  return null;
+}
+
 function selectResumeDocument(profile: AppState["profile"], id: string): ResumeDocument | null {
   const doc = profile.documents.find((item) => item.id === id);
   if (!doc) return null;
@@ -932,6 +949,7 @@ function jobCard(j: Job): string {
       ${authed ? `<button type="button" class="btn btn-ghost" data-save="${esc(j.id)}">${s.saved[j.id] ? "Saved ✓" : "Save"}</button>` : ""}
       ${authed && j.url ? `<a class="btn btn-ghost" href="${esc(safeUrl(j.url))}" target="_blank" rel="noopener">Apply ↗</a>` : ""}
       ${authed && hasResume ? `<button type="button" class="btn btn-ghost" data-tailor="${esc(j.id)}">Rudy tailor résumé</button>` : ""}
+      ${authed ? `<button type="button" class="btn btn-ghost btn-sm" data-ask-rudy="${esc(j.id)}">Ask Rudy about this job</button>` : ""}
       ${authed && hasPack ? `<button type="button" class="btn btn-ghost" data-pack="${esc(j.id)}">Open pack</button>` : ""}
       <button type="button" class="btn btn-ghost btn-sm" data-snooze="${esc(j.id)}">${isSnoozed ? "👁 Napping" : "Not today"}</button>
       <button type="button" class="btn btn-ghost btn-sm" data-hide="${esc(j.id)}">${isHidden ? "Unhide" : "Hide"}</button>
@@ -1306,7 +1324,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-ask-rudy], #rudy-job-chip-clear, [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1553,6 +1571,17 @@ function handleViewClick(e: Event): void {
     const id = t.getAttribute("data-tailor")!;
     const job = jobs.find((x) => x.id === id);
     if (job) openTailor(job);
+    return;
+  }
+  if (t.hasAttribute("data-ask-rudy")) {
+    const id = t.getAttribute("data-ask-rudy")!;
+    const job = jobs.find((x) => x.id === id);
+    if (job) openRudy(job);
+    return;
+  }
+  if (t.id === "rudy-job-chip-clear") {
+    rudyJobContext = null;
+    renderRudyJobChip();
     return;
   }
   if (t.hasAttribute("data-pack")) {
@@ -1871,10 +1900,21 @@ function closeAuth(): void {
   resetAllPasswordVisibility();
 }
 
-function openRudy(): void {
+function renderRudyJobChip(): void {
+  const chip = $("#rudy-job-chip");
+  if (!chip) return;
+  if (!rudyJobContext) { chip.hidden = true; chip.innerHTML = ""; return; }
+  chip.hidden = false;
+  chip.innerHTML = `<span>Chatting about: ${esc(rudyJobContext.title)} at ${esc(rudyJobContext.company)}</span>` +
+    `<button type="button" class="btn btn-ghost btn-sm" id="rudy-job-chip-clear">Clear</button>`;
+}
+
+function openRudy(job?: Job): void {
   if (!authed) return openAuth();
+  rudyJobContext = job ?? rudyJobContext;
   const ov = $("#rudy-overlay");
   if (ov) { ov.hidden = false; document.body.style.overflow = "hidden"; setModalTrap(ov); }
+  renderRudyJobChip();
   void renderRudyLog();
   setTimeout(() => { ($("#rudy-input") as HTMLInputElement | null)?.focus(); }, 50);
 }
@@ -1883,6 +1923,7 @@ function closeRudy(): void {
   const ov = $("#rudy-overlay");
   if (ov) { ov.hidden = true; document.body.style.overflow = ""; clearModalTrap(); }
   stopRudyVoice();
+  rudyJobContext = null;
 }
 
 async function renderRudyLog(): Promise<void> {
@@ -1931,7 +1972,22 @@ async function sendRudy(): Promise<void> {
     return;
   }
   try {
-    const { data, error } = await sb.functions.invoke("companion", { body: { message: msg, spicy: spicyOn } });
+    // Only ride along a résumé document / job when one is actually active —
+    // grounds "does my résumé mention X" / "what does this posting pay"
+    // straight in chat (see supabase/functions/companion/doc_context.ts)
+    // without growing a plain chat turn's payload.
+    const doc = activeResumeDocument();
+    const body: Record<string, unknown> = { message: msg, spicy: spicyOn };
+    if (doc) body.activeDocument = { name: doc.name, text: doc.text };
+    if (rudyJobContext) {
+      body.activeJob = {
+        title: rudyJobContext.title,
+        company: rudyJobContext.company,
+        descFull: rudyJobContext.descFull,
+        about: rudyJobContext.about,
+      };
+    }
+    const { data, error } = await sb.functions.invoke("companion", { body });
     const reply = (error?.message ? null : (data?.reply as string)) || "I'm here with you. Try again in a moment. 💜";
     thinkingBubble.classList.remove("think");
     thinkingBubble.textContent = reply;

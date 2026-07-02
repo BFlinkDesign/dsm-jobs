@@ -44,3 +44,23 @@ Deno.test("the save path still drops time/confidence (no availability override)"
     "save_profile must keep dropping time/confidence so a stored value can't reopen 'open on hours'",
   );
 });
+
+Deno.test("document/job grounding is wired through doc_context.ts and instructed anti-confabulation", () => {
+  assertStringIncludes(src, 'documentContextBlocks } from "./doc_context.ts"');
+  assertStringIncludes(src, "documentContextBlocks(activeDoc, activeJob)");
+  assertStringIncludes(
+    src,
+    "ACTIVE RÉSUMÉ DOCUMENT and/or ACTIVE JOB POSTING block below",
+    "the system prompt must tell Rudy the document/job block (when present) is the only source of truth",
+  );
+  assertStringIncludes(
+    src,
+    "say plainly you don't see that rather than guessing or",
+    "the prompt must instruct Rudy to admit not knowing rather than invent a résumé/job detail",
+  );
+  assertStringIncludes(
+    src,
+    "Never invent a wage: if pay isn't written in the posting",
+    "invariant #1 (never present a guessed wage) must be echoed for the job-context path",
+  );
+});
