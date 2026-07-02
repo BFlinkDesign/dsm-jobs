@@ -122,3 +122,8 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 - Figma design file: https://www.figma.com/design/HxvPka9GtLJYBJpHQwY0M7 (the live app captured for iteration).
 
 **Handoff doc:** `docs/HANDOFF.md` — session summary, verify steps, PR checklist.
+
+**Session hygiene:** read `agent/ERRORS.md` (failures → rules) and `agent/GAPS.md`
+(known risks + closing actions) before starting work; append to ERRORS.md when
+something breaks. High-stakes choices go through `docs/DECISION-MATRIX.md`;
+UI work goes through `docs/DESIGN-BRIEF.md`.
