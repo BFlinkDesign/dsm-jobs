@@ -47,6 +47,43 @@ def test_looks_remote():
     assert fa.looks_remote({"title": "Receptionist", "description": "On site"}) is False
 
 
+def test_strip_remote_decoration_leading_and_trailing():
+    # Trailing decorations (the most common aggregator shape).
+    assert fa.strip_remote_decoration("Data Entry Clerk - Remote") == "Data Entry Clerk"
+    assert fa.strip_remote_decoration("Data Entry Clerk – Remote") == "Data Entry Clerk"
+    assert fa.strip_remote_decoration("Data Entry Specialist (Remote)") == "Data Entry Specialist"
+    assert fa.strip_remote_decoration("Administrative Assistant - Work From Home") == "Administrative Assistant"
+    assert fa.strip_remote_decoration("Administrative Assistant (Work From Home)") == "Administrative Assistant"
+    # Leading decorations.
+    assert fa.strip_remote_decoration("(Remote) Admin Assistant") == "Admin Assistant"
+    assert fa.strip_remote_decoration("[Remote] Admin Assistant") == "Admin Assistant"
+    assert fa.strip_remote_decoration("REMOTE Customer Service") == "Customer Service"
+    assert fa.strip_remote_decoration("100% Remote Administrative Assistant") == "Administrative Assistant"
+    assert fa.strip_remote_decoration("Fully Remote Receptionist") == "Receptionist"
+    # A bare leading "Remote " is fine to strip too — the card shows its own
+    # Remote tag, so "Remote Support Technician" reads fine as the rest alone.
+    assert fa.strip_remote_decoration("Remote Support Technician") == "Support Technician"
+    # Stacked decorations get fully cleaned up.
+    assert fa.strip_remote_decoration("Remote - Data Entry - WFH") == "Data Entry"
+    # A mid-title occurrence is a genuine modifier, not a decoration — left alone.
+    assert fa.strip_remote_decoration("Senior Remote-Friendly Assistant") == "Senior Remote-Friendly Assistant"
+    assert fa.strip_remote_decoration("Virtual Assistant") == "Virtual Assistant"
+    # Degenerate input never returns an empty string.
+    assert fa.strip_remote_decoration("Remote") == "Remote"
+    assert fa.strip_remote_decoration("") == ""
+
+
+def test_normalize_strips_redundant_remote_title_only_for_remote_source():
+    # The card shows a separate "Remote" tag only when source == "remote" — so
+    # that's the only source that should get its title cleaned up.
+    row = fa.normalize({**_job(None, None), "title": "Data Entry Clerk - Remote"}, "remote")
+    assert row["title"] == "Data Entry Clerk"
+    # A LOCAL posting whose title happens to mention "Remote" isn't shown with
+    # a redundant Remote tag (its real location is shown instead) — leave it.
+    local_row = fa.normalize({**_job(None, None), "title": "Data Entry Clerk - Remote"}, "local")
+    assert local_row["title"] == "Data Entry Clerk - Remote"
+
+
 # ── salary verdict classification ─────────────────────────────────────
 
 
@@ -496,6 +533,101 @@ def test_attainability_keeps_coordinators_regression():
               "Scheduling Coordinator", "Front Desk Coordinator",
               "Project Coordinator", "Program Coordinator"):
         assert fa.is_attainable(t) is True, t
+
+
+def test_attainability_drops_roman_numeral_level_tiers():
+    # "II"/"III"/"IV" job-level suffixes are a seniority leak the old plain-
+    # English word list never caught (she has no way to know these mean a
+    # higher experience bar than the plain title).
+    assert fa.is_attainable("Administrative Assistant II") is False
+    assert fa.is_attainable("Office Clerk III") is False
+    assert fa.is_attainable("Customer Service Representative II") is False
+    # Level I / no numeral at all is exactly her level — never dropped, and the
+    # bare pronoun "I" must never accidentally match either.
+    assert fa.is_attainable("Administrative Assistant I") is True
+    assert fa.is_attainable("Administrative Assistant") is True
+
+
+def test_requires_license_or_cert_drops_hard_requirement_only():
+    # Admin-sounding titles that quietly require a credential she doesn't
+    # hold -> dropped.
+    assert fa.requires_license_or_cert({
+        "title": "Accounting Assistant",
+        "description": "Active CPA license required to review client accounts.",
+    }) is True
+    assert fa.requires_license_or_cert({
+        "title": "Medical Receptionist",
+        "description": "Must have an active CNA certification and reliable transportation.",
+    }) is True
+    assert fa.requires_license_or_cert({
+        "title": "Insurance Office Assistant",
+        "description": "Must hold an active insurance producer license to service client policies.",
+    }) is True
+    assert fa.requires_license_or_cert({
+        "title": "Real Estate Administrative Assistant",
+        "description": "Licensed real estate agent required to assist with closings.",
+    }) is True
+    # A credential mentioned but softened (preferred / will sponsor / not
+    # required) must NOT drop a genuinely entry-level lead.
+    assert fa.requires_license_or_cert({
+        "title": "Accounting Assistant",
+        "description": "CPA license preferred but not required; entry-level bookkeeping only.",
+    }) is False
+    assert fa.requires_license_or_cert({
+        "title": "Medical Receptionist",
+        "description": "CNA certification a plus but not required; we will train.",
+    }) is False
+    assert fa.requires_license_or_cert({
+        "title": "Real Estate Administrative Assistant",
+        "description": "Real estate license preferred; we will sponsor licensing during training.",
+    }) is False
+    # A plain admin role that just happens to touch insurance paperwork, with
+    # no license mentioned at all, is a genuine entry-level lead.
+    assert fa.requires_license_or_cert({
+        "title": "Insurance Verification Clerk",
+        "description": "Process insurance claims and verify coverage. No license needed.",
+    }) is False
+
+
+def test_requires_heavy_experience_uses_conservative_threshold():
+    # A real high bar in disguise -> dropped.
+    assert fa.requires_heavy_experience({
+        "title": "Administrative Coordinator",
+        "description": "This role requires 5+ years of related office experience.",
+    }) is True
+    assert fa.requires_heavy_experience({
+        "title": "Office Manager",
+        "description": "7 years of experience is required for this position.",
+    }) is True
+    # A modest, realistic range for her background must never be dropped —
+    # even when it says "required", the bar itself is under the threshold.
+    assert fa.requires_heavy_experience({
+        "title": "Office Assistant",
+        "description": "1-2 years of experience preferred.",
+    }) is False
+    assert fa.requires_heavy_experience({
+        "title": "Office Assistant",
+        "description": "3-5 years of experience required.",
+    }) is False
+    # Any softened mention, even a high number, must not drop it.
+    assert fa.requires_heavy_experience({
+        "title": "Office Assistant",
+        "description": "Prefer 5+ years of experience but will train the right candidate.",
+    }) is False
+    assert fa.requires_heavy_experience({
+        "title": "Receptionist",
+        "description": "Answer phones, schedule meetings.",
+    }) is False
+
+
+def test_title_excluded_catches_lpn_cna_hybrids():
+    # Long, unambiguous occupation names — dropped even when paired with an
+    # admin word, since she holds neither credential.
+    assert fa.title_excluded("Licensed Practical Nurse - Office") is True
+    assert fa.title_excluded("Certified Nursing Assistant / Receptionist") is True
+    # A plain medical front-desk role with no credential in the title is fine.
+    assert fa.title_excluded("Medical Receptionist") is False
+    assert fa.title_excluded("Patient Access Representative") is False
 
 
 def test_scam_sign_on_bonus_in_title_is_hidden():

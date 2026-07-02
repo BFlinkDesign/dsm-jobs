@@ -79,8 +79,13 @@
 
   /* Motion */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  /* "Anticipatory" overshoot ease — a card leaving the list (hide/snooze)
+     should feel like it's already moving toward where it's going, not just
+     fading. Used with --dur-card. */
+  --ease-anticipate: cubic-bezier(0.16, 1, 0.3, 1);
   --dur-fast: 140ms;
   --dur-med: 240ms;
+  --dur-card: 200ms;
 
   /* Layout */
   --nav-h: 64px;
@@ -94,5 +99,6 @@
   :root {
     --dur-fast: 0ms;
     --dur-med: 0ms;
+    --dur-card: 0ms;
   }
 }

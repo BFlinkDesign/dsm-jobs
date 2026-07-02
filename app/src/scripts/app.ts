@@ -36,6 +36,7 @@ import {
   fmtStamp,
   relativePosted,
   safeUrl,
+  stripRedundantRemoteLabel,
   todayISO,
   weekStart,
 } from "./util";
@@ -783,6 +784,52 @@ function activeFilterCount(): number {
   ].filter(Boolean).length;
 }
 
+/** A calm, actionable empty state — never a dead end. A search with no hits
+ * offers real, tappable categories from her CURRENT live feed (never a canned
+ * suggestion that might also come up empty); any other empty result (filters
+ * with no search) offers a one-tap way out. */
+function emptyStateHtml(): string {
+  const f = getState().filters;
+  const clearBtn = `<button type="button" class="btn btn-ghost btn-sm" id="empty-clear-filters">Clear filters</button>`;
+  if (f.searchQ.trim()) {
+    const cats = jobCategories().filter((c) => c !== f.filterCategory);
+    const chips = cats
+      .slice(0, 4)
+      .map((c) => `<button type="button" class="chip chip-suggest" data-suggest-search="${esc(c)}">${esc(c)}</button>`)
+      .join("");
+    return `<div class="empty-state">
+      <p class="job-meta">No matches for “${esc(f.searchQ.trim())}”.</p>
+      ${chips ? `<p class="field-hint">Try one of these instead:</p><div class="chip-row">${chips}</div>` : ""}
+      <p style="margin-top:10px">${clearBtn}</p>
+    </div>`;
+  }
+  return `<div class="empty-state">
+    <p class="job-meta">No jobs match these filters.</p>
+    <p style="margin-top:10px">${clearBtn}</p>
+  </div>`;
+}
+
+/** One tap back to the full feed — resets search + every filter chip/select,
+ * including the commute radius. Sort order is a display preference, not a
+ * filter, so it's left as she set it. */
+function clearAllFilters(): void {
+  patchState((s) => {
+    s.filters.searchQ = "";
+    s.filters.filterRemote = "all";
+    s.filters.filterPay = false;
+    s.filters.filterTrain = false;
+    s.filters.filterTrusted = false;
+    s.filters.filterSaved = false;
+    s.filters.filterApplied = false;
+    s.filters.filterCategory = "";
+    s.filters.showHidden = false;
+    s.commuteRadius = null;
+  });
+  commuteMax = null;
+  autosave();
+  renderJobsMain();
+}
+
 function updateJobsListOnly(): void {
   const listEl = document.getElementById("jobs-list");
   const countEl = document.getElementById("jobs-count");
@@ -791,9 +838,9 @@ function updateJobsListOnly(): void {
     return;
   }
   const list = sortJobs(filteredJobs());
-  listEl.innerHTML = list.map(jobCard).join("") || "<p class='job-meta'>No jobs match — try widening filters.</p>";
+  listEl.innerHTML = list.map(jobCard).join("") || emptyStateHtml();
   if (countEl) {
-    countEl.textContent = `${list.length} safe job${list.length === 1 ? "" : "s"} · updated ${meta.generated}`;
+    countEl.textContent = `${list.length} safe job${list.length === 1 ? "" : "s"}`;
   }
   syncFilterChips();
 }
@@ -1251,6 +1298,12 @@ function followUpHtml(j: Job): string {
   return html;
 }
 
+// A card only earns the compact "why this fits" line when it's a genuinely
+// strong match — not on every card, or it stops being a signal. Reuses the
+// exact scoring already computed for Today's picks; no new AI call, no new
+// heuristic.
+const FIT_LINE_THRESHOLD = 6;
+
 function jobCard(j: Job): string {
   const s = getState();
   const applied = !!s.applied[j.id];
@@ -1262,15 +1315,25 @@ function jobCard(j: Job): string {
   const commute = j.commute ? ` · ${esc(j.commute)}` : "";
   const hasResume = !!s.profile.resume.trim();
   const hasPack = !!s.applicationPacks[j.id];
+  // Defensive second layer: the scanner already strips a redundant "Remote"
+  // from the title before it ever reaches jobs.json (see strip_remote_decoration
+  // in find_admin_jobs.py), but a cached/offline jobs.json from before that fix
+  // — or any future feed source — could still carry it, and the card already
+  // shows its own "Remote" location tag right below the title.
+  const displayTitle = j.remote ? stripRedundantRemoteLabel(j.title) : j.title;
+  const fitLine = pickScore(j) >= FIT_LINE_THRESHOLD
+    ? `<p class="job-fit-line">${esc(pickReason(j))}</p>`
+    : "";
   const shareBtn =
     typeof navigator !== "undefined" && typeof navigator.share === "function"
       ? `<button type="button" class="btn btn-ghost btn-sm" data-share="${esc(j.id)}">Share</button>`
       : "";
   return `<article class="card card-glitter job-card${isHidden ? " card-hidden" : ""}" data-id="${esc(j.id)}" data-verified="${j.trusted ? "1" : "0"}" data-pay="${j.good ? "1" : "0"}">
-    <h3>${esc(j.title)}${isNewJobs[j.id] ? '<span class="newtag">New</span>' : ""}${j.trains ? '<span class="traintag">✦ Will train</span>' : ""}</h3>
+    <h3>${esc(displayTitle)}${isNewJobs[j.id] ? '<span class="newtag">New</span>' : ""}${j.trains ? '<span class="traintag">✦ Will train</span>' : ""}</h3>
     <div class="job-meta">${esc(j.company)} · ${loc}${commute}</div>
     <div><span class="${payCls}">${esc(j.pay)}</span> ${trust}</div>
     <div class="job-meta">${esc(relativePosted(j.posted))}</div>
+    ${fitLine}
     ${j.about ? `<p class="job-meta">${esc(j.about)}</p>` : ""}
     <div class="job-actions">
       ${applied
@@ -1301,49 +1364,54 @@ function renderJobsMain(): void {
   const activeFilters = activeFilterCount();
   jobsShellReady = true;
   host.innerHTML = `
-    <div class="search-row">
-      <input class="search" type="search" placeholder="Search jobs…" value="${esc(f.searchQ)}" id="job-search" autocomplete="off" enterkeyhint="search" />
-    </div>
-    <p class="filter-label" style="margin-top:4px">Sort</p>
-    <div class="chip-row sort-row" id="sort-row">
-      ${SORT_MODES.map(([m, label]) =>
+    <div class="jobs-toolbar" id="jobs-toolbar">
+      <div class="search-row">
+        <input class="search" type="search" placeholder="Search jobs…" value="${esc(f.searchQ)}" id="job-search" autocomplete="off" enterkeyhint="search" />
+      </div>
+      <div class="jobs-count-row">
+        <span class="count-chip" id="jobs-count">${list.length} safe job${list.length === 1 ? "" : "s"}</span>
+        <span class="job-meta" id="jobs-updated">updated ${esc(meta.generated)}</span>
+      </div>
+      <p class="filter-label" style="margin-top:4px">Sort</p>
+      <div class="chip-row sort-row" id="sort-row">
+        ${SORT_MODES.map(([m, label]) =>
     `<button type="button" class="chip${(f.sortBy || "newest") === m ? " on" : ""}" data-sort="${m}">${esc(label)}</button>`,
   ).join("")}
-    </div>
-    <button type="button" class="filter-toggle" id="filter-toggle" aria-expanded="${filtersExpanded ? "true" : "false"}" aria-controls="filter-panel">
-      <span>Filters${activeFilters ? ` (${activeFilters})` : ""}</span>
-      <span aria-hidden="true">${filtersExpanded ? "Hide" : "Show"}</span>
-    </button>
-    <div id="filter-panel" class="filter-panel${filtersExpanded ? "" : " is-collapsed"}">
-      <p class="filter-label">Filter</p>
-      <div class="chip-row" id="filter-extra">
-        <button type="button" class="chip${f.filterTrain ? " on" : ""}" id="filter-train">Will train ✦</button>
-        <button type="button" class="chip${f.filterPay ? " on" : ""}" id="filter-pay">$19+/hr</button>
-        <button type="button" class="chip${f.filterTrusted ? " on" : ""}" id="filter-trusted">Verified employer</button>
-        <button type="button" class="chip${f.filterSaved ? " on" : ""}" id="filter-saved">Saved</button>
-        <button type="button" class="chip${f.filterApplied ? " on" : ""}" id="filter-applied">Applied</button>
-        <button type="button" class="chip${f.showHidden ? " on" : ""}" id="filter-show-hidden">Hidden</button>
       </div>
-      ${cats.length ? `<p class="filter-label">Category</p>
-      <select class="field" id="filter-category" style="margin-bottom:8px">
-        <option value="">All categories</option>
-        ${cats.map((c) => `<option value="${esc(c)}"${f.filterCategory === c ? " selected" : ""}>${esc(c)}</option>`).join("")}
-      </select>` : ""}
-      <p class="filter-label">Job type</p>
-      <div class="chip-row" id="filter-remote">
-        <button type="button" class="chip${f.filterRemote === "all" ? " on" : ""}" data-remote="all">All</button>
-        <button type="button" class="chip${f.filterRemote === "local" ? " on" : ""}" data-remote="local">In person</button>
-        <button type="button" class="chip${f.filterRemote === "remote" ? " on" : ""}" data-remote="remote">Remote</button>
-      </div>
-      <p class="filter-label">How far she'll drive from Grimes</p>
-      <div class="chip-row" id="filter-commute">
-        ${COMMUTE_BANDS.map(([m, label]) =>
+      <button type="button" class="filter-toggle" id="filter-toggle" aria-expanded="${filtersExpanded ? "true" : "false"}" aria-controls="filter-panel">
+        <span>Filters${activeFilters ? ` (${activeFilters})` : ""}</span>
+        <span aria-hidden="true">${filtersExpanded ? "Hide" : "Show"}</span>
+      </button>
+      <div id="filter-panel" class="filter-panel${filtersExpanded ? "" : " is-collapsed"}">
+        <p class="filter-label">Filter</p>
+        <div class="chip-row" id="filter-extra">
+          <button type="button" class="chip${f.filterTrain ? " on" : ""}" id="filter-train">Will train ✦</button>
+          <button type="button" class="chip${f.filterPay ? " on" : ""}" id="filter-pay">$19+/hr</button>
+          <button type="button" class="chip${f.filterTrusted ? " on" : ""}" id="filter-trusted">Verified employer</button>
+          <button type="button" class="chip${f.filterSaved ? " on" : ""}" id="filter-saved">Saved</button>
+          <button type="button" class="chip${f.filterApplied ? " on" : ""}" id="filter-applied">Applied</button>
+          <button type="button" class="chip${f.showHidden ? " on" : ""}" id="filter-show-hidden">Hidden</button>
+        </div>
+        ${cats.length ? `<p class="filter-label">Category</p>
+        <select class="field" id="filter-category" style="margin-bottom:8px">
+          <option value="">All categories</option>
+          ${cats.map((c) => `<option value="${esc(c)}"${f.filterCategory === c ? " selected" : ""}>${esc(c)}</option>`).join("")}
+        </select>` : ""}
+        <p class="filter-label">Job type</p>
+        <div class="chip-row" id="filter-remote">
+          <button type="button" class="chip${f.filterRemote === "all" ? " on" : ""}" data-remote="all">All</button>
+          <button type="button" class="chip${f.filterRemote === "local" ? " on" : ""}" data-remote="local">In person</button>
+          <button type="button" class="chip${f.filterRemote === "remote" ? " on" : ""}" data-remote="remote">Remote</button>
+        </div>
+        <p class="filter-label">How far she'll drive from Grimes</p>
+        <div class="chip-row" id="filter-commute">
+          ${COMMUTE_BANDS.map(([m, label]) =>
     `<button type="button" class="chip${commuteMax === m ? " on" : ""}" data-commute="${m ?? "any"}">${esc(label)}</button>`,
   ).join("")}
+        </div>
       </div>
     </div>
-    <p class="job-meta" id="jobs-count" style="margin-top:1rem">${list.length} safe job${list.length === 1 ? "" : "s"} · updated ${esc(meta.generated)}</p>
-    <div class="jobs-grid" id="jobs-list">${list.map(jobCard).join("") || "<p class='job-meta'>No jobs match — try widening filters.</p>"}</div>
+    <div class="jobs-grid" id="jobs-list">${list.map(jobCard).join("") || emptyStateHtml()}</div>
     <p class="field-hint" style="margin-top:1rem">We checked ${meta.total} postings and hid ${meta.hidden} that looked like scams.</p>
     ${feedLoadFailed ? `<button type="button" class="btn btn-primary" id="feed-retry" style="margin-top:12px">Try loading jobs again</button>` : ""}
     ${(() => {
@@ -1668,9 +1736,30 @@ function printWorkLog(): void {
   window.print();
 }
 
+/** A quick, calm confirmation that a tap on Hide/Snooze registered — the card
+ * eases out (transform + opacity, ~200ms, an anticipatory ease) before the
+ * state change re-renders the list without it. Skips straight to `then` when
+ * the card isn't on screen or the user asked for reduced motion. */
+function animateCardLeave(id: string, then: () => void): void {
+  const reduced = typeof window.matchMedia === "function"
+    && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const card = document.querySelector<HTMLElement>(`.job-card[data-id="${CSS.escape(id)}"]`);
+  if (reduced || !card) { then(); return; }
+  let done = false;
+  const finish = () => {
+    if (done) return;
+    done = true;
+    card.removeEventListener("transitionend", finish);
+    then();
+  };
+  card.classList.add("card-leaving");
+  card.addEventListener("transitionend", finish);
+  setTimeout(finish, 260); // fallback if transitionend never fires
+}
+
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-ask-rudy], #rudy-job-chip-clear, [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #pushbtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-ask-rudy], #rudy-job-chip-clear, [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #pushbtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt, #empty-clear-filters, [data-suggest-search]"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1962,47 +2051,64 @@ function handleViewClick(e: Event): void {
     const id = t.getAttribute("data-hide")!;
     const wasHidden = !!getState().hidden[id];
     const wasSnoozed = getState().snoozedUntil[id];
-    patchState((s) => {
-      if (s.hidden[id]) {
-        delete s.hidden[id];
-      } else {
-        s.hidden[id] = true;
-        delete s.snoozedUntil[id];
+    animateCardLeave(id, () => {
+      patchState((s) => {
+        if (s.hidden[id]) {
+          delete s.hidden[id];
+        } else {
+          s.hidden[id] = true;
+          delete s.snoozedUntil[id];
+        }
+      });
+      autosave();
+      render();
+      if (!wasHidden) {
+        toast("Job hidden", () => {
+          patchState((s) => {
+            delete s.hidden[id];
+            if (wasSnoozed) s.snoozedUntil[id] = wasSnoozed;
+          });
+          autosave();
+          render();
+        });
       }
     });
-    autosave();
-    render();
-    if (!wasHidden) {
-      toast("Job hidden", () => {
-        patchState((s) => {
-          delete s.hidden[id];
-          if (wasSnoozed) s.snoozedUntil[id] = wasSnoozed;
-        });
-        autosave();
-        render();
-      });
-    }
     return;
   }
   if (t.hasAttribute("data-snooze")) {
     const id = t.getAttribute("data-snooze")!;
-    patchState((s) => {
-      if (snoozedNow(id)) {
-        delete s.snoozedUntil[id];
-      } else {
-        // Snooze until tomorrow
-        const tomorrow = addDaysISO(todayISO(), 1);
-        s.snoozedUntil[id] = tomorrow;
-      }
+    animateCardLeave(id, () => {
+      patchState((s) => {
+        if (snoozedNow(id)) {
+          delete s.snoozedUntil[id];
+        } else {
+          // Snooze until tomorrow
+          const tomorrow = addDaysISO(todayISO(), 1);
+          s.snoozedUntil[id] = tomorrow;
+        }
+      });
+      autosave();
+      render();
     });
-    autosave();
-    render();
     return;
   }
   if (t.id === "toggle-hidden") {
     patchState((s) => { s.filters.showHidden = !s.filters.showHidden; });
     autosave();
     refreshJobsView();
+    return;
+  }
+  if (t.id === "empty-clear-filters") {
+    clearAllFilters();
+    return;
+  }
+  if (t.hasAttribute("data-suggest-search")) {
+    const q = t.getAttribute("data-suggest-search") || "";
+    patchState((s) => { s.filters.searchQ = q; });
+    autosave();
+    renderJobsMain();
+    const input = document.getElementById("job-search") as HTMLInputElement | null;
+    if (input) input.focus();
     return;
   }
   if (t.id === "notifybtn") {

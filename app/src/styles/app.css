@@ -243,6 +243,16 @@ body::after {
   background:
     linear-gradient(180deg, color-mix(in oklab, var(--surface) 64%, transparent), transparent 120%),
     var(--card);
+  transform: scale(1) translateY(0);
+  opacity: 1;
+  transition: transform var(--dur-card) var(--ease-anticipate), opacity var(--dur-card) var(--ease-anticipate);
+}
+/* Hide / snooze micro-interaction: the card eases out before the list
+   re-renders without it — a quick, calm confirmation the tap registered. */
+.job-card.card-leaving {
+  transform: scale(0.96) translateY(6px);
+  opacity: 0;
+  pointer-events: none;
 }
 .job-card::before {
   content: "";
@@ -271,6 +281,15 @@ body::after {
 .job-meta {
   font-size: var(--text-sm);
   color: var(--ink-soft);
+}
+/* Compact "why this fits" line — shown only for genuinely strong matches
+   (see FIT_LINE_THRESHOLD in app.ts), so it stays a calm, believable signal
+   instead of an AI-narrator banner on every card. */
+.job-fit-line {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  color: var(--purple-spark);
 }
 .pay-tag {
   display: inline-block;
@@ -421,6 +440,51 @@ body::after {
 }
 .filter-panel.is-collapsed {
   display: none;
+}
+
+/* ── Jobs toolbar (search / count / sort / filters) ─────────────────────
+   Sticks to the top of the viewport as she scrolls the job list, so search,
+   sort, and the Filters toggle stay one thumb-reach away instead of a scroll
+   back to the top. */
+.jobs-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  margin: 0 calc(-1 * var(--space-4));
+  padding: var(--space-3) var(--space-4) var(--space-2);
+  background: color-mix(in oklab, var(--paper) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 12px 20px -14px rgba(7, 7, 11, 0.85);
+}
+.jobs-count-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+  flex-wrap: wrap;
+}
+.count-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-xs);
+  font-weight: 800;
+  color: var(--route);
+  background: color-mix(in oklab, var(--route) 16%, var(--card));
+  border: 1px solid color-mix(in oklab, var(--route) 40%, transparent);
+}
+
+/* ── Empty / zero-result state ──────────────────────────────────────────
+   Never a dead end: a search miss offers real, tappable categories drawn
+   from her CURRENT feed; any other empty result offers one tap back out. */
+.empty-state {
+  padding: var(--space-4) 0;
+}
+.chip-suggest {
+  min-height: 38px;
+  padding: 6px 12px;
 }
 .quiz-q {
   font-weight: 700;
