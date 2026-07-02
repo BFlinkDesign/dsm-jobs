@@ -2,8 +2,8 @@
 
 Use this before any Supabase setting, schema, function, or data operation. The
 script exports the auth users plus all application tables and writes a manifest
-with row counts and SHA-256 hashes. Secret values are loaded from environment
-or `.env`, but never printed.
+with row counts and SHA-256 hashes. Secret values are loaded from environment,
+repo `.env`, or `~/Secrets/dsm-jobs/supabase-admin.env`, but never printed.
 """
 
 from __future__ import annotations
@@ -53,10 +53,7 @@ def _load_verifier():
 
 def _load_env() -> None:
     verifier = _load_verifier()
-    verifier.load_env(ROOT / ".env")
-    extra_env = os.environ.get("DSM_JOBS_SUPABASE_ENV_FILE")
-    if extra_env:
-        verifier.load_env(Path(extra_env))
+    verifier.load_standard_env(ROOT)
 
 
 def _json_request(url: str, headers: dict[str, str]) -> object:

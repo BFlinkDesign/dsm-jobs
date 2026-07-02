@@ -1,12 +1,15 @@
-import type { AppState, ApplicationPack, AtsAlignment, FilterPrefs, Job, Meta, Resource, ResourceHub, ResumeDocument, ViewName } from "./types";
+import type { AppState, ApplicationPack, ApplicationStatus, AtsAlignment, FilterPrefs, Job, Meta, Resource, ResourceHub, ResumeDocument, ViewName } from "./types";
 import {
   appendChatToLocal,
   autosave,
   clearAutosave,
+  clearChatHistory,
   debouncePushNote,
+  drainPendingSaves,
   initAutosave,
   loadChatHistory,
   loadPortal,
+  pendingSyncCount,
   pullLegacyTables,
   pullNotes,
   pullProfile,
@@ -37,6 +40,14 @@ import {
 } from "./util";
 
 const LOCKED: Record<string, boolean> = { today: true, apps: true, corner: true };
+const APP_STATUS_LABELS: Record<ApplicationStatus, string> = {
+  applied: "Applied",
+  followed_up: "Followed up",
+  interview: "Interview",
+  rejected: "Not a fit",
+  offer: "Offer",
+  ghosted: "Quiet / no reply",
+};
 
 let jobs: Job[] = [];
 let meta: Meta = { contact: "", phone: "", generated: "", hidden: 0, total: 0, safe: 0 };
@@ -157,12 +168,33 @@ function snoozedNow(id: string): boolean {
 }
 
 // ── Rudy's voice ──────────────────────────────────────────────────────────
-// Prefer a warm ElevenLabs voice (via the `voice` edge function — key stays
-// server-side); fall back to the browser's built-in voice when the function or
-// key isn't set up yet. Repeated lines are cached so they don't re-bill.
+// Prefer the provider-agnostic `voice` edge function (Chatterbox by default
+// when REPLICATE_API_TOKEN is configured); fall back to the browser's built-in
+// voice when the function or key is not set up yet. Repeated lines are cached
+// so they do not re-bill.
 let voiceUnconfigured = false;             // set once the function reports no key
 const ttsCache = new Map<string, string>(); // text -> object URL
 let rudyAudio: HTMLAudioElement | null = null;
+let voiceStatusEl: HTMLElement | null = null;
+
+function setVoiceStatus(kind: string, text: string): void {
+  if (!voiceStatusEl) voiceStatusEl = $("#rudy-voice-status");
+  if (!voiceStatusEl) return;
+  voiceStatusEl.dataset.voiceStatus = kind;
+  voiceStatusEl.textContent = text;
+}
+
+function syncVoiceIdleStatus(): void {
+  if (!speakOn) {
+    setVoiceStatus("off", "Voice is off.");
+  } else if (!getClient()) {
+    setVoiceStatus("fallback", "Sign in to use Rudy's real voice. Browser voice can still try.");
+  } else if (voiceUnconfigured) {
+    setVoiceStatus("fallback", "Chatterbox is not connected yet. Using this phone's browser voice.");
+  } else {
+    setVoiceStatus("ready", "Rudy will try her real voice first, then fall back if needed.");
+  }
+}
 
 function stopRudyVoice(): void {
   try { rudyAudio?.pause(); } catch { /* no-op */ }
@@ -170,17 +202,35 @@ function stopRudyVoice(): void {
   try { window.speechSynthesis?.cancel(); } catch { /* no-op */ }
 }
 
-/** Try the ElevenLabs voice. Returns false if unavailable (caller falls back). */
-async function elevenSpeak(text: string): Promise<boolean> {
+/** Try the server voice. Returns false if unavailable (caller falls back). */
+async function edgeSpeak(text: string): Promise<boolean> {
   const sb = getClient();
-  if (!sb || voiceUnconfigured) return false;
+  if (!sb) {
+    setVoiceStatus("fallback", "Sign in to use Rudy's real voice. Browser voice can still try.");
+    return false;
+  }
+  if (voiceUnconfigured) {
+    setVoiceStatus("fallback", "Chatterbox is not connected yet. Using this phone's browser voice.");
+    return false;
+  }
   try {
     let url = ttsCache.get(text);
     if (!url) {
+      setVoiceStatus("checking", "Checking Rudy's real voice...");
       const { data, error } = await sb.functions.invoke("voice", { body: { mode: "tts", text } });
-      if (error) return false;
-      if (data?.unconfigured) { voiceUnconfigured = true; return false; }
-      if (!data?.audio) return false;
+      if (error) {
+        setVoiceStatus("fallback", "Voice service stumbled. Browser voice is still ready.");
+        return false;
+      }
+      if (data?.unconfigured) {
+        voiceUnconfigured = true;
+        setVoiceStatus("fallback", "Chatterbox is not connected yet. Using this phone's browser voice.");
+        return false;
+      }
+      if (!data?.audio) {
+        setVoiceStatus("fallback", "Voice service returned no audio. Browser voice is still ready.");
+        return false;
+      }
       const bytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
       url = URL.createObjectURL(new Blob([bytes], { type: data.mime || "audio/mpeg" }));
       ttsCache.set(text, url);
@@ -188,19 +238,29 @@ async function elevenSpeak(text: string): Promise<boolean> {
     stopRudyVoice();
     const a = new Audio(url);
     rudyAudio = a;
+    a.addEventListener("ended", () => syncVoiceIdleStatus(), { once: true });
+    setVoiceStatus("playing", "Rudy's real voice is playing.");
     await a.play();
     return true;
-  } catch { return false; }
+  } catch {
+    setVoiceStatus("fallback", "Voice service stumbled. Browser voice is still ready.");
+    return false;
+  }
 }
 
 /** The browser's built-in voice — the fallback only. */
 function synthSpeak(text: string): void {
-  if (!speechSynthOK) return;
+  if (!speechSynthOK) {
+    setVoiceStatus("unavailable", "Voice is not available in this browser.");
+    return;
+  }
   try {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text);
     if (speechVoice) u.voice = speechVoice;
     u.rate = 0.96; u.pitch = 1.0; u.volume = 1.0;
+    u.onend = () => syncVoiceIdleStatus();
+    setVoiceStatus("fallback", "Using this phone's browser voice.");
     window.speechSynthesis.speak(u);
   } catch { /* no-op */ }
 }
@@ -209,7 +269,7 @@ function synthSpeak(text: string): void {
 function speakText(text: string): void {
   if (!speakOn || !text) return;
   void (async () => {
-    const ok = await elevenSpeak(text);
+    const ok = await edgeSpeak(text);
     if (!ok) synthSpeak(text);
   })();
 }
@@ -377,6 +437,18 @@ function toast(msg: string, undo?: () => void): void {
   }
   t.classList.add("show");
   toastTimer = setTimeout(() => t.classList.remove("show"), undo ? 5000 : 2000);
+}
+
+async function copyText(text: string, success = "Copied"): Promise<boolean> {
+  try {
+    if (!navigator.clipboard?.writeText) throw new Error("clipboard unavailable");
+    await navigator.clipboard.writeText(text);
+    toast(success);
+    return true;
+  } catch {
+    toast("Copy failed — select text manually");
+    return false;
+  }
 }
 
 /** True if any popup overlay is currently open — used so two popups never stack
@@ -604,6 +676,25 @@ function updateOfflineBanner(): void {
   if (el) el.hidden = navigator.onLine;
 }
 
+async function updateSyncBanner(): Promise<void> {
+  const el = document.getElementById("sync-banner");
+  if (!el) return;
+  const pending = await pendingSyncCount();
+  if (pending <= 0) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.textContent = navigator.onLine
+    ? `Syncing ${pending} saved change${pending === 1 ? "" : "s"} to her account...`
+    : `${pending} saved change${pending === 1 ? "" : "s"} safe on this phone. They will sync when internet is back.`;
+}
+
+function updateConnectionBanners(): void {
+  updateOfflineBanner();
+  void updateSyncBanner();
+}
+
 function syncFilterChips(): void {
   const f = getState().filters;
   $("#filter-pay")?.classList.toggle("on", f.filterPay);
@@ -678,6 +769,193 @@ function callScriptHtml(j: Job, appliedOn: string): string {
     `<blockquote>&ldquo;Hi! My name is ____. I applied for the ${esc(j.title)} job ${esc(when)}, ` +
     `and I wanted to check if it's still open and if you need anything else from me. Thank you!&rdquo;</blockquote>` +
     `<p class="job-meta" style="margin-top:6px">That's the whole call. Short is perfect.</p></details>`;
+}
+
+function jobFromAppliedLog(id: string, entry: AppState["appliedLog"][string]): Job {
+  return {
+    id,
+    title: entry.t || "Job no longer listed",
+    company: entry.c || "Saved application",
+    location: "Tracked from earlier job list",
+    pay: "Pay not listed",
+    payNum: 0,
+    remote: false,
+    trusted: false,
+    trustLabel: "",
+    good: false,
+    tagLabel: "",
+    posted: entry.d || "",
+    url: entry.u || "",
+    category: "tracked",
+    commute: "",
+    commuteMin: null,
+    about: "This job is no longer in today's feed, but the application, notes, pack, and follow-up stay here.",
+    descFull: "",
+    trains: false,
+    contactPhone: "",
+    contactEmail: "",
+    contactName: "",
+  };
+}
+
+function trackedApplicationJobs(): Job[] {
+  const s = getState();
+  const byId = new Map(jobs.map((j) => [j.id, j]));
+  const ids = new Set([...Object.keys(s.appliedLog), ...Object.keys(s.applied)]);
+  return [...ids]
+    .filter((id) => !!s.applied[id])
+    .sort((a, b) => {
+      const aEntry = s.appliedLog[a];
+      const bEntry = s.appliedLog[b];
+      return ((bEntry?.ts || bEntry?.d || "")).localeCompare(aEntry?.ts || aEntry?.d || "");
+    })
+    .map((id) => byId.get(id) ?? jobFromAppliedLog(id, s.appliedLog[id] ?? { t: "", c: "", d: "", u: "" }));
+}
+
+function appStatusValue(id: string): ApplicationStatus {
+  const raw = getState().applicationStatus[id];
+  return raw && APP_STATUS_LABELS[raw] ? raw : "applied";
+}
+
+function statusStopsFollowUps(status: ApplicationStatus): boolean {
+  return status === "followed_up" || status === "interview" || status === "rejected" || status === "offer" || status === "ghosted";
+}
+
+function statusOptions(id: string): string {
+  const current = appStatusValue(id);
+  return (Object.keys(APP_STATUS_LABELS) as ApplicationStatus[])
+    .map((status) => `<option value="${esc(status)}"${status === current ? " selected" : ""}>${esc(APP_STATUS_LABELS[status])}</option>`)
+    .join("");
+}
+
+function followUpMessage(j: Job): string {
+  const saved = getState().applicationPacks[j.id]?.followUp?.trim();
+  return saved || fallbackFollowUp(j);
+}
+
+function followDueLabel(on: string): string {
+  if (!on) return "No reminder set";
+  const d = daysSince(on);
+  if (d == null) return `Reminder ${on}`;
+  if (d < -1) return `Due in ${Math.abs(d)} days`;
+  if (d === -1) return "Due tomorrow";
+  if (d === 0) return "Due today";
+  if (d === 1) return "1 day overdue";
+  return `${d} days overdue`;
+}
+
+function mailtoFollowHref(j: Job): string {
+  const fu = getState().followUps[j.id];
+  const email = (fu?.email || j.contactEmail || "").trim();
+  if (!email) return "";
+  const subject = `Following up on ${j.title}`;
+  return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(followUpMessage(j))}`;
+}
+
+function contactPhone(j: Job): string {
+  const fu = getState().followUps[j.id];
+  return (fu?.phone || j.contactPhone || "").trim();
+}
+
+function followActionCard(j: Job, label = "Next move"): string {
+  const fu = getState().followUps[j.id];
+  const status = appStatusValue(j.id);
+  const mail = mailtoFollowHref(j);
+  const phone = contactPhone(j);
+  const pack = !!getState().applicationPacks[j.id];
+  return `<article class="app-action-card" data-app-action="${esc(j.id)}">
+    <div>
+      <p class="tailor-kicker">${esc(label)} · ${esc(fu ? followDueLabel(fu.on) : APP_STATUS_LABELS[status])}</p>
+      <h3>${esc(j.title)}</h3>
+      <p class="job-meta">${esc(j.company)}${APP_STATUS_LABELS[status] ? ` · ${esc(APP_STATUS_LABELS[status])}` : ""}</p>
+    </div>
+    <div class="app-action-buttons">
+      <button type="button" class="btn btn-primary btn-sm" data-follow-copy="${esc(j.id)}">Copy message</button>
+      ${mail ? `<a class="btn btn-email btn-sm" href="${esc(mail)}">Email</a>` : ""}
+      ${phone ? `<a class="btn btn-call btn-sm" href="tel:${esc(phone)}">Call</a>` : ""}
+      ${pack ? `<button type="button" class="btn btn-ghost btn-sm" data-pack="${esc(j.id)}">Open pack</button>` : ""}
+      ${fu && !fu.done ? `<button type="button" class="btn btn-ghost btn-sm" data-follow-done="${esc(j.id)}">Done</button>` : ""}
+    </div>
+  </article>`;
+}
+
+function renderApplicationCockpit(applied: Job[]): string {
+  const s = getState();
+  const today = todayISO();
+  const due = applied
+    .filter((j) => {
+      const fu = s.followUps[j.id];
+      return !!fu && !fu.done && !!fu.on && fu.on <= today;
+    })
+    .sort((a, b) => (s.followUps[a.id]?.on || "").localeCompare(s.followUps[b.id]?.on || ""));
+  const open = applied.filter((j) => !statusStopsFollowUps(appStatusValue(j.id)));
+  const closed = applied.filter((j) => statusStopsFollowUps(appStatusValue(j.id)));
+  const nextScheduled = open
+    .filter((j) => !!s.followUps[j.id]?.on && !s.followUps[j.id]?.done)
+    .sort((a, b) => (s.followUps[a.id]?.on || "").localeCompare(s.followUps[b.id]?.on || ""))[0];
+  const next = due.length
+    ? due.slice(0, 2).map((j) => followActionCard(j, "Due follow-up")).join("")
+    : nextScheduled
+      ? followActionCard(nextScheduled, "Next scheduled follow-up")
+      : `<p class="field-hint">No follow-ups are due. Keep this list calm and current as applications move.</p>`;
+
+  return `<section class="app-cockpit" aria-label="Application next moves">
+    <div class="app-cockpit-head">
+      <div>
+        <p class="tailor-kicker">Application cockpit</p>
+        <h3>What needs attention</h3>
+      </div>
+      <span class="badge-safe">${esc(applied.length.toString())} tracked</span>
+    </div>
+    <div class="app-stat-grid" aria-label="Application status summary">
+      <div><b>${due.length}</b><span>due now</span></div>
+      <div><b>${open.length}</b><span>still open</span></div>
+      <div><b>${closed.length}</b><span>closed / paused</span></div>
+    </div>
+    <div class="app-next-list">${next}</div>
+  </section>`;
+}
+
+function weeklyApplicationCount(): number {
+  const ws = weekStart();
+  return Object.values(getState().appliedLog).filter((e) => (e.d || "") >= ws).length;
+}
+
+function dueFollowUpJobs(): Job[] {
+  const s = getState();
+  const today = todayISO();
+  return trackedApplicationJobs()
+    .filter((j) => {
+      const fu = s.followUps[j.id];
+      return !!fu && !fu.done && !!fu.on && fu.on <= today;
+    })
+    .sort((a, b) => (s.followUps[a.id]?.on || "").localeCompare(s.followUps[b.id]?.on || ""));
+}
+
+function todayNextActionHtml(): string {
+  const due = dueFollowUpJobs();
+  const appsThisWeek = weeklyApplicationCount();
+  const remainingApps = Math.max(0, 3 - appsThisWeek);
+  if (due.length) {
+    return `<section class="today-action" aria-label="Today's first action">
+      <p class="tailor-kicker">Start here</p>
+      <h3>${due.length} follow-up${due.length === 1 ? "" : "s"} due</h3>
+      <p class="job-meta">Follow-ups count as work-search activity and keep quiet applications from disappearing.</p>
+      <button type="button" class="btn btn-primary" data-view-jump="apps">Open My applications</button>
+    </section>`;
+  }
+  if (remainingApps > 0) {
+    return `<section class="today-action" aria-label="Today's first action">
+      <p class="tailor-kicker">Today's move</p>
+      <h3>${remainingApps} more application${remainingApps === 1 ? "" : "s"} keeps the week on track</h3>
+      <p class="job-meta">Pick one clear match below. Save the rest for later.</p>
+    </section>`;
+  }
+  return `<section class="today-action is-calm" aria-label="Today's first action">
+    <p class="tailor-kicker">Steady</p>
+    <h3>This week's application baseline is covered</h3>
+    <p class="job-meta">Review new leads or check follow-ups when you have bandwidth.</p>
+  </section>`;
 }
 
 function isLocked(v: ViewName): boolean {
@@ -899,10 +1177,12 @@ function followUpHtml(j: Job): string {
   if (!getState().applied[j.id] || !fu) return "";
   const appliedDate = getState().appliedLog[j.id]?.d || todayISO();
   const appliedDays = daysSince(appliedDate);
+  const status = appStatusValue(j.id);
   let html = `<div class="job-actions follow-block">`;
+  html += `<label class="field-hint app-status-label">Status <select class="field app-status-field" data-app-status="${esc(j.id)}">${statusOptions(j.id)}</select></label>`;
   if (fu.done) {
-    html += `<span class="badge-safe">Followed up ✓</span>`;
-    html += `<button type="button" class="btn btn-ghost btn-sm" data-follow-undo="${esc(j.id)}">Mark not done</button>`;
+    html += `<span class="badge-safe">${esc(APP_STATUS_LABELS[status])} ✓</span>`;
+    html += `<button type="button" class="btn btn-ghost btn-sm" data-follow-undo="${esc(j.id)}">Resume reminders</button>`;
   } else {
     const phone = fu.phone || j.contactPhone;
     const email = fu.email || j.contactEmail;
@@ -1064,6 +1344,7 @@ function renderToday(): void {
       <p class="job-meta" style="margin-top:${affirmation ? "8px" : "0"}">Three leads picked for her — closest fit first. No pressure to apply to all three.</p>
       ${!s.coachOff ? `<button type="button" class="btn btn-ghost" id="coach-off-btn" style="margin-top:8px;font-size:var(--text-xs)">Turn off affirmations</button>` : `<button type="button" class="btn btn-ghost" id="coach-on-btn" style="margin-top:8px;font-size:var(--text-xs)">Turn on affirmations</button>`}
     </div>
+    ${todayNextActionHtml()}
     <div class="jobs-grid">${picks.length
       ? picks.map((j) => `<div class="pick-wrap"><p class="pick-reason">${esc(pickReason(j))}</p>${jobCard(j)}</div>`).join("")
       : "<p class='job-meta'>You've worked through today's list — genuinely well done. New jobs arrive every morning.</p>"}</div>
@@ -1078,7 +1359,7 @@ function renderApps(): void {
     return;
   }
   const s = getState();
-  const applied = jobs.filter((j) => s.applied[j.id]);
+  const applied = trackedApplicationJobs();
   const ws = weekStart();
   const appsThisWeek = Object.values(s.appliedLog).filter((e) => (e.d || "") >= ws).length;
   const weekMsg = appsThisWeek >= 3
@@ -1089,6 +1370,7 @@ function renderApps(): void {
   const dueBanner = dueEntries.length
     ? `<div class="follow-alert"><b>${dueEntries.length} follow-up${dueEntries.length === 1 ? "" : "s"} due</b> — tap Call or Email on the job below.</div>`
     : "";
+  const appCockpit = renderApplicationCockpit(applied);
   const canNotify = typeof Notification !== "undefined";
   const notifPerm = canNotify ? (Notification as typeof Notification).permission : "denied";
   const notifyBtn = canNotify && notifPerm !== "granted" && Object.keys(s.applied).length > 0
@@ -1116,6 +1398,7 @@ function renderApps(): void {
       ${pushBtn}
       <button type="button" class="btn btn-ghost" id="print-log" style="margin-top:12px">Print work-search log</button>
     </div>
+    ${appCockpit}
     <div class="jobs-grid">${applied.length ? applied.map(jobCard).join("") : "<p class='job-meta'>Nothing marked applied yet. Tap <b>Mark applied</b> on a job she likes.</p>"}</div>
   `;
   renderFollowBadge();
@@ -1342,7 +1625,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #pushbtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #pushbtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1361,6 +1644,11 @@ function handleViewClick(e: Event): void {
     autosave();
     if (view === "jobs") refreshJobsView();
     else renderCorner();
+    return;
+  }
+  if (t.hasAttribute("data-view-jump")) {
+    const target = t.getAttribute("data-view-jump") as ViewName | null;
+    if (target) setView(target);
     return;
   }
   if (t.id === "open-rudy") {
@@ -1429,10 +1717,17 @@ function handleViewClick(e: Event): void {
     patchState((s) => {
       const fu = s.followUps[id];
       if (fu) fu.done = true;
+      s.applicationStatus[id] = "followed_up";
     });
     autosave();
     render();
     toast("Follow-up marked done ✦");
+    return;
+  }
+  if (t.hasAttribute("data-follow-copy")) {
+    const id = t.getAttribute("data-follow-copy")!;
+    const job = trackedApplicationJobs().find((x) => x.id === id) || jobs.find((x) => x.id === id);
+    if (job) void copyText(followUpMessage(job), "Follow-up message copied");
     return;
   }
   if (t.hasAttribute("data-follow-undo")) {
@@ -1440,6 +1735,7 @@ function handleViewClick(e: Event): void {
     patchState((s) => {
       const fu = s.followUps[id];
       if (fu) fu.done = false;
+      s.applicationStatus[id] = "applied";
     });
     autosave();
     render();
@@ -1452,6 +1748,7 @@ function handleViewClick(e: Event): void {
       applied: !!getState().applied[id],
       log: getState().appliedLog[id] ? { ...getState().appliedLog[id] } : undefined,
       fu: getState().followUps[id] ? { ...getState().followUps[id] } : undefined,
+      status: getState().applicationStatus[id],
     };
     patchState((s) => {
       s.applied[id] = true;
@@ -1476,6 +1773,7 @@ function handleViewClick(e: Event): void {
           done: false,
         };
       }
+      if (!s.applicationStatus[id]) s.applicationStatus[id] = "applied";
     });
     autosave();
     if (typeof navigator.vibrate === "function") navigator.vibrate(50);
@@ -1487,6 +1785,8 @@ function handleViewClick(e: Event): void {
         else delete s.appliedLog[id];
         if (prev.fu) s.followUps[id] = prev.fu;
         else delete s.followUps[id];
+        if (prev.status) s.applicationStatus[id] = prev.status;
+        else delete s.applicationStatus[id];
       });
       autosave();
       render();
@@ -1499,11 +1799,13 @@ function handleViewClick(e: Event): void {
       applied: !!getState().applied[id],
       log: getState().appliedLog[id] ? { ...getState().appliedLog[id] } : undefined,
       fu: getState().followUps[id] ? { ...getState().followUps[id] } : undefined,
+      status: getState().applicationStatus[id],
     };
     patchState((s) => {
       delete s.applied[id];
       delete s.appliedLog[id];
       delete s.followUps[id];
+      delete s.applicationStatus[id];
     });
     autosave();
     render();
@@ -1512,6 +1814,8 @@ function handleViewClick(e: Event): void {
         if (prev.applied) s.applied[id] = true;
         if (prev.log) s.appliedLog[id] = prev.log;
         if (prev.fu) s.followUps[id] = prev.fu;
+        if (prev.status) s.applicationStatus[id] = prev.status;
+        else if (prev.applied) s.applicationStatus[id] = "applied";
       });
       autosave();
       render();
@@ -1533,6 +1837,7 @@ function handleViewClick(e: Event): void {
       if (fu) {
         fu.on = addDaysISO(s.appliedLog[id]?.d || todayISO(), days);
         fu.done = false;
+        s.applicationStatus[id] = "applied";
       }
     });
     autosave();
@@ -1704,7 +2009,7 @@ function bindViewHost(): void {
   if (!host || host.dataset.bound) return;
   host.dataset.bound = "1";
   host.addEventListener("click", handleViewClick);
-  host.addEventListener("input", (e) => {
+  const handleField = (e: Event) => {
     const t = e.target as HTMLElement;
     if (t.id === "job-search") { onSearchInput(e); return; }
     if (t.hasAttribute("data-note")) {
@@ -1732,6 +2037,19 @@ function bindViewHost(): void {
       autosave();
       return;
     }
+    if (t.hasAttribute("data-app-status")) {
+      const id = t.getAttribute("data-app-status")!;
+      const value = (t as HTMLSelectElement).value as ApplicationStatus;
+      if (!APP_STATUS_LABELS[value]) return;
+      patchState((s) => {
+        s.applicationStatus[id] = value;
+        const fu = s.followUps[id];
+        if (fu) fu.done = statusStopsFollowUps(value);
+      });
+      autosave();
+      renderFollowBadge();
+      return;
+    }
     if (t.hasAttribute("data-follow-date")) {
       const id = t.getAttribute("data-follow-date")!;
       const value = (t as HTMLInputElement).value;
@@ -1754,7 +2072,9 @@ function bindViewHost(): void {
       return;
     }
     onProfileInput(e);
-  });
+  };
+  host.addEventListener("input", handleField);
+  host.addEventListener("change", handleField);
 }
 
 function setAuthMsg(text: string, isErr = false): void {
@@ -1938,6 +2258,110 @@ function closeRudy(): void {
   const ov = $("#rudy-overlay");
   if (ov) { ov.hidden = true; document.body.style.overflow = ""; clearModalTrap(); }
   stopRudyVoice();
+  closeRudyMemory();
+}
+
+/** Human label for a saved quiz value, e.g. kind="home" -> "Working from home".
+ * Falls back to the raw value if it's not one of the known quiz options — this
+ * happens for a value the companion itself saved (e.g. a free-text `notes`). */
+function quizValueLabel(key: string, val: string): string {
+  const entry = QUIZ.find(([k]) => k === key);
+  const opt = entry?.[2].find(([v]) => v === val);
+  return opt ? opt[1] : val;
+}
+
+/** "What Rudy remembers" — a plain-language list of every fact Rudy actually
+ * has about her (preference flags the quiz/chat set, her saved résumé
+ * documents, and her recent chat history), each with a one-tap way to forget
+ * it. Nothing here is inferred; it mirrors exactly what companion/grounding.ts
+ * sends the model and what the chat log holds. */
+function renderRudyMemory(): void {
+  const body = $("#rudy-memory-body");
+  if (!body) return;
+  const p = getState().profile;
+  const quizEntries = Object.entries(p.quiz).filter(([, v]) => !!v);
+
+  const prefsHtml = quizEntries.length
+    ? `<div class="doc-list" aria-label="Preferences Rudy has picked up">
+        ${quizEntries.map(([key, val]) => {
+      const entry = QUIZ.find(([k]) => k === key);
+      const question = entry?.[1] ?? key;
+      return `<article class="doc-item">
+            <div class="doc-main">
+              <span class="doc-name">${esc(question)}</span>
+              <span class="doc-meta">${esc(quizValueLabel(key, val))}</span>
+            </div>
+            <div class="doc-actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-mem-forget-quiz="${esc(key)}">Forget</button>
+            </div>
+          </article>`;
+    }).join("")}
+      </div>`
+    : `<p class="field-hint doc-empty">No preferences saved yet — answer a few questions in My corner, or just tell Rudy in chat.</p>`;
+
+  const docsHtml = p.documents.length
+    ? `<div class="doc-list" aria-label="Résumé documents Rudy can read from">
+        ${p.documents.map((doc) => {
+      const active = doc.id === p.activeDocumentId;
+      return `<article class="doc-item${active ? " is-active" : ""}">
+            <div class="doc-main">
+              <span class="doc-name">${esc(doc.name)}</span>
+              <span class="doc-meta">${esc(documentStats(doc.text))}${active ? " · selected for tailoring" : ""}</span>
+            </div>
+            <div class="doc-actions">
+              <button type="button" class="btn btn-ghost btn-sm" data-mem-forget-doc="${esc(doc.id)}">Delete</button>
+            </div>
+          </article>`;
+    }).join("")}
+      </div>`
+    : `<p class="field-hint doc-empty">No résumé saved yet — add one in My corner and Rudy can read it.</p>`;
+
+  body.innerHTML = `
+    <section class="mem-section">
+      <h4 class="section-title">Preferences she's told Rudy</h4>
+      ${prefsHtml}
+    </section>
+    <section class="mem-section">
+      <h4 class="section-title">Saved résumé</h4>
+      ${docsHtml}
+    </section>
+    <section class="mem-section">
+      <h4 class="section-title">Chat history</h4>
+      <p class="field-hint" id="rudy-memory-chat-count">Checking...</p>
+      <button type="button" class="btn btn-ghost btn-sm" id="rudy-memory-clear-chat">Clear conversation history</button>
+    </section>
+  `;
+
+  void loadChatHistory().then((msgs) => {
+    const el = $("#rudy-memory-chat-count");
+    if (!el) return;
+    el.textContent = msgs.length
+      ? `Rudy can see your last ${msgs.length} message${msgs.length === 1 ? "" : "s"} to keep the conversation going.`
+      : "No chat history saved yet.";
+  });
+}
+
+function openRudyMemory(): void {
+  const log = $("#rudy-log");
+  const prompts = $(".rudy-prompts") as HTMLElement | null;
+  const mem = $("#rudy-memory");
+  const btn = $("#rudy-memory-open");
+  if (log) log.hidden = true;
+  if (prompts) prompts.hidden = true;
+  if (mem) mem.hidden = false;
+  if (btn) btn.setAttribute("aria-pressed", "true");
+  renderRudyMemory();
+}
+
+function closeRudyMemory(): void {
+  const log = $("#rudy-log");
+  const prompts = $(".rudy-prompts") as HTMLElement | null;
+  const mem = $("#rudy-memory");
+  const btn = $("#rudy-memory-open");
+  if (log) log.hidden = false;
+  if (prompts) prompts.hidden = false;
+  if (mem) mem.hidden = true;
+  if (btn) btn.setAttribute("aria-pressed", "false");
 }
 
 async function renderRudyLog(): Promise<void> {
@@ -2367,17 +2791,13 @@ function renderTailorResult(job: Job, data: TailorResult): void {
       else if (which === "both") text = downloadText;
       const button = btn as HTMLButtonElement;
       const original = button.textContent || "Copy";
-      try {
-        await navigator.clipboard?.writeText(text);
+      if (await copyText(text, "Copied")) {
         button.textContent = "Copied";
         button.classList.add("is-done");
-        toast("Copied");
         setTimeout(() => {
           button.textContent = original;
           button.classList.remove("is-done");
         }, 1400);
-      } catch {
-        toast("Copy failed — select text manually");
       }
     });
   });
@@ -2422,11 +2842,14 @@ async function refreshAuth(): Promise<void> {
     await pullLegacyTables();
     await pullNotes();
     autosave();
+    await drainPendingSaves();
+    await updateSyncBanner();
     commuteMax = getState().commuteRadius;
     rudyHistoryLoaded = false;
     if (!wasAuthed) offerPasskeyNudge(user.id);
   } else {
     clearAutosave();
+    await updateSyncBanner();
   }
   render();
 }
@@ -2539,9 +2962,14 @@ async function boot(): Promise<void> {
   } catch { /* quota */ }
   commuteMax = getState().commuteRadius;
   bindViewHost();
-  updateOfflineBanner();
-  window.addEventListener("online", () => { updateOfflineBanner(); void loadFeed().then((ok) => { if (ok) render(); }); });
-  window.addEventListener("offline", updateOfflineBanner);
+  updateConnectionBanners();
+  window.addEventListener("dsm-jobs-outbox-change", () => { void updateSyncBanner(); });
+  window.addEventListener("online", () => {
+    updateConnectionBanners();
+    void drainPendingSaves().then(() => updateSyncBanner());
+    void loadFeed().then((ok) => { if (ok) render(); });
+  });
+  window.addEventListener("offline", updateConnectionBanners);
   document.addEventListener("keydown", (e) => {
     if (e.key === "Tab") { handleTrapTab(e); return; }
     if (e.key === "Escape") {
@@ -2746,6 +3174,39 @@ async function boot(): Promise<void> {
   });
 
   $("#rudy-close")?.addEventListener("click", closeRudy);
+  $("#rudy-memory-open")?.addEventListener("click", openRudyMemory);
+  $("#rudy-memory-close")?.addEventListener("click", closeRudyMemory);
+  $("#rudy-memory")?.addEventListener("click", (e) => {
+    const t = (e.target as HTMLElement).closest(
+      "[data-mem-forget-quiz], [data-mem-forget-doc], #rudy-memory-clear-chat"
+    ) as HTMLElement | null;
+    if (!t) return;
+    if (t.id === "rudy-memory-clear-chat") {
+      void clearChatHistory().then(() => {
+        toast("Chat history cleared");
+        rudyHistoryLoaded = false;
+        renderRudyMemory();
+      });
+      return;
+    }
+    const quizKey = t.getAttribute("data-mem-forget-quiz");
+    if (quizKey) {
+      patchState((s) => { delete s.profile.quiz[quizKey]; });
+      autosave();
+      toast("Forgotten");
+      renderRudyMemory();
+      return;
+    }
+    const docId = t.getAttribute("data-mem-forget-doc");
+    if (docId) {
+      patchState((s) => { removeResumeDocument(s.profile, docId); });
+      autosave();
+      toast("Résumé deleted");
+      renderRudyMemory();
+      if (view === "corner") renderCorner();
+      return;
+    }
+  });
   $("#rudy-send")?.addEventListener("click", () => { void sendRudy(); });
   $("#rudy-input")?.addEventListener("keydown", (e) => {
     if ((e as KeyboardEvent).key === "Enter") void sendRudy();
@@ -2777,9 +3238,9 @@ async function boot(): Promise<void> {
     });
   }
 
-  // ── Voice OUT: "Rudy reads replies aloud" toggle. Voice itself is ElevenLabs
-  // (speakText), with the browser voice as fallback — so keep the toggle even
-  // when SpeechSynthesis is missing (ElevenLabs may still work). ──────────────
+  // ── Voice OUT: "Rudy reads replies aloud" toggle. Voice uses the server
+  // edge function first, with browser speech as fallback, so keep the toggle
+  // even when SpeechSynthesis is missing. ────────────────────────────────────
   speechSynthOK = "speechSynthesis" in window && typeof SpeechSynthesisUtterance !== "undefined";
   speakOn = localStorage.getItem("rudySpeak") === "1";
   const pickVoice = (): void => {
@@ -2801,10 +3262,12 @@ async function boot(): Promise<void> {
   }
   const spkBtn = $("#rudy-spk");
   const spkState = $("#rudy-spk-state");
+  voiceStatusEl = $("#rudy-voice-status");
   const syncSpeaker = (): void => {
     if (!spkBtn) return;
     spkBtn.setAttribute("aria-pressed", speakOn ? "true" : "false");
     if (spkState) spkState.textContent = speakOn ? "On" : "Off";
+    syncVoiceIdleStatus();
   };
   if (spkBtn) {
     syncSpeaker();
@@ -2818,8 +3281,8 @@ async function boot(): Promise<void> {
   }
 
   // ── Voice IN: tap the mic to talk to Rudy. Records with MediaRecorder and
-  // transcribes via the `voice` edge function (ElevenLabs) — works on iOS,
-  // unlike the old SpeechRecognition. Hidden where the mic API is unavailable. ─
+  // transcribes via the `voice` edge function, which works on iOS unlike the
+  // old SpeechRecognition path. Hidden where the mic API is unavailable. ─────
   const micBtn = $("#rudy-mic");
   const listenEl = $("#rudy-listen");
   const micOK = !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined";

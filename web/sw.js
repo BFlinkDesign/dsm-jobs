@@ -67,3 +67,26 @@ self.addEventListener("fetch", (e) => {
     );
   }
 });
+
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  const target = new URL("./", self.location.href).href;
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true })
+      .then((clients) => {
+        const sameApp = clients.find((client) => {
+          try {
+            const url = new URL(client.url);
+            return url.origin === self.location.origin && url.pathname.includes("/dsm-jobs/");
+          } catch {
+            return false;
+          }
+        });
+        if (sameApp) {
+          if ("focus" in sameApp) return sameApp.focus();
+          return sameApp;
+        }
+        return self.clients.openWindow(target);
+      }),
+  );
+});

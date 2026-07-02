@@ -1,0 +1,68 @@
+name: ATS candidate probe (manual)
+
+# Read-only diagnostic: probe a CANDIDATE employer board (not yet in
+# providers.py) from a runner with real internet egress, and report row
+# counts / HTTP status as a job summary. Some sandboxed dev environments
+# block ATS hosts at the network-policy layer (CONNECT 403), so this is how
+# a human or a future agent gets ground truth before adding a board token —
+# per CLAUDE.md: "Add a board token only after confirming it returns
+# 200+jobs live." This workflow is intentionally NOT wired into scan.yml or
+# ci.yml — it never touches web/, gh-pages, or providers.py.
+
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: "Provider type to probe"
+        required: true
+        type: choice
+        options:
+          - greenhouse
+          - lever
+          - workday
+          - smartrecruiters
+          - neogov
+      identifier:
+        description: >-
+          Board identifier. greenhouse/lever/smartrecruiters/neogov: a single
+          token/slug (e.g. "boxlunch"). workday: space-separated
+          "tenant dc site [label]" (e.g. "hy-vee wd1 hyvee_careers Hy-Vee").
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false   # read-only diagnostic; no commits, no push
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Probe candidate board
+        id: probe
+        shell: bash
+        env:
+          # Piped through env vars, never interpolated directly into the run
+          # script, so a crafted workflow_dispatch input can't inject shell
+          # code (zizmor: template-injection).
+          ATS_PROBE_PROVIDER: ${{ inputs.provider }}
+          ATS_PROBE_IDENTIFIER: ${{ inputs.identifier }}
+        run: |
+          set -o pipefail
+          # No secrets are used by this script (all probed endpoints are
+          # keyless per providers.py) — nothing here can leak into logs.
+          # shellcheck disable=SC2086
+          python scripts/ats_probe.py "$ATS_PROBE_PROVIDER" $ATS_PROBE_IDENTIFIER \
+            | tee /tmp/summary.md
+
+      - name: Publish job summary
+        if: always()
+        run: cat /tmp/summary.md >> "$GITHUB_STEP_SUMMARY"

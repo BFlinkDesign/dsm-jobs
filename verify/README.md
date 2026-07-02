@@ -1,8 +1,9 @@
 # verify/ — the camera (self-verifier)
 
-`camera.py` builds the PWA, renders it in **real Chrome**, **photographs** each
-view, and **inspects** the live DOM against the load-bearing invariants. It's the
-loop's eyes: run it after any change; exit 0 means every check passed.
+`camera.py` builds the PWA, renders it in Playwright's bundled Chromium when
+available and falls back to installed Chrome, photographs each view, and
+inspects the live DOM against the load-bearing invariants. It's the loop's eyes:
+run it after any change; exit 0 means every check passed.
 
 ```bash
 pip install -r verify/requirements.txt   # playwright (verify-only; NOT a runtime dep)
@@ -10,9 +11,9 @@ python verify/camera.py                   # --mock scan + `cd app && npm run bui
 python verify/camera.py --no-build        # inspect the existing web/ build
 ```
 
-On this box Playwright's bundled Chromium download fails, so the camera launches
-the **installed** Chrome via `channel="chrome"`. (`pip install playwright` is
-enough — no `playwright install` needed when system Chrome is present.)
+If Playwright's bundled Chromium is unavailable on this box, the camera launches
+installed Chrome via `channel="chrome"`. (`pip install playwright` is enough for
+that fallback; install the bundled browser when you need fully pinned pixels.)
 
 ## What it checks (8)
 

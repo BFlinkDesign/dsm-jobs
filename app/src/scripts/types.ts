@@ -83,6 +83,14 @@ export type AppliedEntry = {
   ts?: string; // ISO timestamp (for finer sort/display)
 };
 
+export type ApplicationStatus =
+  | "applied"
+  | "followed_up"
+  | "interview"
+  | "rejected"
+  | "offer"
+  | "ghosted";
+
 export type AtsAlignment = {
   strong_matches: string[];
   suggested_keywords: string[];
@@ -119,6 +127,7 @@ export type AppState = {
   notes: Record<string, string>;          // per-job text notes (synced to job_notes table)
   followUps: Record<string, FollowUp>;
   appliedLog: Record<string, AppliedEntry>;
+  applicationStatus: Record<string, ApplicationStatus>;
   applicationPacks: Record<string, ApplicationPack>;
   followAlertDay: string;                 // last day follow-up browser notifications fired
   seen: string[];                         // job ids from previous visit (for "New" badges)

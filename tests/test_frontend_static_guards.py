@@ -52,6 +52,8 @@ def test_rudy_voice_and_spicy_modes_are_explicit_opt_in():
     # (aria-pressed="false") and its visible state label reads "Off".
     assert 'id="rudy-spk" aria-pressed="false"' in page
     assert 'id="rudy-spk-state">Off' in page
+    assert 'id="rudy-voice-status" role="status" aria-live="polite"' in page
+    assert "Voice is off." in page
     assert 'localStorage.getItem("rudySpeak") === "1"' in app
     assert 'localStorage.getItem("rudySpicy") === "1"' in app
     assert 'body: { message: msg, spicy: spicyOn }' in app
@@ -61,6 +63,31 @@ def test_rudy_voice_and_spicy_modes_are_explicit_opt_in():
     assert "HARD RULES, crisis routing, anti-confabulation" in fn
     assert "private life-and-job app that Daddy built" in fn
     assert '/^me$/i.test(rawWho) ? "Brady" : rawWho' in app
+
+
+def test_rudy_voice_contract_uses_chatterbox_default_without_stale_client_copy():
+    app = _read("app/src/scripts/app.ts")
+    page = _read("app/src/pages/index.astro")
+    cfg = _read("supabase/config.toml")
+    voice = _read("supabase/functions/voice/index.ts")
+
+    assert "[functions.voice]" in cfg
+    voice_section = cfg.split("[functions.voice]", 1)[1].split("[", 1)[0]
+    assert "verify_jwt = true" in voice_section
+    assert 'if (env("REPLICATE_API_TOKEN")) return "chatterbox";' in voice
+    assert 'case "chatterbox": return await ttsChatterbox(clean);' in voice
+    assert 'default: return json({ unconfigured: true });' in voice
+    assert "edgeSpeak" in app
+    assert "syncVoiceIdleStatus" in app
+    assert "Rudy's real voice is playing." in app
+    assert "Using this phone's browser voice." in app
+    assert "Chatterbox is not connected yet" in app
+    assert "Voice service stumbled. Browser voice is still ready." in app
+    assert "elevenSpeak" not in app
+    assert "MediaRecorder -> voice Edge Function" in page
+    assert "ElevenLabs" not in app
+    assert "ElevenLabs" not in page
+    assert "ElevenLabs" not in cfg
 
 
 def test_rudy_thinking_bubbles_are_bound_by_element_reference():
@@ -138,15 +165,71 @@ def test_application_pack_is_saved_and_reopenable():
 
 def test_application_status_has_persistent_undo_and_custom_followup_date():
     app = _read("app/src/scripts/app.ts")
+    types = _read("app/src/scripts/types.ts")
+    store = _read("app/src/scripts/store.ts")
+    autosave = _read("app/src/scripts/autosave.ts")
     css = _read("app/src/styles/app.css")
 
+    assert "export type ApplicationStatus" in types
+    assert "applicationStatus: Record<string, ApplicationStatus>" in types
+    assert "applicationStatus: {}" in store
+    assert "applicationStatus: s.applicationStatus" in autosave
+    assert "trackedApplicationJobs" in app
+    assert "Object.keys(s.applied)" in app
+    assert "jobFromAppliedLog" in app
+    assert "This job is no longer in today's feed" in app
     assert "Undo applied" in app
     assert "data-unapply" in app
     assert "Applied status removed" in app
+    assert "data-app-status" in app
+    assert "APP_STATUS_LABELS" in app
+    assert "s.applicationStatus[id] = value" in app
+    assert 'status === "interview"' in app
+    assert 'host.addEventListener("change", handleField)' in app
     assert "data-follow-date" in app
     assert "Follow up on" in app
     assert "fu.done = false" in app
     assert ".follow-date-label" in css
+    assert ".app-status-field" in css
+    assert "renderApplicationCockpit" in app
+    assert "Application cockpit" in app
+    assert "What needs attention" in app
+    assert "data-follow-copy" in app
+    assert "Copy message" in app
+    assert "Follow-up message copied" in app
+    assert ".app-cockpit" in css
+    assert ".app-action-card" in css
+    assert "todayNextActionHtml" in app
+    assert "Start here" in app
+    assert "Open My applications" in app
+    assert 'data-view-jump="apps"' in app
+    assert ".today-action" in css
+
+
+def test_client_resilience_queues_account_sync_when_offline():
+    app = _read("app/src/scripts/app.ts")
+    autosave = _read("app/src/scripts/autosave.ts")
+    outbox = _read("app/src/scripts/outbox.ts")
+    page = _read("app/src/pages/index.astro")
+    css = _read("app/src/styles/app.css")
+
+    assert "indexedDB.open" in outbox
+    assert "dsm-jobs-outbox" in outbox
+    assert "enqueueOutbox" in outbox
+    assert "drainOutbox" in outbox
+    assert 'kind: "profile"' in autosave
+    assert 'kind: "note"' in autosave
+    assert 'kind: "chat"' in autosave
+    assert 'kind: "chat_clear"' in autosave
+    assert "drainPendingSaves" in autosave
+    assert "Saved on this phone" in autosave
+    assert 'delete().eq("job_id", jobId)' in autosave
+    assert 'id="sync-banner"' in page
+    assert "role=\"status\"" in page
+    assert "pendingSyncCount" in app
+    assert "dsm-jobs-outbox-change" in app
+    assert "safe on this phone" in app
+    assert ".banner-sync" in css
 
 
 def test_resume_document_manager_preserves_multiple_documents():
@@ -274,9 +357,92 @@ def test_service_worker_only_caches_same_origin_gets():
     assert "if (url.origin !== self.location.origin) return;" in sw
 
 
+def test_service_worker_notification_click_returns_to_app_window():
+    sw = _read("app/public/sw.js")
+    assert 'self.addEventListener("notificationclick"' in sw
+    assert "e.notification.close()" in sw
+    assert "clients.matchAll({ type: \"window\", includeUncontrolled: true })" in sw
+    assert 'url.pathname.includes("/dsm-jobs/")' in sw
+    assert "sameApp.focus()" in sw
+    assert "self.clients.openWindow(target)" in sw
+
+
 def test_github_pages_serves_astro_underscore_assets():
     assert (ROOT / "app/public/.nojekyll").is_file()
 
+
+def test_rudy_memory_viewer_renders_and_deletes_clear_local_and_supabase_state():
+    """'What Rudy remembers' — a transparency panel inside the Rudy overlay
+    (docs/plans/2026-06-27-fable5-task-queue.md item 2). It must actually
+    render (a toggle button + a dedicated panel, distinct from the chat log)
+    and every delete control must clear the item from BOTH localStorage and
+    the Supabase user_profile blob / chat_messages table — not just hide it
+    in the UI.
+    """
+    page = _read("app/src/pages/index.astro")
+    app = _read("app/src/scripts/app.ts")
+    autosave = _read("app/src/scripts/autosave.ts")
+
+    # The panel exists inside the Rudy overlay and is reachable/closeable.
+    assert 'id="rudy-memory-open"' in page
+    assert 'id="rudy-memory"' in page
+    assert 'id="rudy-memory-body"' in page
+    assert 'id="rudy-memory-close"' in page
+    assert "What Rudy remembers" in page
+    assert "renderRudyMemory" in app
+    assert "openRudyMemory" in app
+    assert "closeRudyMemory" in app
+    # Opening the panel hides the chat log rather than stacking on top of it
+    # (calm UI — one thing on screen at a time, no overlapping panels).
+    assert 'if (log) log.hidden = true;' in app
+
+    # It lists what's actually remembered: preference flags (the quiz Rudy's
+    # chat and My-corner quiz both write to), saved résumé documents, and a
+    # chat-history summary — not a placeholder.
+    assert "Preferences she's told Rudy" in app
+    assert "Saved résumé" in app
+    assert "Chat history" in app
+    assert "quizValueLabel" in app
+
+    # Deleting a preference clears it from local AppState (profile.quiz) and
+    # autosave() pushes that change to the Supabase user_profile blob (see
+    # pushProfileNow in autosave.ts, which serializes s.profile wholesale).
+    assert "data-mem-forget-quiz" in app
+    assert "delete s.profile.quiz[quizKey]" in app
+
+    # Deleting a résumé document reuses the existing removeResumeDocument
+    # helper (same one wired to My corner's own delete button) and autosaves.
+    assert "data-mem-forget-doc" in app
+    assert "removeResumeDocument(s.profile, docId)" in app
+
+    # Clearing chat history must remove it from BOTH the Supabase chat_messages
+    # table (RLS-scoped delete) and this phone's localStorage copy — not just
+    # the in-memory render — via clearChatHistory in autosave.ts.
+    assert "clearChatHistory" in app
+    assert "export async function clearChatHistory" in autosave
+    assert 'localStorage.removeItem(chatLocalKey())' in autosave
+    assert 'client.from("chat_messages").delete().eq("user_id", uid)' in autosave
+
+    # All dynamic memory text goes through esc() (XSS-safe rendering, per
+    # CLAUDE.md invariant #5) rather than raw interpolation.
+    assert "esc(question)" in app
+    assert "esc(quizValueLabel(key, val))" in app
+    assert "esc(doc.name)" in app
+
+
+def test_rudy_chat_is_document_aware_without_guessing():
+    grounding = _read("supabase/functions/companion/grounding.ts")
+    companion = _read("supabase/functions/companion/index.ts")
+    grounding_test = _read("supabase/functions/companion/grounding_test.ts")
+
+    assert "SAVED RÉSUMÉ DOCUMENTS Rudy may discuss" in grounding
+    assert "documents" in grounding
+    assert "activeDocumentId" in grounding
+    assert "MAX_ACTIVE_RESUME_CHARS" in grounding
+    assert "If the answer is not in this text, say you do not see it" in grounding
+    assert "Never infer résumé content from vibes" in companion
+    assert "saved active resume document is grounded for document-aware chat" in grounding_test
+    assert "[object Object]" in grounding_test
 
 def test_service_worker_has_web_push_handlers():
     """Web Push follow-up reminders (CLAUDE.md 'Planned / next') need the SW to
@@ -296,7 +462,7 @@ def test_service_worker_has_web_push_handlers():
     # and falls back to opening a URL derived from that same scope — never an
     # arbitrary attacker-controlled origin.
     assert "const scopeOrigin = new URL(self.registration.scope).origin;" in sw
-    assert "new URL(client.url).origin === scopeOrigin" in sw
+    assert "url.origin === scopeOrigin" in sw
 
 
 def test_push_subscription_is_separate_opt_in_from_in_app_notification():

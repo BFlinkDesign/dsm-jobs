@@ -96,25 +96,37 @@ self.addEventListener("push", (e) => {
   e.waitUntil(self.registration.showNotification(title, options));
 });
 
-/* Tapping the notification focuses an already-open same-origin tab (so state
- * isn't lost) or opens a new one to the apps tab, landing her on the follow-up
- * that's due. Never navigates a client to another origin — the fallback open
- * target is always this SW's own registration scope. */
+/* Tapping the notification focuses an already-open app tab (so state isn't
+ * lost) or opens a new one. The open target honors the push payload's URL
+ * only when it resolves to this SW's own scope origin — a malformed payload
+ * can never hijack the tap into another site. */
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const targetUrl = (e.notification.data && e.notification.data.url) || self.registration.scope;
   const scopeOrigin = new URL(self.registration.scope).origin;
+  let target = new URL("./", self.location.href).href;
+  const dataUrl = e.notification.data && e.notification.data.url;
+  if (dataUrl) {
+    try {
+      const u = new URL(dataUrl, self.registration.scope);
+      if (u.origin === scopeOrigin) target = u.href;
+    } catch { /* keep the app root */ }
+  }
   e.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-      for (const client of list) {
-        if (new URL(client.url).origin === scopeOrigin && "focus" in client) {
-          if ("navigate" in client) {
-            try { client.navigate(targetUrl); } catch { /* ignore */ }
+    self.clients.matchAll({ type: "window", includeUncontrolled: true })
+      .then((clients) => {
+        const sameApp = clients.find((client) => {
+          try {
+            const url = new URL(client.url);
+            return url.origin === scopeOrigin && url.pathname.includes("/dsm-jobs/");
+          } catch {
+            return false;
           }
-          return client.focus();
+        });
+        if (sameApp) {
+          if ("focus" in sameApp) return sameApp.focus();
+          return sameApp;
         }
-      }
-      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
-    }),
+        return self.clients.openWindow(target);
+      }),
   );
 });

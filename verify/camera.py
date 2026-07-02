@@ -6,10 +6,10 @@ photographs each view, and inspects the live DOM against the load-bearing
 invariants. Exit 0 iff EVERY check passes; otherwise prints the failures
 and exits 1. Re-run it after any change — it is the loop's eyes.
 
-Verify-only tool (NOT a runtime dependency). DETERMINISTIC by design: it drives
-Playwright's BUNDLED Chromium, pinned to the playwright version in
-verify/requirements.txt, against the canned --mock build — so the rendered
-pixels are reproducible across runs and machines (CI or local). Setup:
+Verify-only tool (NOT a runtime dependency). It first tries Playwright's bundled
+Chromium, pinned to the playwright version in verify/requirements.txt, and falls
+back to installed Chrome via channel="chrome" on machines where the bundled
+browser is unavailable. Setup:
     pip install -r verify/requirements.txt
     python -m playwright install --with-deps chromium    # the pinned revision
 
@@ -38,6 +38,23 @@ BASE_PATH = "/dsm-jobs/"
 VALUE_LEAK = ["undefined", "NaN", "[object Object]", "$None", "~None min", "None min drive"]
 # Unfilled template tokens — distinctive enough to scan the raw HTML safely.
 TEMPLATE_TOKENS = ["##JOBS##", "##META##", "##PORTAL##", "##PORTAL_SCRIPT##", "##SENTRY##"]
+INIT_SCRIPT = (
+    "(function(){var s=0x2545F491;Math.random=function(){"
+    "s|=0;s=s+0x6D2B79F5|0;var t=Math.imul(s^s>>>15,1|s);"
+    "t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};"
+    "var FIXED=1781913600000,R=Date;function F(a,b,c,d,e,f,g){"
+    "switch(arguments.length){case 0:return new R(FIXED);"
+    "case 1:return new R(a);default:return new R(a,b,c,d,e,f,g);}}"
+    "F.now=function(){return FIXED;};F.parse=R.parse;F.UTC=R.UTC;"
+    "F.prototype=R.prototype;Date=F;window.Date=F;"
+    "try{localStorage.setItem('tour-seen','1');}catch(e){};"
+    "})();"
+)
+NO_ANIM_CSS = (
+    "*,*::before,*::after{animation:none!important;transition:none!important;"
+    "animation-duration:0s!important;caret-color:transparent!important;"
+    "scroll-behavior:auto!important}"
+)
 
 
 def build():
@@ -176,7 +193,7 @@ def inspect(page):
         nav[key] = page.query_selector("#view-host .lock-screen") is not None
     page.click('.nav-bottom .tab[data-view="help"]')
     page.wait_for_timeout(150)
-    nav["help"] = page.inner_text("#view-host").lower().count("stays safe") >= 1
+    nav["help"] = page.inner_text("#view-host").lower().count("how you stay safe") >= 1
     page.click('.nav-bottom .tab[data-view="jobs"]')
     page.wait_for_timeout(150)
     nav["jobs"] = page.query_selector("#jobs-list") is not None
@@ -255,22 +272,9 @@ def main():
                 device_scale_factor=1,
                 reduced_motion="reduce",
             )
-            page.add_init_script(
-                "(function(){var s=0x2545F491;Math.random=function(){"
-                "s|=0;s=s+0x6D2B79F5|0;var t=Math.imul(s^s>>>15,1|s);"
-                "t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};"
-                "var FIXED=1781913600000,R=Date;function F(a,b,c,d,e,f,g){"
-                "switch(arguments.length){case 0:return new R(FIXED);"
-                "case 1:return new R(a);default:return new R(a,b,c,d,e,f,g);}}"
-                "F.now=function(){return FIXED;};F.parse=R.parse;F.UTC=R.UTC;"
-                "F.prototype=R.prototype;Date=F;window.Date=F;})();"
-            )
+            page.add_init_script(INIT_SCRIPT)
             page.goto(app_url, wait_until="networkidle")
-            page.add_style_tag(content=(
-                "*,*::before,*::after{animation:none!important;transition:none!important;"
-                "animation-duration:0s!important;caret-color:transparent!important;"
-                "scroll-behavior:auto!important}"
-            ))
+            page.add_style_tag(content=NO_ANIM_CSS)
             try:
                 page.evaluate("document.fonts && document.fonts.ready")
             except Exception:  # noqa: BLE001 — fonts API is best-effort
