@@ -1,0 +1,16 @@
+<!-- Subject: Your dsm-jobs sign-in code: {{ .Token }} -->
+<h2 style="margin:0 0 12px;font-family:Georgia,serif;">Your sign-in code ✦</h2>
+<p style="font-size:15px;line-height:1.5;margin:0 0 16px;">
+  Type this code in the app — that's it, you're in:
+</p>
+<p style="font-size:34px;letter-spacing:6px;font-weight:bold;font-family:monospace;margin:0 0 20px;">
+  {{ .Token }}
+</p>
+<p style="font-size:14px;line-height:1.5;margin:0 0 16px;color:#555;">
+  Prefer one tap? <a href="{{ .ConfirmationURL }}">This link signs you in too</a>
+  (it opens in your browser, not the app icon — the code is easier).
+</p>
+<p style="font-size:13px;line-height:1.5;margin:0;color:#777;">
+  Didn't ask for this? Ignore it — nothing happens without the code.
+  The code expires in about an hour. — Rudy 🦇
+</p>

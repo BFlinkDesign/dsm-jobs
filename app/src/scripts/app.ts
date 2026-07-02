@@ -16,7 +16,7 @@ import {
   pullProfile,
   pushChatMessage,
 } from "./autosave";
-import { currentUser, fetchGoogleAuthEnabled, friendlyAuthError, getClient, initAuth, registerPasskey, resetPasswordForEmail, signIn, signInWithGoogle, signInWithMagicLink, signInWithPasskey, signOut, signUp, supportsPasskey, updatePassword } from "./auth";
+import { currentUser, fetchGoogleAuthEnabled, friendlyAuthError, getClient, initAuth, registerPasskey, resetPasswordForEmail, sendEmailCode, signIn, signInWithGoogle, signInWithMagicLink, signInWithPasskey, signOut, signUp, supportsPasskey, updatePassword, verifyEmailCode } from "./auth";
 import {
   pickSaying,
   SEARCHING_LINES,
@@ -2261,6 +2261,13 @@ function setRecoverMsg(text: string, isErr = false): void {
   el.classList.toggle("auth-err", isErr);
 }
 
+function setCodeMsg(text: string, isErr = false): void {
+  const el = $("#auth-code-msg");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("auth-err", isErr);
+}
+
 function setPasswordFieldVisible(input: HTMLInputElement, toggle: HTMLButtonElement, visible: boolean): void {
   input.type = visible ? "text" : "password";
   toggle.setAttribute("aria-label", visible ? "Hide password" : "Show password");
@@ -2318,11 +2325,14 @@ function showAuthMain(): void {
   const main = $("#auth-main");
   const forgotPanel = $("#auth-forgot-panel");
   const recover = $("#auth-recover");
+  const code = $("#auth-code");
   if (main) main.hidden = false;
   if (forgotPanel) forgotPanel.hidden = true;
   if (recover) recover.hidden = true;
+  if (code) code.hidden = true;
   setForgotMsg("");
   setRecoverMsg("");
+  setCodeMsg("");
 }
 
 function showAuthForgot(): void {
@@ -2334,21 +2344,57 @@ function showAuthForgot(): void {
   if (main) main.hidden = true;
   if (forgotPanel) forgotPanel.hidden = false;
   if (recover) recover.hidden = true;
+  const codePanel = $("#auth-code");
+  if (codePanel) codePanel.hidden = true;
   if (forgotEmail && signInEmail && !forgotEmail.value.trim()) forgotEmail.value = signInEmail;
   setAuthMsg("");
   setForgotMsg("");
   setTimeout(() => { forgotEmail?.focus(); }, 50);
 }
 
+/** Which flow the 6-digit code panel is verifying: "email" = passwordless
+ * sign-in; "recovery" = password reset (verify → then set a new password,
+ * all inside THIS app — no Safari-tab hop, nothing for a mail scanner to
+ * burn: the code is only consumed when she types it here). */
+let codeCtx: { mode: "email" | "recovery"; email: string } = { mode: "email", email: "" };
+let codeResendAt = 0;
+
+function showAuthCode(mode: "email" | "recovery", email: string): void {
+  codeCtx = { mode, email };
+  const main = $("#auth-main");
+  const forgotPanel = $("#auth-forgot-panel");
+  const recover = $("#auth-recover");
+  const code = $("#auth-code");
+  if (main) main.hidden = true;
+  if (forgotPanel) forgotPanel.hidden = true;
+  if (recover) recover.hidden = true;
+  if (code) code.hidden = false;
+  const sub = $("#auth-code-sub");
+  if (sub) {
+    sub.textContent = mode === "recovery"
+      ? `Type the 6-digit code we emailed to ${email}. Then you'll pick a new password — right here.`
+      : `Type the 6-digit code we emailed to ${email}. No link-tapping needed — it works right here.`;
+  }
+  const input = document.getElementById("auth-code-input") as HTMLInputElement | null;
+  if (input) input.value = "";
+  setAuthMsg("");
+  setForgotMsg("");
+  setCodeMsg("");
+  setTimeout(() => { input?.focus(); }, 50);
+}
+
 function showAuthRecover(): void {
   const main = $("#auth-main");
   const forgotPanel = $("#auth-forgot-panel");
   const recover = $("#auth-recover");
+  const code = $("#auth-code");
   if (main) main.hidden = true;
   if (forgotPanel) forgotPanel.hidden = true;
   if (recover) recover.hidden = false;
+  if (code) code.hidden = true;
   setAuthMsg("");
   setForgotMsg("");
+  setCodeMsg("");
   setTimeout(() => { (document.getElementById("auth-newpass") as HTMLInputElement | null)?.focus(); }, 50);
 }
 
@@ -3336,12 +3382,95 @@ async function boot(): Promise<void> {
       setForgotMsg("That doesn't look like an email address.", true);
       return;
     }
-    setForgotMsg("Sending a reset link…");
+    setForgotMsg("Sending your reset code…");
     const err = await resetPasswordForEmail(sb, email, authRedirectUrl());
-    setForgotMsg(
-      err ? friendlyAuthError(err) : "If that email is on file, check your inbox for a reset link.",
-      !!err,
-    );
+    if (err) {
+      setForgotMsg(friendlyAuthError(err), true);
+      return;
+    }
+    // Code-first reset: land her straight on code entry. The email carries
+    // both the 6-digit code and a link; typing the code here completes the
+    // whole reset inside the installed app (no Safari tab, no prefetch burn).
+    codeResendAt = Date.now();
+    showAuthCode("recovery", email);
+    setCodeMsg("If that email is on file, the code is on its way.");
+  });
+  $("#auth-forgot-code")?.addEventListener("click", () => {
+    const email = (document.getElementById("auth-forgot-email") as HTMLInputElement).value.trim();
+    if (!/.+@.+\..+/.test(email)) {
+      setForgotMsg("Enter your email first, so the code matches.", true);
+      return;
+    }
+    showAuthCode("recovery", email);
+  });
+  $("#auth-code-send")?.addEventListener("click", async () => {
+    const sb = getClient();
+    if (!sb) return;
+    const email = (document.getElementById("auth-email") as HTMLInputElement).value.trim();
+    if (!/.+@.+\..+/.test(email)) {
+      setAuthMsg("Enter your email first.", true);
+      return;
+    }
+    setAuthMsg("Sending your code…");
+    const err = await sendEmailCode(sb, email);
+    if (err) {
+      setAuthMsg(friendlyAuthError(err), true);
+      return;
+    }
+    codeResendAt = Date.now();
+    showAuthCode("email", email);
+  });
+  $("#auth-code-verify")?.addEventListener("click", async () => {
+    const sb = getClient();
+    if (!sb) return;
+    const token = (document.getElementById("auth-code-input") as HTMLInputElement).value.replace(/\D/g, "");
+    if (token.length < 6) {
+      setCodeMsg("Type the 6-digit code from the email.", true);
+      return;
+    }
+    setCodeMsg("Checking…");
+    const err = await verifyEmailCode(sb, codeCtx.email, token, codeCtx.mode);
+    if (err) {
+      setCodeMsg(friendlyAuthError(err), true);
+      return;
+    }
+    if (codeCtx.mode === "recovery") {
+      showAuthRecover();
+      setRecoverMsg("Code accepted ✦ Pick your new password.");
+      return;
+    }
+    closeAuth();
+    await refreshAuth();
+    toast("Welcome back ✦");
+  });
+  $("#auth-code-resend")?.addEventListener("click", async () => {
+    const sb = getClient();
+    if (!sb) return;
+    const waitMs = 30_000 - (Date.now() - codeResendAt);
+    if (waitMs > 0) {
+      setCodeMsg(`One's already on the way — give it ${Math.ceil(waitMs / 1000)}s, and check spam.`);
+      return;
+    }
+    setCodeMsg("Sending a fresh code…");
+    const err = codeCtx.mode === "recovery"
+      ? await resetPasswordForEmail(sb, codeCtx.email, authRedirectUrl())
+      : await sendEmailCode(sb, codeCtx.email);
+    if (err) {
+      setCodeMsg(friendlyAuthError(err), true);
+      return;
+    }
+    codeResendAt = Date.now();
+    setCodeMsg("New code sent — the newest one wins.");
+  });
+  $("#auth-code-back")?.addEventListener("click", () => {
+    if (codeCtx.mode === "recovery") showAuthForgot();
+    else {
+      showAuthMain();
+      setAuthMode("signin");
+    }
+  });
+  document.getElementById("auth-code-input")?.addEventListener("keydown", (e) => {
+    if ((e as KeyboardEvent).key === "Enter") ($("#auth-code-verify") as HTMLButtonElement | null)?.click();
   });
   $("#auth-passkey")?.addEventListener("click", async () => {
     const sb = getClient();

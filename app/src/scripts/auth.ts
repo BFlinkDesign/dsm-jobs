@@ -81,6 +81,29 @@ export async function signInWithMagicLink(client: SupabaseClient, email: string,
   return error?.message ?? null;
 }
 
+/** Email a 6-digit sign-in code. Deliberately NO emailRedirectTo: without it
+ * the email is a code carrier, not a one-time link — so it can't be burned by
+ * a mail scanner's prefetch and can't open in the wrong browser context (the
+ * Safari-tab-vs-installed-PWA split that broke recovery). The dashboard email
+ * template must include {{ .Token }} for the code to appear. */
+export async function sendEmailCode(client: SupabaseClient, email: string): Promise<string | null> {
+  const { error } = await client.auth.signInWithOtp({ email });
+  return error?.message ?? null;
+}
+
+/** Verify a 6-digit emailed code. type "email" signs her in; type "recovery"
+ * (paired with resetPasswordForEmail) opens a session that may set a new
+ * password. Either way the whole flow completes inside the app she's in. */
+export async function verifyEmailCode(
+  client: SupabaseClient,
+  email: string,
+  token: string,
+  type: "email" | "recovery",
+): Promise<string | null> {
+  const { error } = await client.auth.verifyOtp({ email, token, type });
+  return error?.message ?? null;
+}
+
 export async function resetPasswordForEmail(client: SupabaseClient, email: string, redirectTo: string): Promise<string | null> {
   const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
   return error?.message ?? null;
@@ -119,6 +142,9 @@ export function friendlyAuthError(error: unknown): string {
   // provider's link-prefetch scanner burned the one-time token before she
   // tapped it) redirects back with an error hash, not a thrown SDK error —
   // callers pass that through here too so the message stays one source.
+  if (/token.*(invalid|not found)|invalid.*token|otp.*(invalid|incorrect)/i.test(m)) {
+    return "That code didn't match — check the newest email and try again.";
+  }
   if (/otp_expired|access_denied|invalid or has expired|token has expired/i.test(m)) {
     return "That link expired or was already used — enter your email below for a fresh one.";
   }
