@@ -168,7 +168,17 @@ def test_resume_tailor_is_trust_first_with_recovery_paths():
     assert "What Rudy changed" in app
     assert "tailor-result-actions" in app
     assert "data-download" in app
+    assert "data-download-notes" in app
+    assert "Download résumé (.docx)" in app
+    assert "Download notes (.txt)" in app
     assert "Download text file</button>" not in app
+    # The résumé download must be a real .docx an ATS upload widget accepts
+    # (the City of Des Moines portal rejects .txt) — never re-regress it back
+    # to a text/plain blob.
+    assert "buildDocxBlob" in app
+    assert '"./docx"' in app
+    assert "-resume.docx" in app
+    assert "-notes.txt" in app
     assert "data-tailor-retry" in app
     assert "data-tailor-edit" in app
     assert "friendlyTailorError" in app
@@ -598,3 +608,53 @@ def test_push_subscription_is_separate_opt_in_from_in_app_notification():
     assert "export async function subscribeToPush" in push_ts
     assert "return false;" in push_ts
     assert "} catch {" in push_ts
+
+
+def test_password_recovery_handles_expired_link_and_sends_her_back_to_the_app():
+    """iPad reality check: a recovery-email link opens in a plain Safari tab,
+    never the installed PWA (iPadOS partitions storage between the two), so
+    the whole set-new-password flow must work standalone from the URL hash in
+    that tab. Two failure modes must both be closed off:
+
+    1. Supabase redirects an EXPIRED or already-used link back as
+       `#error=...&error_code=...&error_description=...` with no distinct
+       auth event at all (confirmed against auth-js's _getSessionFromURL) —
+       so without an explicit hash check she'd land on the plain sign-in
+       screen with zero feedback, believe nothing happened, and try her
+       "new" password later only to find her password was never changed.
+    2. Even on a SUCCESSFUL update, she needs to be told explicitly to go
+       back to her installed app to sign in — the recovery session lives only
+       in this Safari tab, so "you're signed in" here is not actionable.
+    """
+    app = _read("app/src/scripts/app.ts")
+    auth = _read("app/src/scripts/auth.ts")
+
+    # Expired/consumed-link detection, independent of any auth event firing.
+    assert "function authHashError" in app
+    assert 'params.get("error_description") || params.get("error_code") || params.get("error")' in app
+    assert "const hashErr = authHashError();" in app
+    assert "setForgotMsg(friendlyAuthError({ message: hashErr }), true);" in app
+    assert "showAuthForgot();" in app
+
+    # friendlyAuthError carries the one phrasing for this case, used by both
+    # the hash-error path above and any thrown SDK error with the same code.
+    assert "otp_expired|access_denied|invalid or has expired|token has expired" in auth
+    assert "enter your email below for a fresh one." in auth
+
+    # Successful update must say explicitly to return to the installed app —
+    # never just "you're signed in", which would be true only in this tab.
+    assert "Now open your dsm-jobs app (not this tab) and sign in with it." in app
+    assert "go back to your app and sign in with it" in app
+
+    # Never show a success message unless updateUser actually returned no
+    # error (CLAUDE.md invariant-adjacent: don't fake a result the backend
+    # didn't confirm) — the error branch returns before any success copy runs.
+    assert "const err = await updatePassword(sb, np);" in app
+    assert "if (err) {\n      setRecoverMsg(friendlyAuthError(err), true);\n      return;\n    }" in app
+
+    # The new-password field must not let Safari's autofill "suggest strong
+    # password" overlay quietly save something other than what she typed
+    # under a different (unlabeled) credential.
+    astro = _read("app/src/pages/index.astro")
+    assert 'id="auth-newpass" type="password" autocomplete="new-password"' in astro
+    assert 'id="auth-newpass-confirm" type="password" autocomplete="new-password"' in astro

@@ -115,6 +115,13 @@ export function friendlyAuthError(error: unknown): string {
   if (/passkey|webauthn|credential/i.test(m) && /no|not found|none/i.test(m)) {
     return "No passkey found on this device yet. Sign in another way first, then add Face ID below.";
   }
+  // A recovery/magic-link click that's expired or already used (e.g. an email
+  // provider's link-prefetch scanner burned the one-time token before she
+  // tapped it) redirects back with an error hash, not a thrown SDK error —
+  // callers pass that through here too so the message stays one source.
+  if (/otp_expired|access_denied|invalid or has expired|token has expired/i.test(m)) {
+    return "That link expired or was already used — enter your email below for a fresh one.";
+  }
   if (/already registered|user already/i.test(m)) return "You already have an account — try signing in instead.";
   if (/invalid login|invalid credentials|wrong/i.test(m)) return "That email and password don't match. Try again.";
   if (/email not confirmed|confirm/i.test(m)) return "Check your email and tap the confirm link first, then sign in.";
