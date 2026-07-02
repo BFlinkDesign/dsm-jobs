@@ -106,12 +106,34 @@ EXCLUDE_TITLE_WORDS = [
     "it administrator", "engineer", "developer", "registered nurse", "pharmacy",
     "phlebotom", "therapist", "physician", "attorney", "paralegal director",
     # Licensed/certified occupations she has no credential for. Long, unambiguous
-    # phrases only (never bare 2-3 letter acronyms like "CNA"/"CPA"/"RN"/"CDL" —
-    # those collide with real company names and benign context, e.g. "CNA
+    # phrases stay the rule (never bare 2-3 letter acronyms like "CNA"/"CPA"/"CDL"
+    # — those collide with real company names and benign context, e.g. "CNA
     # Financial", "Administrative Assistant for a CPA firm"; those are caught
     # instead by requires_license_or_cert() reading the DESCRIPTION for an
-    # unambiguous requirement).
+    # unambiguous requirement). EXCEPTION: bare "nurse"/"nurses", "lpn", and "rn"
+    # ARE title-excluded (unlike CNA/CPA/CDL) — a live-feed leak (2026-07-02)
+    # proved the description-only path insufficient: "Home Health Intake &
+    # Admissions Nurse" and "LPN - Nursing Home Caregiver (Day/Night) $33-$36/hr"
+    # both slipped through on "intake"/"caregiver" allowlist hits with no
+    # unambiguous LICENSE_CERT_HINTS phrase in the body. A bare RN/LPN token in
+    # the TITLE (not just "nursing" as a modifier — see "Nursing Home
+    # Receptionist" below, which must stay) is an unambiguous nursing credential
+    # in a way "CNA"/"CPA"/"CDL" are not: those three collide with real company
+    # names ("CNA Financial") and non-credential context far more often than a
+    # job TITLE reading "... Nurse" or "RN ..." / "LPN ..." does.
     "licensed practical nurse", "certified nursing assistant",
+    "nurse", "nurses", "lpn", "rn",
+    # Sales roles and sales-adjacent MLM/commission recruiting funnels ("Customer
+    # Service/Sales", "Customer Service Sales Representative") — she wants
+    # customer-service work, not a sales quota. Word-boundary matched, so this
+    # does NOT catch "Salesforce" (already excluded on its own above; "sales"
+    # has no word boundary before "force" inside "salesforce").
+    "sales",
+    # Medical-assistant credential (CMA/RMA-track) she doesn't hold — distinct
+    # from a plain medical-office clerical role ("Medical Receptionist", "Patient
+    # Access Representative" stay; only an explicit medical/certified-medical
+    # ASSISTANT title is dropped).
+    "medical assistant", "certified medical assistant",
 ]
 # Entries matched as prefixes (no trailing word boundary): cybersecurity,
 # phlebotomist/phlebotomy.
@@ -1078,6 +1100,100 @@ def normalize(job, source):
 
 
 # --------------------------------------------------------------------------
+# Direct-apply routing (2026-07-02): the aggregators (Adzuna, Jooble) show an
+# interstitial/landing page before the real employer application, which is one
+# extra tap and one extra chance to bounce on a phone. When the aggregator's
+# apply link ultimately redirects to a KNOWN ATS/employer host, we follow that
+# redirect ourselves at scan time and publish the real application URL instead
+# — "Apply" then lands directly on the employer's form.
+# --------------------------------------------------------------------------
+
+# Reuse domain_screen's already-vetted ATS/gov host list — it's the exact same
+# "is this really an employer's own application system, not a redirect/landing
+# page" judgment the WHOIS scam-shield path already makes, so a second,
+# independently-drifting host list here would just be a second thing to keep in
+# sync. Extended with three ATS hosts domain_screen didn't need for WHOIS
+# purposes (aggregator/skip vs. trusted is all WHOIS cares about) but that DO
+# show up as real employer application domains: ashbyhq.com (Ashby), the older
+# myworkday.com candidate-home domain (distinct from myworkdayjobs.com, which
+# is already covered), and applytojob.com (BambooHR's public apply-tracking
+# domain).
+DIRECT_ATS_HOSTS = domain_screen.TRUSTED_APPLY_HOST_SUFFIXES + (
+    "ashbyhq.com", "myworkday.com", "applytojob.com",
+)
+
+# Cap total redirect-resolution attempts per scan and throttle between them —
+# an aggregator row we can't resolve just keeps its aggregator URL (fail-soft),
+# but an unbounded loop over every aggregator row could turn a slow/rate-limited
+# ATS host into a scan that blows past its CI step timeout.
+MAX_DIRECT_RESOLUTIONS = 150
+_DIRECT_RESOLVE_SLEEP_S = 0.2
+
+# Some ATS platforms sit behind Cloudflare/Akamai bot protection that rejects
+# urllib's default User-Agent outright — the exact failure mode fixed for the
+# Supabase snapshot script in dde871a (a bare urllib UA drew a Cloudflare 403).
+# Send an explicit, identifiable one here too rather than rediscover that the
+# hard way against a live ATS host.
+_RESOLVER_USER_AGENT = "dsm-jobs-apply-resolver/1.0 (+https://github.com/BFlinkDesign/dsm-jobs)"
+
+
+def _is_direct_ats_host(host):
+    """Subdomain-safe suffix match against DIRECT_ATS_HOSTS: an exact host or a
+    real subdomain of one of our known ATS hosts matches; a host that merely
+    CONTAINS an ATS name as a substring does not (e.g. an attacker-registered
+    'evil-greenhouse.io.attacker.com' must NOT match 'greenhouse.io' — that
+    would let a spoofed apply link masquerade as a trusted direct application).
+    """
+    host = (host or "").lower()
+    return bool(host) and any(
+        host == suffix or host.endswith("." + suffix) for suffix in DIRECT_ATS_HOSTS
+    )
+
+
+def resolve_direct_url(url, timeout=8):
+    """Follow redirects on an aggregator apply link (Adzuna/Jooble) and return
+    the FINAL url ONLY if it lands on a known ATS/employer host — never an
+    arbitrary redirect target. The whole point is trading an aggregator
+    interstitial for the real employer application, not for an unvalidated
+    redirect chain that could end anywhere.
+
+    HEAD first (cheap — most ATS hosts honor the same redirect chain for HEAD
+    as GET); a HEAD failure (405 Method Not Allowed, timeout, connection reset,
+    ...) falls back to a real GET. ANY exception on both attempts returns None:
+    a flaky resolution attempt must never crash the scan or swap in an unsafe
+    URL — the caller just keeps the original aggregator link, which is always
+    a safe fallback (it already passed the scam shield same as every other
+    row)."""
+    if not url:
+        return None
+    final_url = None
+    for method in ("HEAD", "GET"):
+        try:
+            req = urllib.request.Request(url, method=method,
+                                          headers={"User-Agent": _RESOLVER_USER_AGENT})
+            # nosemgrep - url is one of our own scan results (an Adzuna/Jooble
+            # apply link), not attacker-controlled input; the final host is
+            # re-validated against DIRECT_ATS_HOSTS below before ever being
+            # trusted, so a malicious redirect target is never returned.
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310
+                final_url = resp.geturl()
+            break
+        except Exception:
+            if method == "GET":
+                return None
+            continue  # HEAD failed -- try GET before giving up
+    if not final_url:
+        return None
+    parsed = urllib.parse.urlparse(final_url)
+    if parsed.scheme != "https":
+        return None
+    host = (parsed.netloc or "").split("@")[-1].split(":")[0].lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return final_url if _is_direct_ats_host(host) else None
+
+
+# --------------------------------------------------------------------------
 # Collection
 # --------------------------------------------------------------------------
 
@@ -1145,26 +1261,90 @@ def collect(verbose=True):
     rows, dupes = dedupe_rows(rows)
     if verbose and dupes:
         print(f"  (collapsed {dupes} duplicate postings of the same job)")
+
+    # Direct-apply routing (live path ONLY — collect_mock() below never calls
+    # collect(), so a --mock run never reaches this loop and never touches the
+    # network here; see test_mock_never_invokes_direct_resolver). For each row
+    # still pointing at an aggregator interstitial, try to resolve the real
+    # employer application and swap it in. Bounded + throttled: see
+    # MAX_DIRECT_RESOLUTIONS / _DIRECT_RESOLVE_SLEEP_S above.
+    resolutions = 0
+    for r in rows:
+        if resolutions >= MAX_DIRECT_RESOLUTIONS:
+            break
+        host = domain_screen.apply_host(r.get("url") or "")
+        if not domain_screen.is_skipped_apply_host(host):
+            continue  # already a direct/unrecognized host -- nothing to resolve
+        resolutions += 1
+        direct = resolve_direct_url(r.get("url"))
+        if direct:
+            r["url"] = direct
+            r["direct"] = True
+        time.sleep(_DIRECT_RESOLVE_SLEEP_S)
+
     return rows
 
 
 def dedupe_rows(rows):
     """Collapse duplicate postings: same real apply URL, or same employer+title+location.
 
-    Adzuna re-publishes under different IDs; ATS rows often share one apply URL.
+    Adzuna re-publishes the same job under a different id/redirect URL per
+    source, and (since Fix 2) that same job may ALSO show up as an ATS row
+    whose apply URL lives on a completely different domain — so a row is
+    matched into an existing group by EITHER signal (its normalized apply URL,
+    or its (company, title, location) triple), not just whichever one its own
+    host happens to prefer. Without that cross-linking, an aggregator
+    interstitial and the direct-apply row for the exact same opening never
+    collide (different domains -> different URL keys) and both would survive
+    as "duplicates" — exactly what direct-apply routing is trying to collapse
+    away.
+
+    When two rows land in the same group, a row whose apply URL is already a
+    known ATS/employer host (DIRECT_ATS_HOSTS) wins over an aggregator URL,
+    regardless of which one is newer — a direct link beats an interstitial.
+    Only when both (or neither) rows are direct does the tiebreak fall back to
+    newest `created` first, same as before.
+
     Returns (deduped_rows, number_collapsed)."""
-    best: dict[tuple, dict] = {}
+    signal_group: dict[tuple, int] = {}
+    best: dict[int, dict] = {}
+    next_group = 0
     for r in rows:
-        url_key = domain_screen.normalize_apply_url(r.get("url") or "")
         host = domain_screen.apply_host(r.get("url") or "")
+        url_key = domain_screen.normalize_apply_url(r.get("url") or "")
+        cty_key = (_norm_company(r["company"]), (r["title"] or "").lower().strip(),
+                   (r["location"] or "").lower().strip())
+        # An aggregator's own redirect URL is a new one per listing occurrence
+        # even for the SAME underlying job (re-published under a different
+        # id), so it is never a reliable identity signal on its own — only the
+        # (company, title, location) triple is, for those hosts.
+        signals = [("cty", cty_key)]
         if url_key and not domain_screen.is_skipped_apply_host(host):
-            key = ("url", url_key)
-        else:
-            key = ("cty", (_norm_company(r["company"]), (r["title"] or "").lower().strip(),
-                           (r["location"] or "").lower().strip()))
-        cur = best.get(key)
-        if cur is None or (r.get("created") or "") > (cur.get("created") or ""):
-            best[key] = r
+            signals.append(("url", url_key))
+
+        gid = None
+        for sig in signals:
+            if sig in signal_group:
+                gid = signal_group[sig]
+                break
+        if gid is None:
+            gid = next_group
+            next_group += 1
+        for sig in signals:
+            signal_group.setdefault(sig, gid)
+
+        cur = best.get(gid)
+        if cur is None:
+            best[gid] = r
+            continue
+        cur_direct = _is_direct_ats_host(domain_screen.apply_host(cur.get("url") or ""))
+        new_direct = _is_direct_ats_host(host)
+        if new_direct and not cur_direct:
+            best[gid] = r
+        elif cur_direct and not new_direct:
+            pass  # keep the existing direct-ATS row over an aggregator row
+        elif (r.get("created") or "") > (cur.get("created") or ""):
+            best[gid] = r
     return list(best.values()), len(rows) - len(best)
 
 

@@ -68,16 +68,56 @@ self.addEventListener("fetch", (e) => {
   }
 });
 
+/* ── Web Push: real OS notifications for follow-up reminders ─────────────────
+ * Best-effort / soft feature: the in-app Notification path (app.ts
+ * maybeNotifyFollowUps) keeps working exactly as it does today regardless of
+ * whether push is subscribed, supported, or permitted — this only ADDS a
+ * delivery path for when the app is fully closed (the normal iOS PWA state).
+ * A malformed/missing payload never throws past this handler; it always falls
+ * back to a generic notification rather than silently doing nothing, since a
+ * push event with no notification shown can get the browser to unsubscribe it.
+ */
+self.addEventListener("push", (e) => {
+  let data = {};
+  try {
+    if (e.data) data = e.data.json();
+  } catch {
+    data = { title: "Time to follow up", body: e.data ? e.data.text() : "" };
+  }
+  const title = data.title || "Time to follow up";
+  const base = self.registration.scope; // e.g. https://.../dsm-jobs/
+  const options = {
+    body: data.body || "A follow-up reminder is due.",
+    icon: `${base}icon-192.png`,
+    badge: `${base}icon-192.png`,
+    tag: data.tag || "followup",
+    data: { jobId: data.jobId || null, url: `${base}?view=apps` },
+  };
+  e.waitUntil(self.registration.showNotification(title, options));
+});
+
+/* Tapping the notification focuses an already-open app tab (so state isn't
+ * lost) or opens a new one. The open target honors the push payload's URL
+ * only when it resolves to this SW's own scope origin — a malformed payload
+ * can never hijack the tap into another site. */
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  const target = new URL("./", self.location.href).href;
+  const scopeOrigin = new URL(self.registration.scope).origin;
+  let target = new URL("./", self.location.href).href;
+  const dataUrl = e.notification.data && e.notification.data.url;
+  if (dataUrl) {
+    try {
+      const u = new URL(dataUrl, self.registration.scope);
+      if (u.origin === scopeOrigin) target = u.href;
+    } catch { /* keep the app root */ }
+  }
   e.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true })
       .then((clients) => {
         const sameApp = clients.find((client) => {
           try {
             const url = new URL(client.url);
-            return url.origin === self.location.origin && url.pathname.includes("/dsm-jobs/");
+            return url.origin === scopeOrigin && url.pathname.includes("/dsm-jobs/");
           } catch {
             return false;
           }

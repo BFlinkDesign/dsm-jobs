@@ -1634,8 +1634,8 @@ body::after {
 .bat-finger {
   fill: none;
   stroke: color-mix(in oklab, var(--route) 60%, var(--void));
-  stroke-width: 0.55;
-  opacity: 0.7;
+  stroke-width: 1.1;
+  opacity: 0.92;
 }
 .bat-torso,
 .bat-ear {
@@ -1646,12 +1646,15 @@ body::after {
   transform-origin: 58px 30px;
   animation: bat-flap-l 0.2s ease-in-out infinite;
 }
+/* Real bat wingbeats are asymmetric — a fast, powerful downstroke followed by
+   a slower recovery — not a symmetric butterfly pulse. The wing hits bottom
+   by ~32-34% of the cycle, then eases back up over the remaining ~66-68%. */
 @keyframes bat-flap-l {
-  0%   { transform: rotate(8deg)   scaleY(0.9); }
-  22%  { transform: rotate(-18deg) scaleY(1.0); }
-  50%  { transform: rotate(-44deg) scaleY(1.12); }
-  78%  { transform: rotate(-16deg) scaleY(1.0); }
-  100% { transform: rotate(8deg)   scaleY(0.9); }
+  0%   { transform: rotate(10deg)  scaleY(0.88); }
+  30%  { transform: rotate(-30deg) scaleY(1.05); }
+  34%  { transform: rotate(-46deg) scaleY(1.15); }
+  70%  { transform: rotate(-10deg) scaleY(0.98); }
+  100% { transform: rotate(10deg)  scaleY(0.88); }
 }
 
 /* Per-bat wingbeat rate — 4.3 to 6.1 beats/sec, no two in sync. */
@@ -1800,7 +1803,9 @@ body::after {
 }
 .bat-static .bat-wing-l {
   animation: none;
-  transform: rotate(-14deg) scaleY(1.04);
+  /* Mid-downstroke pose (matches the ~34% keyframe above) so the still
+     silhouette reads as a bat wing, not an ambiguous half-open shape. */
+  transform: rotate(-40deg) scaleY(1.12);
 }
 
 /* Dispersal — triggered by JS (stopTailorLoader) just before the result or
@@ -1847,6 +1852,7 @@ body::after {
   top: -1px;
   z-index: 2;
   display: flex;
+  flex-wrap: wrap;
   gap: var(--space-2);
   margin-top: var(--space-3);
   padding: 8px 0;
@@ -1854,7 +1860,10 @@ body::after {
     linear-gradient(180deg, var(--card) 78%, color-mix(in oklab, var(--card) 0%, transparent));
 }
 .tailor-result-actions .btn {
-  flex: 1 1 0;
+  /* 4 buttons now share this row (résumé download + notes download were one
+     button); flex-basis 45% wraps them 2-up on phone width instead of
+     squeezing 4 across into unreadable slivers. */
+  flex: 1 1 45%;
   padding-inline: 10px;
 }
 .tailor-error {

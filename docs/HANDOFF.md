@@ -1,5 +1,16 @@
 # Session handoff — 2026-06-22 (Goth Astro + audit fixes)
 
+> **Update 2026-07-02:** this doc predates PRs #162–#171 — several "Not done"
+> rows below have since shipped. **Web Push is DONE** (#164: `push.ts`,
+> `send-followup-push` cron sender + `push-followups.yml`, `push_subscriptions`
+> table, SW `push`/`notificationclick`). Also landed: action cockpit (#161/#162),
+> voice deploy + picker (#163/#165), job-grounded Rudy chat (#166), bat-swarm
+> tailor loader (#167), design brief (#168), jobs UX + fit filters (#169),
+> Supabase UA fix (#170), camera CI npm-deps fix (#171). Still genuinely open:
+> Resend SMTP, Google OAuth client, passkeys dashboard-enable (all operator),
+> Astro CSS lint gate + authed camera flows (CI). The end user works on an
+> **iPad** (Safari + installed PWA); the owner uses iOS.
+
 **Branch:** `cursor/goth-redesign-execute-9fce` (or current working branch)  
 **Live URL:** https://bflinkdesign.github.io/dsm-jobs/  
 **End user:** Lilly (phone/tablet only)  
