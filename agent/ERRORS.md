@@ -68,3 +68,15 @@ hits a failure adds an entry; every agent session reads this before starting.
   regression test using real leaked titles from the live feed**, and audit the
   published `jobs.json` (fetch via `git show origin/gh-pages:jobs.json` — the
   proxy blocks github.io but git reaches the branch) whenever filters change.
+
+### 6. Phantom "missing CSS link" build bug that wasn't
+- **Symptom:** built `web/index.html` had an inline `<style>` and an orphaned
+  hashed CSS file with no `<link>` — looked like a real regression, was blamed
+  on an unrelated code change.
+- **Root cause:** stale outDir debris. `outDir: ../web` is outside the Vite
+  project root, so builds don't empty `web/_astro`; a shared sandbox running
+  many incremental builds from intermediate states accumulates artifacts that
+  make the *latest* HTML look inconsistent with what's on disk.
+- **Rule:** before diagnosing any build-output anomaly, `rm -rf web/_astro`
+  and rebuild clean. CI is immune (fresh checkout); only long-lived sandboxes
+  hit this.
