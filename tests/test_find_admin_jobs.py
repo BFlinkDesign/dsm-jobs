@@ -1110,3 +1110,211 @@ def test_scam_shield_does_not_false_hide_market_research_coordinator():
         desc="Coordinate research projects, scheduling, reports.",
     )
     assert fa.scam_assessment(r, {})["level"] == "safe"
+
+
+# ── filter-leak regression (live feed, 2026-07-02) ──────────────────────
+# "Customer Service/Sales | Home Depot" (passed via "customer service", no
+# "sales" exclusion), "Home Health Intake & Admissions Nurse" (passed via
+# "intake"), "LPN - Nursing Home Caregiver (Day/Night) $33-$36/hr" (passed via
+# "caregiver" — the description-license-hint path didn't catch a bare LPN
+# title), and "Medical Records Clerk/Certified Medical Assistant (CMA)" (a
+# credential she doesn't hold) all leaked past the filters live. Zuzick &
+# Associates and Vector Marketing are MLM/commission recruiting funnels
+# ("Customer Service Sales Representative" / Cutco door-to-door sales) —
+# blocklisted by employer name rather than by title, since the titles
+# themselves read as ordinary customer-service jobs.
+
+
+def test_title_excluded_drops_live_leak_titles():
+    for title in (
+        "Customer Service/Sales",
+        "Home Health Intake & Admissions Nurse",
+        "LPN - Nursing Home Caregiver (Day/Night) $33-$36/hr",
+        "Medical Records Clerk/Certified Medical Assistant (CMA)",
+        "RN Scheduler",
+    ):
+        assert fa.title_excluded(title) is True, title
+    # "Salesforce" is its own exclude entry — confirm the new bare "sales"
+    # word-boundary match doesn't need it to still work (no boundary between
+    # "sales" and "force" inside "salesforce", so it wouldn't match on "sales"
+    # alone — the "salesforce" entry is what actually catches this).
+    assert fa.title_excluded("Salesforce Administrator") is True
+
+
+def test_title_excluded_keeps_wanted_titles():
+    for title in (
+        "Nursing Home Receptionist",  # AT a nursing home, not a nursing role
+        "Customer Service Representative",
+        "Caregiver (CNA Preferred) - Flexible Schedule",  # bare CNA stays untouched
+        "Patient Service Representative",
+    ):
+        assert fa.title_excluded(title) is False, title
+
+
+def test_passes_filters_drops_live_leak_title_end_to_end():
+    # Exercise the same title through the full row pipeline (not just
+    # title_excluded in isolation) the way the live scan actually sees it.
+    row = fa.normalize({**_job(None, None),
+                        "title": "LPN - Nursing Home Caregiver (Day/Night) $33-$36/hr"}, "local")
+    assert fa._passes_filters(row) is False
+
+
+def test_scam_blocklist_hides_zuzick_and_vector_marketing(monkeypatch):
+    blocklist_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                  "scam_blocklist.txt")
+    loaded = fa.load_blocklist(blocklist_path)
+    assert "zuzick" in loaded
+    assert "vector marketing" in loaded
+    monkeypatch.setattr(fa, "BLOCKLIST", loaded)
+    for company in ("Zuzick & Associates", "Vector Marketing"):
+        r = _row(title="Customer Service Sales Representative", company=company, source="local")
+        assert fa.scam_assessment(r, {})["level"] == "scam", company
+
+
+# ── direct-apply routing (Fix 2, 2026-07-02) ────────────────────────────
+# Route "Apply" around an aggregator interstitial (Adzuna/Jooble) straight to
+# the employer's real ATS application when the redirect resolves to one.
+
+
+def test_direct_ats_host_matcher_is_subdomain_safe():
+    assert fa._is_direct_ats_host("boards.greenhouse.io") is True
+    assert fa._is_direct_ats_host("jobs.lever.co") is True
+    assert fa._is_direct_ats_host("acme.myworkdayjobs.com") is True
+    assert fa._is_direct_ats_host("acme.wd1.myworkday.com") is True
+    assert fa._is_direct_ats_host("jobs.ashbyhq.com") is True
+    assert fa._is_direct_ats_host("acme.applytojob.com") is True
+    # A host that merely CONTAINS an ATS name as a substring must NOT match —
+    # otherwise an attacker-registered lookalike domain could pass itself off
+    # as a trusted direct-apply target.
+    assert fa._is_direct_ats_host("evil-greenhouse.io.attacker.com") is False
+    assert fa._is_direct_ats_host("greenhouse.io.attacker.com") is False
+    assert fa._is_direct_ats_host("notgreenhouse.io") is False
+    assert fa._is_direct_ats_host("www.adzuna.com") is False
+    assert fa._is_direct_ats_host("") is False
+
+
+def test_resolve_direct_url_follows_redirect_to_trusted_ats(monkeypatch):
+    calls = {"methods": []}
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def geturl(self):
+            return "https://boards.greenhouse.io/acme/jobs/123"
+
+    def fake_urlopen(req, timeout=8):
+        calls["methods"].append(req.get_method())
+        assert req.headers.get("User-agent")  # explicit UA sent, not urllib default
+        return FakeResp()
+
+    monkeypatch.setattr(fa.urllib.request, "urlopen", fake_urlopen)
+    result = fa.resolve_direct_url("https://www.adzuna.com/land/ad/123")
+    assert result == "https://boards.greenhouse.io/acme/jobs/123"
+    assert calls["methods"] == ["HEAD"]  # HEAD succeeded -- no GET fallback needed
+
+
+def test_resolve_direct_url_falls_back_to_get_when_head_fails(monkeypatch):
+    calls = {"methods": []}
+
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def geturl(self):
+            return "https://boards.greenhouse.io/acme/jobs/123"
+
+    def fake_urlopen(req, timeout=8):
+        calls["methods"].append(req.get_method())
+        if req.get_method() == "HEAD":
+            raise urllib.error.HTTPError(req.full_url, 405, "Method Not Allowed", {}, None)
+        return FakeResp()
+
+    monkeypatch.setattr(fa.urllib.request, "urlopen", fake_urlopen)
+    result = fa.resolve_direct_url("https://www.adzuna.com/land/ad/123")
+    assert result == "https://boards.greenhouse.io/acme/jobs/123"
+    assert calls["methods"] == ["HEAD", "GET"]
+
+
+def test_resolve_direct_url_rejects_untrusted_final_host(monkeypatch):
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def geturl(self):
+            return "https://not-an-ats.example/apply/1"
+
+    monkeypatch.setattr(fa.urllib.request, "urlopen", lambda req, timeout=8: FakeResp())
+    assert fa.resolve_direct_url("https://www.adzuna.com/land/ad/123") is None
+
+
+def test_resolve_direct_url_rejects_non_https_final_scheme(monkeypatch):
+    class FakeResp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def geturl(self):
+            return "http://boards.greenhouse.io/acme/jobs/123"
+
+    monkeypatch.setattr(fa.urllib.request, "urlopen", lambda req, timeout=8: FakeResp())
+    assert fa.resolve_direct_url("https://www.adzuna.com/land/ad/123") is None
+
+
+def test_resolve_direct_url_is_fail_soft_on_any_exception(monkeypatch):
+    def _boom(req, timeout=8):
+        raise OSError("network is down")
+
+    monkeypatch.setattr(fa.urllib.request, "urlopen", _boom)
+    assert fa.resolve_direct_url("https://www.adzuna.com/land/ad/123") is None
+    assert fa.resolve_direct_url("") is None
+
+
+def test_dedupe_prefers_direct_ats_row_over_aggregator_row():
+    # Same underlying opening surfaced two ways: once via an Adzuna redirect,
+    # once via a Greenhouse board — same company/title/location, but the URLs
+    # live on completely different domains so only the (company, title,
+    # location) signal links them. The direct-ATS row must win even though
+    # it's the OLDER of the two (a direct link beats an interstitial).
+    adzuna_row = {
+        "id": "a1", "title": "Administrative Assistant", "company": "Acme Corp",
+        "location": "Des Moines, IA", "created": "2026-07-01",
+        "url": "https://www.adzuna.com/land/ad/999",
+    }
+    greenhouse_row = {
+        "id": "a2", "title": "Administrative Assistant", "company": "Acme Corp",
+        "location": "Des Moines, IA", "created": "2026-06-15",
+        "url": "https://boards.greenhouse.io/acme/jobs/456",
+    }
+    rows, collapsed = fa.dedupe_rows([adzuna_row, greenhouse_row])
+    assert collapsed == 1 and len(rows) == 1
+    assert rows[0]["id"] == "a2"
+
+    # Order shouldn't matter -- same result the other way around.
+    rows2, collapsed2 = fa.dedupe_rows([greenhouse_row, adzuna_row])
+    assert collapsed2 == 1 and len(rows2) == 1
+    assert rows2[0]["id"] == "a2"
+
+
+def test_mock_pipeline_never_invokes_direct_resolver(monkeypatch):
+    # --mock must never touch the network. collect_mock() doesn't call
+    # collect() at all, so this proves it structurally: if resolve_direct_url
+    # were ever wired into the mock path, this test would blow up instead of
+    # silently passing.
+    def _must_not_be_called(*_a, **_k):
+        raise AssertionError("resolve_direct_url must never run under --mock")
+
+    monkeypatch.setattr(fa, "resolve_direct_url", _must_not_be_called)
+    rows = fa.collect_mock()
+    assert len(rows) > 0  # sanity: the mock pipeline still produced rows

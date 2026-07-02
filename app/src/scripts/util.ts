@@ -107,6 +107,4 @@ export function relativePosted(posted: string): string {
 
 const SKULL = `<svg class="skull-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M12 2c-3.5 0-6 2.8-6 6.5 0 2 .8 3.5 2 4.7V16h8v-2.8c1.2-1.2 2-2.7 2-4.7C18 4.8 15.5 2 12 2z"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="15" cy="9" r="1.2" fill="currentColor"/><path d="M9 18v3M12 18v3M15 18v3"/></svg>`;
 
-const BAT = `<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C7 6 3 7 1 6c1 4 5 10 11 11 6-1 10-7 11-11-2 1-6 0-11-4z"/></svg>`;
-
-export { SKULL, BAT };
+export { SKULL };

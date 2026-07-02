@@ -23,6 +23,7 @@ import {
   TAILOR_LINES,
   THINKING_LINES,
 } from "./rudy-sayings";
+import { buildDocxBlob } from "./docx";
 import { extractResumeFile } from "./resume";
 import { hasActivePushSubscription, pushPermission, pushSupported, subscribeToPush } from "./push";
 import { getState, loadLocal, migrateLocalV1, patchState } from "./store";
@@ -2359,6 +2360,24 @@ function isPasswordRecoveryHash(): boolean {
   return params.get("type") === "recovery";
 }
 
+/** Supabase redirects an expired or already-used recovery/magic-link click
+ * back here as `#error=...&error_code=...&error_description=...` — it does
+ * NOT fire a PASSWORD_RECOVERY (or any distinct) auth event for this case, so
+ * without an explicit check the tab lands on the plain sign-in screen with no
+ * feedback at all. That silence is exactly how "I changed my password" turns
+ * into "the new password says it's wrong": nothing was ever saved because the
+ * link had already been consumed (a common cause is an email provider's
+ * link-prefetch/security scanner visiting the one-time link before she does),
+ * and she has no way to know that from the UI. */
+function authHashError(): string | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash.replace(/^#/, "");
+  if (!hash) return null;
+  const params = new URLSearchParams(hash);
+  if (!params.get("error") && !params.get("error_code") && !params.get("error_description")) return null;
+  return params.get("error_description") || params.get("error_code") || params.get("error");
+}
+
 function renderCallButton(): void {
   const btn = $("#call-btn");
   if (!btn) return;
@@ -2654,17 +2673,26 @@ function tailorLabel(job: Job): string {
 // layers (far/mid/near) each get their own flight-path + flutter + flap timing
 // (see app.css `.bat-a`..`.bat-f`) so nothing reads as one sprite cloned in a
 // loop. Decorative only: aria-hidden, pointer-events:none, never intercepts taps.
+// Wing root ("shoulder") sits at (58,30) so the CSS transform-origin lines up
+// for both the left wing and its mirrored twin. The wrist (36,9) is where the
+// arm ends and four fingers fan out to tips T1..T4. The leading edge sweeps
+// shoulder -> wrist -> a sharp wingtip (T1, 5,20): each scallop's control
+// point is pulled back close to the WRIST itself (not just "toward the
+// body"), so the trailing edge swings in tight to the arm between fingers
+// before bowing back out to the next tip — that's what puts a hard, sharp
+// angle at every cusp instead of a smooth rounded lobe (the butterfly tell).
+// The last segment closes the membrane back to the shoulder along the body.
 const BAT_WING_MARKUP =
-  `<path class="bat-membrane" d="M58,30 Q46,10 36,8 Q40,20 40,20 Q26,10 14,14 Q24,26 22,30 Q14,30 10,34 Q18,38 20,42 Q16,48 18,50 Q30,44 34,46 Q44,42 48,38 Q54,34 58,30 Z"/>` +
-  `<path class="bat-finger" d="M58,30 L36,8 M58,30 L14,14 M58,30 L10,34 M58,30 L18,50"/>`;
+  `<path class="bat-membrane" d="M58,30 Q46,12 36,9 Q18,8 5,20 Q28,16 12,38 Q34,26 20,48 Q42,36 32,55 Q50,50 58,30 Z"/>` +
+  `<path class="bat-finger" d="M36,9 L5,20 M36,9 L12,38 M36,9 L20,48 M36,9 L32,55"/>`;
 
 function batSvg(): string {
   return `<svg class="bat-svg" viewBox="0 0 120 64" aria-hidden="true" focusable="false">
     <g class="bat-wing bat-wing-l">${BAT_WING_MARKUP}</g>
     <g transform="translate(120,0) scale(-1,1)"><g class="bat-wing bat-wing-l">${BAT_WING_MARKUP}</g></g>
-    <path class="bat-ear" d="M54,22 L50,9 L59,20 Z"/>
-    <path class="bat-ear" d="M66,22 L70,9 L61,20 Z"/>
-    <ellipse class="bat-torso" cx="60" cy="31" rx="5.5" ry="9.5"/>
+    <path class="bat-ear" d="M56,20 L52,9 L60,18 Z"/>
+    <path class="bat-ear" d="M64,20 L68,9 L60,18 Z"/>
+    <ellipse class="bat-torso" cx="60" cy="29" rx="4" ry="6.5"/>
   </svg>`;
 }
 
@@ -2997,7 +3025,8 @@ function renderTailorResult(job: Job, data: TailorResult): void {
     </div>
     <div class="tailor-result-actions">
       <button type="button" class="btn btn-primary" data-copy="both">Copy both</button>
-      <button type="button" class="btn btn-ghost" data-download>Download</button>
+      <button type="button" class="btn btn-ghost" data-download>Download résumé (.docx)</button>
+      <button type="button" class="btn btn-ghost" data-download-notes>Download notes (.txt)</button>
       <button type="button" class="btn btn-ghost" data-save-pack>${saved ? "Saved pack" : "Save application pack"}</button>
     </div>
     <div class="tailor-block">
@@ -3042,11 +3071,26 @@ function renderTailorResult(job: Job, data: TailorResult): void {
       btn.classList.add("is-done");
     }
   });
+  const slug = job.company.replace(/\W+/g, "-").slice(0, 30);
+  // The résumé itself — a file an employer receives, not a DOM node. It goes
+  // in raw (esc() is for HTML rendering, not file bytes) as a .docx, because
+  // the City of Des Moines portal (and most ATS upload widgets) reject
+  // .txt — .doc/.docx/.pdf/etc. only. Cover note / follow-up / ATS notes are
+  // Rudy's coaching, not part of the résumé an employer opens.
   body.querySelectorAll("[data-download]").forEach((btn) => btn.addEventListener("click", () => {
+    const blob = buildDocxBlob(data.resume);
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `${slug}-resume.docx`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast("Saved to Files ▸ Downloads ✦");
+  }));
+  body.querySelectorAll("[data-download-notes]").forEach((btn) => btn.addEventListener("click", () => {
     const blob = new Blob([downloadText], { type: "text/plain;charset=utf-8" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `${job.company.replace(/\W+/g, "-").slice(0, 30)}-resume.txt`;
+    a.download = `${slug}-notes.txt`;
     a.click();
     URL.revokeObjectURL(a.href);
     toast("Downloaded ✦");
@@ -3325,15 +3369,15 @@ async function boot(): Promise<void> {
       setRecoverMsg(friendlyAuthError(err), true);
       return;
     }
-    setRecoverMsg("Done! You're signed in.");
+    setRecoverMsg("Password changed ✦ Now open your dsm-jobs app (not this tab) and sign in with it.");
     if (window.location.hash) {
       history.replaceState(null, "", window.location.pathname + window.location.search);
     }
     setTimeout(async () => {
       closeAuth();
       await refreshAuth();
-      toast("Password updated — welcome back");
-    }, 900);
+      toast("Password changed — go back to your app and sign in with it");
+    }, 2200);
   });
   $("#auth-signin")?.addEventListener("click", async () => {
     const sb = getClient();
@@ -3686,6 +3730,15 @@ async function boot(): Promise<void> {
       const back = $("#auth-modal");
       if (back) back.hidden = false;
       showAuthRecover();
+    } else {
+      const hashErr = authHashError();
+      if (hashErr) {
+        const back = $("#auth-modal");
+        if (back) back.hidden = false;
+        showAuthForgot();
+        setForgotMsg(friendlyAuthError({ message: hashErr }), true);
+        history.replaceState(null, "", window.location.pathname + window.location.search);
+      }
     }
   }
   await refreshAuth();
