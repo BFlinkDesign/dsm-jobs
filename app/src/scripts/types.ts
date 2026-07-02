@@ -75,6 +75,22 @@ export function defaultFilters(): FilterPrefs {
   };
 }
 
+// Rudy's read-aloud voice presets — mirrors the server-side allowlist in
+// supabase/functions/voice/index.ts (VOICE_PRESETS). Client picks a short id
+// only; the server maps it to actual provider params, never the reverse.
+export const RUDY_VOICE_DEFAULT = "warm";
+export const RUDY_VOICE_OPTIONS: Array<{ id: string; label: string }> = [
+  { id: "warm", label: "Warm" },
+  { id: "bright", label: "Bright" },
+  { id: "calm", label: "Calm" },
+  { id: "spark", label: "Spark" },
+];
+
+export function normalizeRudyVoice(raw: unknown): string {
+  const id = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return RUDY_VOICE_OPTIONS.some((o) => o.id === id) ? id : RUDY_VOICE_DEFAULT;
+}
+
 export type AppliedEntry = {
   t: string;   // job title (captured at apply time so log survives job leaving feed)
   c: string;   // company
@@ -142,6 +158,7 @@ export type AppState = {
   };
   commuteRadius: number | null;
   coachOff: boolean;
+  rudyVoice: string;                      // read-aloud preset id (warm|bright|calm|spark); follows her across devices
 };
 
 export type ViewName = "jobs" | "today" | "apps" | "corner" | "help" | "money";

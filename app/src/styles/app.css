@@ -1179,6 +1179,29 @@ body::after {
   background: color-mix(in oklab, var(--accent) 26%, transparent);
   color: var(--accent);
 }
+.rudy-voice-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: var(--space-2);
+}
+.rudy-voice-opt {
+  flex: 1 1 auto;
+  min-width: 64px;
+  padding: 6px 10px;
+  border-radius: var(--radius-full);
+  border: 1.5px solid var(--line);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  cursor: pointer;
+}
+.rudy-voice-opt[aria-pressed="true"] {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent), transparent 42%);
+  background: color-mix(in srgb, var(--accent), transparent 88%);
+}
 .rudy-voice-status {
   margin: 4px 0 0;
   min-height: 18px;

@@ -75,7 +75,7 @@ def test_rudy_voice_contract_uses_chatterbox_default_without_stale_client_copy()
     voice_section = cfg.split("[functions.voice]", 1)[1].split("[", 1)[0]
     assert "verify_jwt = true" in voice_section
     assert 'if (env("REPLICATE_API_TOKEN")) return "chatterbox";' in voice
-    assert 'case "chatterbox": return await ttsChatterbox(clean);' in voice
+    assert 'case "chatterbox": return await ttsChatterbox(clean, voiceId);' in voice
     assert 'default: return json({ unconfigured: true });' in voice
     assert "edgeSpeak" in app
     assert "syncVoiceIdleStatus" in app
@@ -88,6 +88,42 @@ def test_rudy_voice_contract_uses_chatterbox_default_without_stale_client_copy()
     assert "ElevenLabs" not in app
     assert "ElevenLabs" not in page
     assert "ElevenLabs" not in cfg
+
+
+def test_rudy_voice_picker_is_serverside_allowlisted_and_hidden_until_voice_on():
+    app = _read("app/src/scripts/app.ts")
+    page = _read("app/src/pages/index.astro")
+    voice = _read("supabase/functions/voice/index.ts")
+    types_ts = _read("app/src/scripts/types.ts")
+
+    # The picker is a device+account preference (rides AppState/profile like
+    # commuteRadius/coachOff), not a new opt-in gate — but it must still start
+    # hidden in markup, matching JS only revealing it once read-aloud is on.
+    assert 'id="rudy-voice-picker"' in page
+    assert 'role="group" aria-label="Rudy\'s voice" hidden' in page
+    for opt in ("warm", "bright", "calm", "spark"):
+        assert f'data-voice="{opt}"' in page
+
+    # Server allowlist: `voice` is matched against VOICE_PRESETS keys only —
+    # this is what stops the client from ever injecting a raw provider value.
+    assert "VOICE_PRESETS" in voice
+    assert "function resolveVoiceId" in voice
+    assert 'const DEFAULT_VOICE = "warm";' in voice
+    for opt in ("warm:", "bright:", "calm:", "spark:"):
+        assert opt in voice
+    # Byte-compatible when `voice` is absent: the default path still reads the
+    # exact same env keys/defaults it always did.
+    assert 'exaggeration: num("CHATTERBOX_EXAGGERATION", 0.5),' in voice
+    assert 'env("ELEVENLABS_VOICE_ID") || VOICE_PRESETS[DEFAULT_VOICE].elevenlabsVoiceId' in voice
+
+    # Client: shared allowlist/normalizer, cache keyed on voice+text (so
+    # switching presets never replays stale audio), and a throttled preview.
+    assert "export function normalizeRudyVoice" in types_ts
+    assert "rudyVoice: string" in types_ts
+    assert "`${voiceId}::${text}`" in app
+    assert "voicePreviewBusy" in app
+    assert "async function previewVoice" in app
+    assert "body: { mode: \"tts\", text, voice: voiceId }" in app
 
 
 def test_rudy_thinking_bubbles_are_bound_by_element_reference():

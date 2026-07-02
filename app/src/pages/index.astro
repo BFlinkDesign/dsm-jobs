@@ -294,6 +294,15 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
         </button>
         <span class="rudy-listen" id="rudy-listen" hidden>● Listening…</span>
       </div>
+      <!-- Voice picker: only meaningful once read-aloud is on (JS shows/hides
+           via [hidden]; wired in app.ts). Tapping an option both selects it
+           and plays a short preview line, throttled to one in flight. -->
+      <div class="rudy-voice-picker" id="rudy-voice-picker" role="group" aria-label="Rudy's voice" hidden>
+        <button type="button" class="rudy-voice-opt" data-voice="warm" aria-pressed="true">Warm</button>
+        <button type="button" class="rudy-voice-opt" data-voice="bright" aria-pressed="false">Bright</button>
+        <button type="button" class="rudy-voice-opt" data-voice="calm" aria-pressed="false">Calm</button>
+        <button type="button" class="rudy-voice-opt" data-voice="spark" aria-pressed="false">Spark</button>
+      </div>
       <p class="rudy-voice-status" id="rudy-voice-status" role="status" aria-live="polite">Voice is off.</p>
       <p class="rudy-crisis">Need help now? <a href="tel:988"><b>988</b></a> (call/text, 24/7) · Your Life Iowa <a href="tel:8555818111">855-581-8111</a> · Iowa Warm Line <a href="tel:8447759276">844-775-9276</a>. Always free.</p>
     </div>

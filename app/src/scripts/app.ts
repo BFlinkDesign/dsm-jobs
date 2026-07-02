@@ -1,4 +1,5 @@
 import type { AppState, ApplicationPack, ApplicationStatus, AtsAlignment, FilterPrefs, Job, Meta, Resource, ResourceHub, ResumeDocument, ViewName } from "./types";
+import { normalizeRudyVoice, RUDY_VOICE_DEFAULT } from "./types";
 import {
   appendChatToLocal,
   autosave,
@@ -173,9 +174,15 @@ function snoozedNow(id: string): boolean {
 // voice when the function or key is not set up yet. Repeated lines are cached
 // so they do not re-bill.
 let voiceUnconfigured = false;             // set once the function reports no key
-const ttsCache = new Map<string, string>(); // text -> object URL
+// Keyed on "<voiceId>::<text>" so switching presets never replays stale audio
+// recorded under a different voice for the same line.
+const ttsCache = new Map<string, string>();
 let rudyAudio: HTMLAudioElement | null = null;
 let voiceStatusEl: HTMLElement | null = null;
+let rudyVoiceId = RUDY_VOICE_DEFAULT;      // her chosen read-aloud preset — synced to profile + localStorage
+let voicePreviewBusy = false;               // one in-flight preview at a time (cost guard)
+const RUDY_VOICE_PREVIEW_TEXT = "Hi, I'm Rudy. This is what I sound like.";
+let voicePickerEl: HTMLElement | null = null;
 
 function setVoiceStatus(kind: string, text: string): void {
   if (!voiceStatusEl) voiceStatusEl = $("#rudy-voice-status");
@@ -196,6 +203,23 @@ function syncVoiceIdleStatus(): void {
   }
 }
 
+/** Choose Rudy's read-aloud preset. Visible only while read-aloud is ON — it
+ * never coaxes her into turning that on, it just appears once she already
+ * has. Selection lives in profile.rudyVoice, riding the same AppState
+ * (localStorage) + Supabase profile-blob sync as commuteRadius/coachOff, so
+ * it follows her across devices. Re-callable after a profile pull so a
+ * choice made on another device shows up here too. */
+function syncVoicePicker(): void {
+  if (!voicePickerEl) voicePickerEl = $("#rudy-voice-picker");
+  rudyVoiceId = normalizeRudyVoice(getState().rudyVoice);
+  if (!voicePickerEl) return;
+  voicePickerEl.hidden = !speakOn;
+  voicePickerEl.querySelectorAll<HTMLButtonElement>(".rudy-voice-opt").forEach((btn) => {
+    const on = btn.dataset.voice === rudyVoiceId;
+    btn.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+}
+
 function stopRudyVoice(): void {
   try { rudyAudio?.pause(); } catch { /* no-op */ }
   rudyAudio = null;
@@ -203,7 +227,7 @@ function stopRudyVoice(): void {
 }
 
 /** Try the server voice. Returns false if unavailable (caller falls back). */
-async function edgeSpeak(text: string): Promise<boolean> {
+async function edgeSpeak(text: string, voiceId: string = rudyVoiceId): Promise<boolean> {
   const sb = getClient();
   if (!sb) {
     setVoiceStatus("fallback", "Sign in to use Rudy's real voice. Browser voice can still try.");
@@ -214,10 +238,11 @@ async function edgeSpeak(text: string): Promise<boolean> {
     return false;
   }
   try {
-    let url = ttsCache.get(text);
+    const cacheKey = `${voiceId}::${text}`;
+    let url = ttsCache.get(cacheKey);
     if (!url) {
       setVoiceStatus("checking", "Checking Rudy's real voice...");
-      const { data, error } = await sb.functions.invoke("voice", { body: { mode: "tts", text } });
+      const { data, error } = await sb.functions.invoke("voice", { body: { mode: "tts", text, voice: voiceId } });
       if (error) {
         setVoiceStatus("fallback", "Voice service stumbled. Browser voice is still ready.");
         return false;
@@ -233,7 +258,7 @@ async function edgeSpeak(text: string): Promise<boolean> {
       }
       const bytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
       url = URL.createObjectURL(new Blob([bytes], { type: data.mime || "audio/mpeg" }));
-      ttsCache.set(text, url);
+      ttsCache.set(cacheKey, url);
     }
     stopRudyVoice();
     const a = new Audio(url);
@@ -272,6 +297,20 @@ function speakText(text: string): void {
     const ok = await edgeSpeak(text);
     if (!ok) synthSpeak(text);
   })();
+}
+
+/** Preview one voice preset with a short fixed line. Throttled to one
+ * in-flight preview at a time so tapping around the picker can't spam the
+ * provider — matches the cost-guard philosophy used elsewhere in this file. */
+async function previewVoice(voiceId: string): Promise<void> {
+  if (voicePreviewBusy) return;
+  voicePreviewBusy = true;
+  try {
+    const ok = await edgeSpeak(RUDY_VOICE_PREVIEW_TEXT, voiceId);
+    if (!ok) synthSpeak(RUDY_VOICE_PREVIEW_TEXT);
+  } finally {
+    voicePreviewBusy = false;
+  }
 }
 
 /** How strong a lead is FOR HER — her quiz answers weigh most, then remote,
@@ -2845,6 +2884,7 @@ async function refreshAuth(): Promise<void> {
     await drainPendingSaves();
     await updateSyncBanner();
     commuteMax = getState().commuteRadius;
+    syncVoicePicker();
     rudyHistoryLoaded = false;
     if (!wasAuthed) offerPasskeyNudge(user.id);
   } else {
@@ -3263,11 +3303,27 @@ async function boot(): Promise<void> {
   const spkBtn = $("#rudy-spk");
   const spkState = $("#rudy-spk-state");
   voiceStatusEl = $("#rudy-voice-status");
+  voicePickerEl = $("#rudy-voice-picker");
+  syncVoicePicker();
+  voicePickerEl?.querySelectorAll<HTMLButtonElement>(".rudy-voice-opt").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const id = normalizeRudyVoice(btn.dataset.voice);
+      if (id !== rudyVoiceId) {
+        rudyVoiceId = id;
+        patchState((s) => { s.rudyVoice = id; });
+        autosave();
+        syncVoicePicker();
+      }
+      if (speakOn) void previewVoice(id);
+    });
+  });
+
   const syncSpeaker = (): void => {
     if (!spkBtn) return;
     spkBtn.setAttribute("aria-pressed", speakOn ? "true" : "false");
     if (spkState) spkState.textContent = speakOn ? "On" : "Off";
     syncVoiceIdleStatus();
+    syncVoicePicker();
   };
   if (spkBtn) {
     syncSpeaker();
