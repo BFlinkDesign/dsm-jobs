@@ -86,6 +86,52 @@ LPN leak: add "current lpn", "lpn in good standing", "iowa lpn" style phrasings
 with softener-window tests (don't drop "CNA preferred but not required").
 **Gate:** existing softener tests stay green.
 
+## P0-3 · Job import (paste a job from anywhere → real card)
+**Status:** briefed, build was killed by the account spend limit mid-run.
+**Spec:** new edge function `supabase/functions/job-import` cloned from the
+resume-tailor pattern (verify_jwt=true + getUser(), origin-locked CORS,
+spend-cap, json_schema LLM output). Input `{url?|text?}`; URL mode fetches
+server-side behind a strict SSRF guard (https only, no IP-literal hosts,
+1.5MB/10s caps); extraction schema forbids invented pay (`pay_stated` bool —
+invariant #1 extends to imports); the function ports SCAM_HARD_FLAGS +
+scam_blocklist names and returns `{rejected:true}` with NO job data on a hit
+(invariant #3: removed, not labeled). Client: "Add a job you found ✦" on the
+Jobs tab → modal with paste button (no auto clipboard read) → preview card →
+saves to `state.importedJobs` synced via the profile blob; renders through
+the normal card path with a "You found this one" marker; esc()/safeUrl()
+everywhere; undo/delete. Deno tests (blocklist reject, gift-card reject,
+clean pass, stated/unstated pay) + static guards.
+
+## P0-4 · Alignment engine (Rudy interview + ignore-that-learns)
+**Status:** briefed, build was killed by the account spend limit mid-run.
+**Spec:** deterministic, transparent, NO ML. (a) Chips-first skippable
+resumable interview (~6 steps: commute ceiling, categories, schedule
+dealbreakers, stated-pay floor, never-want free text) hosted in Rudy's voice
+→ `preferences` in AppState + profile blob. (b) "Not for me" on cards → one
+why-chip (Too far / Wrong kind / Pay / Schedule / Just no); 1 = hint, 3 same
+reason+dimension = auto-rule with visible dismissible notice + per-rule undo
+and a "What Rudy's learned" list (Corner tab) with reset-all. Rules must
+never bury "Pay not listed" rows (invariant #2) and never touch the scam
+shield. Extract pure logic to `app/src/scripts/alignment.ts` for testability.
+
+## P1-4 · Design overhaul — "professional spooky, components SCREAM real"
+**Status:** direction set; execution needs a fresh session (spend limit).
+**Direction (from the design lead pass):** the app's gravity well is
+"near-black + one neon accent" — escape it with *materials*, not more color:
+candlelit warmth layered over deep blacks (2-3 stacked translucent glows, not
+flat #hex), engraved-line ornament on cards (0.5px double-rule borders like
+mourning jewelry), moth-wing iridescence ONLY on the signature element (the
+bat swarm + one accent per view), real texture (subtle paper/vellum grain on
+panels), type with actual display presence (a serif display for headings —
+self-hosted WOFF2, LCP ≤2.5s budget). Motion: one easing family, 150-250ms,
+reduced-motion clean. Every DESIGN-BRIEF acceptance criterion is a gate;
+camera + screenshots at 390px, WCAG AA proven by numbers.
+**WebGL/Three.js verdict (owner asked):** NO for this app — R3F/three.js is
+~150KB+ gzipped before a single scene, iPad Safari WebGL contexts die under
+memory pressure in PWAs, and the audience is a stressed user on battery.
+Frontier-feel here = materials, texture, and motion discipline (above), which
+cost ~0KB. Reconsider only for an optional easter-egg scene, lazy-loaded.
+
 ## Operator-only (no code — the owner does these)
 1. **Email templates (do first — powers the 6-digit codes):** Dashboard →
    Authentication → Email Templates → paste `docs/email-templates/magic-link.html`
