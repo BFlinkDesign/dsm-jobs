@@ -1,0 +1,81 @@
+name: Follow-up Web Push (scheduled)
+
+# Drives the send-followup-push Supabase edge function on a schedule so a
+# due 3/5/7-day follow-up reminder arrives as a real OS push notification even
+# when her PWA is fully closed (the in-app Notification API only fires while
+# the app is open/foregrounded — see CLAUDE.md "Web Push for follow-ups").
+#
+# This workflow ONLY calls the edge function over HTTPS; it never touches the
+# database directly and never needs the Supabase service key locally. All the
+# secrets that matter (VAPID keys, SUPABASE_SERVICE_ROLE_KEY) live as Supabase
+# function secrets (see supabase/functions/send-followup-push/index.ts header).
+# This workflow's own secret (PUSH_CRON_SECRET) only proves the CALL is
+# authorized — it never grants data access by itself.
+#
+# Self-disabling: if SUPABASE_URL or PUSH_CRON_SECRET repo secrets are unset,
+# the job step below is skipped (not a failure) — same pattern as scan.yml's
+# "Skip if Adzuna key not configured" gate.
+
+on:
+  schedule:
+    - cron: "0 14 * * *"   # 14:00 UTC daily (~8-9am Central, after the daily scan)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # open an issue if the push call keeps failing (self-repair signal)
+
+jobs:
+  push-followups:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Skip if not configured
+        id: gate
+        shell: bash
+        run: |
+          if [ -z "${{ secrets.SUPABASE_URL }}" ] || [ -z "${{ secrets.PUSH_CRON_SECRET }}" ]; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SUPABASE_URL / PUSH_CRON_SECRET not set - skipping (not a failure)."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Call send-followup-push
+        if: steps.gate.outputs.run == 'true'
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          PUSH_CRON_SECRET: ${{ secrets.PUSH_CRON_SECRET }}
+        run: |
+          code=$(curl -sS -o /tmp/resp.json -w '%{http_code}' -m 30 -X POST \
+            "${SUPABASE_URL}/functions/v1/send-followup-push" \
+            -H "x-cron-secret: ${PUSH_CRON_SECRET}" \
+            -H "Content-Type: application/json")
+          echo "response body:"; cat /tmp/resp.json; echo
+          echo "HTTP $code"
+          if [ "$code" -ge 300 ]; then
+            echo "::error::send-followup-push returned HTTP $code"
+            exit 1
+          fi
+
+      - name: Open/refresh an issue if the push call failed
+        if: failure()
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const body = `The scheduled follow-up push call failed at ${new Date().toISOString()}. ` +
+              `In-app Notification fallback still works while the app is open.\n\n` +
+              `Run: ${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const title = "🔕 Follow-up push delivery failing";
+            const open = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo, state: "open", labels: "push-followups" });
+            if (open.data.length) {
+              await github.rest.issues.createComment({ owner: context.repo.owner,
+                repo: context.repo.repo, issue_number: open.data[0].number, body });
+            } else {
+              const created = await github.rest.issues.create({ owner: context.repo.owner,
+                repo: context.repo.repo, title, body, labels: ["push-followups", "outage", "automated"] });
+              await github.rest.issues.addLabels({ owner: context.repo.owner,
+                repo: context.repo.repo, issue_number: created.data.number, labels: ["auto-fix"] });
+            }

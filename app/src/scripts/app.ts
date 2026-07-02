@@ -23,6 +23,7 @@ import {
   THINKING_LINES,
 } from "./rudy-sayings";
 import { extractResumeFile } from "./resume";
+import { hasActivePushSubscription, pushPermission, pushSupported, subscribeToPush } from "./push";
 import { getState, loadLocal, migrateLocalV1, patchState } from "./store";
 import {
   SKULL,
@@ -59,6 +60,12 @@ const scrollByView: Partial<Record<ViewName, number>> = {};
 let jobsShellReady = false;
 let pullStartY = 0;
 let pullReady = false;
+// Web Push (soft add-on to the existing in-app Notification reminders — never
+// required for the app to be usable). Populated at boot from portal.json;
+// empty when the operator hasn't set VAPID_PUBLIC_KEY, which keeps the whole
+// feature invisible rather than showing a broken/disabled control.
+let vapidPublicKey = "";
+let pushSubscribed = false;
 let pullRefreshing = false;
 let feedLoadFailed = false;
 let rudyHistoryLoaded = false;
@@ -966,6 +973,24 @@ function setView(v: ViewName): void {
   window.scrollTo({ top: y, behavior: y > 0 ? "auto" : "smooth" });
 }
 
+const VALID_VIEWS: ReadonlySet<string> = new Set(["jobs", "today", "apps", "money", "corner"]);
+
+/** Honor a `?view=` deep link (from a tapped push notification) once at boot,
+ * then strip it from the URL so a refresh/share doesn't re-trigger it. A
+ * best-effort enhancement only — an absent/invalid param is a silent no-op. */
+function applyDeepLinkView(): void {
+  const params = new URLSearchParams(window.location.search);
+  const v = params.get("view");
+  if (v && VALID_VIEWS.has(v)) {
+    setView(v as ViewName);
+  }
+  if (params.has("view")) {
+    params.delete("view");
+    const qs = params.toString();
+    history.replaceState(null, "", window.location.pathname + (qs ? `?${qs}` : "") + window.location.hash);
+  }
+}
+
 function quizComplete(): boolean {
   const q = getState().profile.quiz;
   return QUIZ_KEYS.every((k) => !!q[k]);
@@ -1353,6 +1378,16 @@ function renderApps(): void {
         ${notifPerm === "denied" ? "Reminders blocked — enable in phone settings" : "Turn on phone reminders for follow-ups"}
        </button>`
     : "";
+  // Web Push button: a SEPARATE opt-in from the plain Notification button
+  // above — she may want reminders while the app is open (notifybtn) without
+  // also enabling push for when it's closed, or vice versa. Only ever shown
+  // when the operator has configured VAPID keys AND she's signed in (a
+  // subscription is tied to her account row) AND it isn't already active.
+  const pushBtn = pushSupported() && vapidPublicKey && authed && !pushSubscribed
+    ? `<button type="button" class="btn btn-ghost" id="pushbtn" style="margin-top:8px">
+        Turn on push notifications (works even with the app closed)
+       </button>`
+    : "";
   host.innerHTML = `
     <div class="card">
       <h2 class="view-title">My applications</h2>
@@ -1360,6 +1395,7 @@ function renderApps(): void {
       <p class="job-meta">${applied.length} tracked — tap <b>I followed up ✓</b> when she's done so reminders stop.</p>
       <p class="job-meta" style="margin-top:8px">${weekMsg}</p>
       ${notifyBtn}
+      ${pushBtn}
       <button type="button" class="btn btn-ghost" id="print-log" style="margin-top:12px">Print work-search log</button>
     </div>
     ${appCockpit}
@@ -1589,7 +1625,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #pushbtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1917,6 +1953,25 @@ function handleViewClick(e: Event): void {
     if (typeof Notification !== "undefined" && (Notification as typeof Notification).permission !== "denied") {
       void Notification.requestPermission().then(() => { renderApps(); });
     }
+    return;
+  }
+  if (t.id === "pushbtn") {
+    const sb = getClient();
+    if (!sb || !vapidPublicKey) return;
+    const btn = t as HTMLButtonElement;
+    btn.disabled = true;
+    btn.textContent = "Turning on…";
+    void subscribeToPush(sb, vapidPublicKey).then((ok) => {
+      pushSubscribed = ok;
+      if (ok) {
+        toast("Push notifications on ✦");
+      } else if (pushPermission() === "denied") {
+        toast("Push blocked — enable notifications in phone settings");
+      } else {
+        toast("Couldn't turn on push right now — reminders still work while the app is open");
+      }
+      renderApps();
+    });
     return;
   }
   if (t.id === "coach-off-btn") {
@@ -3315,6 +3370,10 @@ async function boot(): Promise<void> {
   });
 
   const portal = await loadPortal();
+  vapidPublicKey = portal.vapidPublicKey || "";
+  if (pushSupported() && vapidPublicKey) {
+    hasActivePushSubscription().then((on) => { pushSubscribed = on; if (view === "apps") renderApps(); }).catch(() => {});
+  }
   await initAuth(portal);
   if (await fetchGoogleAuthEnabled(portal)) {
     const gBtn = document.getElementById("auth-google");
@@ -3345,6 +3404,7 @@ async function boot(): Promise<void> {
   }
   await refreshAuth();
   render();
+  applyDeepLinkView();
   wirePullToRefresh();
   maybeIosInstallCoach();
   $("#ios-install-close")?.addEventListener("click", () => { const m = $("#ios-install-modal"); if (m) m.hidden = true; });

@@ -10,6 +10,7 @@ name: Daily Job Scan (CD)
 #   USAJOBS_API_KEY, USAJOBS_EMAIL -- optional (federal; employer-stated pay)
 #   JOOBLE_API_KEY                 -- optional
 #   CAREERJET_AFFID                -- optional (affiliate ID)
+#   VAPID_PUBLIC_KEY               -- optional (Web Push; public half of the pair)
 # Provider keys are optional: each provider self-gates on its env var and the
 # scan runs with whatever is configured (Adzuna remains the required base).
 # Publishing uses the built-in GITHUB_TOKEN (contents: write below); no PAT.
@@ -64,6 +65,12 @@ jobs:
       # Sentry error monitoring (optional; page self-disables when unset). A
       # Sentry DSN is PUBLIC/embeddable, so it's a repo Variable, not a Secret.
       SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+      # Web Push (optional; "Turn on push notifications" control self-disables
+      # when unset). VAPID_PUBLIC_KEY is the PUBLIC half of the key pair -
+      # embeddable by design - but kept as a Secret alongside its private
+      # counterpart (a Supabase function secret, never here) so both halves are
+      # rotated from one place.
+      VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
     steps:
       # Read-only checkout: the gh-pages publish step below pushes with an
       # explicit x-access-token URL in a fresh `git init` repo under web/, so it

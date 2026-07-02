@@ -1312,6 +1312,18 @@ def _portal_web_config():
     return {"url": url, "key": key}
 
 
+def _vapid_public_key():
+    """The PUBLIC half of the Web Push VAPID key pair, or "" when unset.
+
+    Safe to embed in the page by design (it's the argument PushManager.subscribe
+    needs); the PRIVATE half lives only in Supabase function secrets and is
+    never read here. Push subscribing requires sign-in (the subscription is
+    tied to a user row), so this is only meaningful merged onto portal_cfg,
+    never emitted on its own.
+    """
+    return os.environ.get("VAPID_PUBLIC_KEY") or ""
+
+
 # Pinned + SRI-locked: the browser refuses the script if the CDN bytes ever
 # change. Hash computed from the fetched artifact 2026-06-12 (sha384).
 PORTAL_SCRIPT_TAG = (
@@ -4318,6 +4330,10 @@ def main():
     # Portal config never reaches a --mock page: canned data must not gain a
     # sign-in surface, and a mock page must never be deployed anyway.
     portal_cfg = None if args.mock else _portal_web_config()
+    if portal_cfg is not None:
+        vapid_key = _vapid_public_key()
+        if vapid_key:
+            portal_cfg = {**portal_cfg, "vapidPublicKey": vapid_key}
     sentry_cfg = None if args.mock else _sentry_web_config()
     write_html(safe, len(hidden), len(rows), html_path, human,
                contact=args.contact, contact_phone=args.contact_phone,
