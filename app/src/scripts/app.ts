@@ -2540,8 +2540,49 @@ function tailorLabel(job: Job): string {
   return `${job.title} at ${job.company}`;
 }
 
+// ── Bat swarm — the tailor loader's signature flourish ──────────────────────
+// One hand-authored wing (membrane + visible finger bones) is reused, mirrored,
+// for both sides of every bat: real flight is (near-)symmetric, and reusing the
+// same path + the same bat-flap-l keyframes for both wings keeps the flap
+// perfectly in sync without duplicating geometry. Six bats across three depth
+// layers (far/mid/near) each get their own flight-path + flutter + flap timing
+// (see app.css `.bat-a`..`.bat-f`) so nothing reads as one sprite cloned in a
+// loop. Decorative only: aria-hidden, pointer-events:none, never intercepts taps.
+const BAT_WING_MARKUP =
+  `<path class="bat-membrane" d="M58,30 Q46,10 36,8 Q40,20 40,20 Q26,10 14,14 Q24,26 22,30 Q14,30 10,34 Q18,38 20,42 Q16,48 18,50 Q30,44 34,46 Q44,42 48,38 Q54,34 58,30 Z"/>` +
+  `<path class="bat-finger" d="M58,30 L36,8 M58,30 L14,14 M58,30 L10,34 M58,30 L18,50"/>`;
+
+function batSvg(): string {
+  return `<svg class="bat-svg" viewBox="0 0 120 64" aria-hidden="true" focusable="false">
+    <g class="bat-wing bat-wing-l">${BAT_WING_MARKUP}</g>
+    <g transform="translate(120,0) scale(-1,1)"><g class="bat-wing bat-wing-l">${BAT_WING_MARKUP}</g></g>
+    <path class="bat-ear" d="M54,22 L50,9 L59,20 Z"/>
+    <path class="bat-ear" d="M66,22 L70,9 L61,20 Z"/>
+    <ellipse class="bat-torso" cx="60" cy="31" rx="5.5" ry="9.5"/>
+  </svg>`;
+}
+
+const BAT_LAYERS: Array<{ id: string; layer: "far" | "mid" | "near" }> = [
+  { id: "a", layer: "far" },
+  { id: "b", layer: "mid" },
+  { id: "c", layer: "near" },
+  { id: "d", layer: "far" },
+  { id: "e", layer: "mid" },
+  { id: "f", layer: "near" },
+];
+
+function batSwarmHTML(): string {
+  const bats = BAT_LAYERS
+    .map(({ id, layer }) => `<div class="bat bat--${layer} bat-${id}"><div class="bat-flutter">${batSvg()}</div></div>`)
+    .join("");
+  // Reduced-motion fallback: a single still silhouette, shown only when the
+  // animated swarm below is disabled (see app.css prefers-reduced-motion block).
+  return `<div class="bat-swarm" id="bat-swarm" aria-hidden="true">${bats}<div class="bat bat-static">${batSvg()}</div></div>`;
+}
+
 function tailorLoaderHTML(job: Job): string {
   return `<section class="tailor-load" aria-label="Rudy is tailoring this résumé">
+    ${batSwarmHTML()}
     <div class="tailor-load-head">
       <p class="tailor-kicker">Rudy is tailoring</p>
       <h3>${esc(job.title)}</h3>
@@ -2590,7 +2631,14 @@ function startTailorLoader(job: Job): void {
   }, 180);
 }
 
-function stopTailorLoader(): void {
+function prefersReducedMotion(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+}
+
+// Lets the bats visibly scatter off-screen before the loader panel is replaced
+// by the result/error view, instead of just vanishing mid-flight. Skipped
+// entirely under reduced motion (nothing to wait for — the swarm never ran).
+function stopTailorLoader(): Promise<void> {
   if (tailorTimer) {
     clearInterval(tailorTimer);
     tailorTimer = null;
@@ -2599,6 +2647,10 @@ function stopTailorLoader(): void {
   const meter = document.getElementById("tailor-meter");
   if (fill) fill.style.width = "100%";
   if (meter) meter.setAttribute("aria-valuenow", "100");
+  const swarm = document.getElementById("bat-swarm");
+  if (!swarm || prefersReducedMotion()) return Promise.resolve();
+  swarm.classList.add("is-leaving");
+  return new Promise((resolve) => setTimeout(resolve, 380));
 }
 
 function openTailor(job: Job): void {
@@ -2629,7 +2681,7 @@ function closeTailor(): void {
   if (modal) modal.hidden = true;
   document.body.style.overflow = "";
   clearModalTrap();
-  stopTailorLoader();
+  void stopTailorLoader();
 }
 
 function openApplicationPack(job: Job): void {
@@ -2919,7 +2971,7 @@ async function runTailor(job: Job, resume: string, jobText: string): Promise<voi
   const body = $("#tailor-body");
   lastTailorRequest = { job, resume, jobText };
   if (!sb || !body) {
-    stopTailorLoader();
+    await stopTailorLoader();
     if (body) renderTailorError(job, "Sign in to tailor. That keeps her résumé private and saved to her account.");
     return;
   }
@@ -2927,14 +2979,14 @@ async function runTailor(job: Job, resume: string, jobText: string): Promise<voi
     const { data, error } = await sb.functions.invoke("resume-tailor", {
       body: { resume, jobTitle: job.title, company: job.company, jobText },
     });
-    stopTailorLoader();
+    await stopTailorLoader();
     if (error || !data?.resume) {
       renderTailorError(job, friendlyTailorError(await extractTailorErrorMessage(data?.error, error)));
       return;
     }
     renderTailorResult(job, data as TailorResult);
   } catch {
-    stopTailorLoader();
+    await stopTailorLoader();
     renderTailorError(job, "No connection right now. Nothing was changed; try again when the connection is back.");
   }
 }

@@ -181,6 +181,40 @@ def test_resume_tailor_is_trust_first_with_recovery_paths():
     assert ".tailor-error" in css
 
 
+def test_tailor_bat_swarm_is_realistic_and_reduced_motion_safe():
+    app = _read("app/src/scripts/app.ts")
+    css = _read("app/src/styles/app.css")
+
+    # The bat layer exists, is decorative-only, and never blocks a tap.
+    assert "batSwarmHTML" in app
+    assert 'id="bat-swarm"' in app
+    assert ".bat-swarm {" in css
+    assert "pointer-events: none;" in css
+
+    # Distinct wing poses (articulated flap, not a rigid sprite) and per-bat
+    # timing so six bats never read as one clone on a loop.
+    assert "bat-wing-l" in css
+    assert "@keyframes bat-flap-l" in css
+    assert "bat-flutter" in css
+    for letter in "abcdef":
+        assert f".bat-{letter} " in css or f".bat-{letter}{{" in css
+        assert f"@keyframes bat-path-{letter}" in css
+
+    # Depth via scale + opacity across three layers.
+    assert ".bat--far" in css
+    assert ".bat--mid" in css
+    assert ".bat--near" in css
+
+    # Disperses off-screen (JS-driven) rather than vanishing mid-flight.
+    assert "is-leaving" in css
+    assert "stopTailorLoader" in app
+
+    # Fully inert under reduced motion, with a static silhouette standing in.
+    assert "prefers-reduced-motion: reduce" in css
+    assert ".bat-a, .bat-b, .bat-c, .bat-d, .bat-e, .bat-f" in css
+    assert ".bat-static" in css
+
+
 def test_application_pack_is_saved_and_reopenable():
     app = _read("app/src/scripts/app.ts")
     types = _read("app/src/scripts/types.ts")
