@@ -105,6 +105,13 @@ EXCLUDE_TITLE_WORDS = [
     "devops", "sql", "linux", "server", "cyber", "security administrator",
     "it administrator", "engineer", "developer", "registered nurse", "pharmacy",
     "phlebotom", "therapist", "physician", "attorney", "paralegal director",
+    # Licensed/certified occupations she has no credential for. Long, unambiguous
+    # phrases only (never bare 2-3 letter acronyms like "CNA"/"CPA"/"RN"/"CDL" —
+    # those collide with real company names and benign context, e.g. "CNA
+    # Financial", "Administrative Assistant for a CPA firm"; those are caught
+    # instead by requires_license_or_cert() reading the DESCRIPTION for an
+    # unambiguous requirement).
+    "licensed practical nurse", "certified nursing assistant",
 ]
 # Entries matched as prefixes (no trailing word boundary): cybersecurity,
 # phlebotomist/phlebotomy.
@@ -324,6 +331,11 @@ SENIORITY_DROP_TERMS = [
     "ceo", "cfo", "coo", "president",
     "team lead", "lead", "senior", "sr", "supervisor", "manager",
     "principal", "foreman", "superintendent",
+    # Roman-numeral job-level tiers ("Administrative Assistant II", "Office
+    # Clerk III") — a leak the plain-English words above never caught. "I"
+    # (level one / entry) is deliberately NOT included: that tier is exactly
+    # this user's level, and a bare \bi\b would also match the pronoun "I".
+    "ii", "iii", "iv",
 ]
 _SENIORITY_RX = re.compile(
     r"\b(" + "|".join(re.escape(t) for t in SENIORITY_DROP_TERMS) + r")\b")
@@ -545,6 +557,78 @@ def requires_degree(job):
             window = blob[max(0, m.start() - 30): m.end() + 80]
             if not any(s in window for s in DEGREE_SOFTENERS):
                 return True
+    return False
+
+
+# Professional licenses/certifications she does not hold. These are admin-
+# adjacent hybrid roles that slip past is_admin_title (the title reads like a
+# real admin/clerical job — "Medical Receptionist", "Insurance Office
+# Assistant", "Accounting Assistant") but the DESCRIPTION quietly demands a
+# credential: RN/LPN, CNA, a commercial driver's license, an active CPA,
+# a paralegal certificate, a teaching license, an insurance producer or
+# real-estate license, cosmetology, or a journeyman card. Distinctive, long
+# phrases only — never a bare acronym (see EXCLUDE_TITLE_WORDS comment on the
+# same collision risk: "CNA" the company, "CPA firm" as an ordinary employer).
+LICENSE_CERT_HINTS = [
+    "registered nurse license", "rn license", "active rn license",
+    "licensed practical nurse license", "lpn license", "active lpn license",
+    "cna certification", "certified nursing assistant certification",
+    "active cna license",
+    "cdl class a license", "cdl class b license", "commercial driver's license",
+    "commercial drivers license",
+    "cpa license", "certified public accountant license", "active cpa license",
+    "paralegal certificate", "paralegal certification",
+    "teaching license", "teaching certificate", "licensed teacher",
+    "insurance producer license", "producer's license", "producer license",
+    "real estate license", "licensed real estate agent",
+    "cosmetology license", "active cosmetology license",
+    "journeyman license", "journeyman certification",
+]
+
+
+def requires_license_or_cert(job):
+    """True only when the posting names one of LICENSE_CERT_HINTS as something
+    she'd need to hold, with no softener nearby. 'CNA certification preferred
+    but not required' / 'will sponsor your real estate license' must NOT drop
+    a posting — same conservative softener rule as requires_degree()."""
+    blob = ((job.get("title") or "") + " " + (job.get("description") or "")).lower()
+    for h in LICENSE_CERT_HINTS:
+        for m in re.finditer(re.escape(h), blob):
+            window = blob[max(0, m.start() - 30): m.end() + 60]
+            if not any(s in window for s in DEGREE_SOFTENERS):
+                return True
+    return False
+
+
+# A hard "N+ years of experience REQUIRED" wall. Conservative on purpose: she
+# has years of general admin/office/customer-service experience, so a modest
+# range ("1-2 years experience preferred") must never trip this — only an
+# unambiguous, high bar (>=4 years) paired with REQUIRED-style phrasing (never
+# "preferred"/"a plus"/etc.) counts. This catches postings that are really
+# senior roles wearing an entry-level title.
+_YEARS_RX = re.compile(r"\b(\d{1,2})\s*(?:[-–]\s*\d{1,2}\s*)?\+?\s*years?\b", re.IGNORECASE)
+_HARD_EXPERIENCE_SIGNALS = (
+    "required", "is required", "requires", "must have", "minimum of",
+    "at least", "mandatory", "must possess",
+)
+
+
+def requires_heavy_experience(job):
+    """True only when the posting demands >=4 years' experience with
+    unambiguous REQUIRED phrasing nearby. A low range ('1-2 years'), or any
+    range at all softened by 'preferred'/'a plus'/etc., is kept."""
+    blob = ((job.get("title") or "") + " " + (job.get("description") or "")).lower()
+    for m in _YEARS_RX.finditer(blob):
+        years = int(m.group(1))
+        if years < 4:
+            continue
+        window = blob[max(0, m.start() - 15): m.end() + 70]
+        if "experience" not in window:
+            continue
+        if any(s in window for s in DEGREE_SOFTENERS):
+            continue
+        if any(sig in window for sig in _HARD_EXPERIENCE_SIGNALS):
+            return True
     return False
 
 
@@ -913,9 +997,55 @@ def salary_verdict(hourly_min, hourly_max, *, stated):
     return "below"
 
 
+
+# A remote job's title from an aggregator very often ALREADY names "Remote" as
+# a decoration ("Data Entry Clerk - Remote", "(Remote) Admin Assistant",
+# "100% Remote Receptionist") — but the card also shows a separate "Remote"
+# meta tag (source == "remote"), so the un-stripped title reads redundantly:
+# "Data Entry Clerk - Remote · Remote". This strips that decoration ONLY when
+# it is anchored at the very start or end of the title (never a mid-title
+# word like "Senior Remote-Friendly Assistant", which is left untouched).
+# A bare leading "Remote " (no punctuation) is also stripped on purpose —
+# "Remote Support Technician" reads fine as "Support Technician" once the
+# card already shows the Remote tag.
+_REMOTE_DECOR_PHRASE = (
+    r"(?:100%\s*remote\b|fully\s*remote\b|remote\b|"
+    r"work[\s-]?from[\s-]?home\b|wfh\b)"
+)
+_REMOTE_DECOR_TRAILING = re.compile(
+    r"\s*[\-–—:,]?\s*[\(\[]?\s*" + _REMOTE_DECOR_PHRASE + r"\s*[\)\]]?\s*$",
+    re.IGNORECASE,
+)
+_REMOTE_DECOR_LEADING = re.compile(
+    r"^\s*[\(\[]?\s*" + _REMOTE_DECOR_PHRASE + r"\s*[\)\]]?\s*[\-–—:,]?\s*",
+    re.IGNORECASE,
+)
+
+
+def strip_remote_decoration(title):
+    """Remove a redundant leading/trailing 'Remote' decoration from a job title
+    that is ALREADY flagged remote elsewhere on the card. Loops so stacked
+    decorations ("Remote - Data Entry - WFH") are fully cleaned up. Falls back
+    to the original title if the cleanup would leave nothing (defensive; should
+    not happen given the anchored patterns)."""
+    t = (title or "").strip()
+    if not t:
+        return t
+    original = t
+    prev = None
+    while prev != t:
+        prev = t
+        t = _REMOTE_DECOR_TRAILING.sub("", t)
+        t = _REMOTE_DECOR_LEADING.sub("", t)
+        t = t.strip(" \t-–—:,")
+    return t or original
+
+
 def normalize(job, source):
     """Flatten an Adzuna result into the row we care about + a salary verdict."""
     title = job.get("title") or ""
+    if source == "remote":
+        title = strip_remote_decoration(title)
     company = (job.get("company") or {}).get("display_name") or "(company not listed)"
     location = (job.get("location") or {}).get("display_name") or ""
     smin = job.get("salary_min")
@@ -962,6 +1092,8 @@ def _passes_filters(r):
             and is_attainable(r["title"])
             and not title_excluded(r["title"])
             and not requires_degree(r)
+            and not requires_license_or_cert(r)
+            and not requires_heavy_experience(r)
             and (is_remote_row(r) or is_day_shift(r))
             and passes_us_filter(r)
             and (r["source"] != "local" or commute_minutes(r["location"]) is not None))
@@ -993,10 +1125,15 @@ def collect(verbose=True):
         time.sleep(0.3)
 
     # Extra providers (USAJobs/Jooble/...; each active only when its keys
-    # exist). Same filters + scam shield apply to every source.
+    # exist). Same filters + scam shield apply to every source. Provider rows
+    # build their own "title" (they don't go through normalize()), so the
+    # redundant-"Remote" title decoration is stripped here too, for every
+    # source that reports itself remote.
     for r in providers.collect_extra(TITLES, LOCATION, salary_verdict,
                                      log=(print if verbose else (lambda *_: None))):
         if r["id"] and r["id"] not in seen:
+            if r.get("source") == "remote":
+                r["title"] = strip_remote_decoration(r.get("title"))
             seen[r["id"]] = r
 
     all_rows = list(seen.values())

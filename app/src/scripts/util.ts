@@ -68,6 +68,31 @@ export function ago(iso: string): string {
   return `${w} week${w === 1 ? "" : "s"} ago`;
 }
 
+// Mirrors strip_remote_decoration() in find_admin_jobs.py. The scanner already
+// strips a redundant "Remote" from a remote job's title before it ever reaches
+// jobs.json, but this is the DEFENSIVE second layer: cached/offline jobs.json
+// from before that fix, or any future feed source, can still carry a title
+// like "Data Entry Clerk - Remote" alongside the card's own "Remote" location
+// tag — which would read "Data Entry Clerk - Remote · Remote". Only strips a
+// decoration anchored at the very start or end of the title; a mid-title word
+// ("Senior Remote-Friendly Assistant") is left alone.
+const REMOTE_DECOR_PHRASE = "(?:100%\\s*remote\\b|fully\\s*remote\\b|remote\\b|work[\\s-]?from[\\s-]?home\\b|wfh\\b)";
+const REMOTE_DECOR_TRAILING = new RegExp(`\\s*[-–—:,]?\\s*[(\\[]?\\s*${REMOTE_DECOR_PHRASE}\\s*[)\\]]?\\s*$`, "i");
+const REMOTE_DECOR_LEADING = new RegExp(`^\\s*[(\\[]?\\s*${REMOTE_DECOR_PHRASE}\\s*[)\\]]?\\s*[-–—:,]?\\s*`, "i");
+
+export function stripRedundantRemoteLabel(title: string): string {
+  let t = (title || "").trim();
+  if (!t) return t;
+  const original = t;
+  let prev: string | null = null;
+  while (prev !== t) {
+    prev = t;
+    t = t.replace(REMOTE_DECOR_TRAILING, "").replace(REMOTE_DECOR_LEADING, "");
+    t = t.replace(/^[\s\t\-–—:,]+|[\s\t\-–—:,]+$/g, "");
+  }
+  return t || original;
+}
+
 export function relativePosted(posted: string): string {
   if (!posted) return "";
   const t = Date.parse(posted);
