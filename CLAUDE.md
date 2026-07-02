@@ -73,7 +73,7 @@ Runtime is **stdlib-only** (no pip install to run). Dev/CI tooling: `pip install
 
 ## Deploy / publish
 
-`main` is push-protected — land changes via branch → PR → squash-merge (re-verify the ruleset survived the 2026-06-10 public flip; visibility changes can disable rulesets). The site updates when `web/` lands on this repo's `gh-pages` branch: automatically by the daily CD, or manually (`git push origin gh-pages` from a worktree containing the built `web/`). NEVER deploy after a `--mock` run — it overwrites `web/index.html` with canned data.
+`main` is push-protected — land changes via branch → PR → squash-merge (re-verify the ruleset survived the 2026-06-10 public flip; visibility changes can disable rulesets). **Standing rule (owner, 2026-07-02): the agent squash-merges its own PRs — green CI + the verified test plan is the gate, not a human click. No waiting on the owner to merge; also verify the post-merge `scan.yml` deploy actually shipped (merged ≠ live).** The site updates when `web/` lands on this repo's `gh-pages` branch: automatically by the daily CD, or manually (`git push origin gh-pages` from a worktree containing the built `web/`). NEVER deploy after a `--mock` run — it overwrites `web/index.html` with canned data.
 
 ## Shipped 2026-06-16
 
