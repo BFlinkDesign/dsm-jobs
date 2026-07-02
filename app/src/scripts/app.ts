@@ -69,6 +69,11 @@ let pushSubscribed = false;
 let pullRefreshing = false;
 let feedLoadFailed = false;
 let rudyHistoryLoaded = false;
+// The job she's currently chatting with Rudy about, if any — set by "Ask Rudy
+// about this job" on a card, cleared when she dismisses the context chip or
+// closes Rudy. Transient UI state only (never persisted): reopening Rudy from
+// the tab bar or My corner always starts with no job context.
+let rudyJobContext: Job | null = null;
 let tailorTimer: ReturnType<typeof setInterval> | null = null;
 let filtersExpanded = false;
 let lastTailorRequest: TailorRequest | null = null;
@@ -1237,6 +1242,7 @@ function jobCard(j: Job): string {
       ${authed ? `<button type="button" class="btn btn-ghost" data-save="${esc(j.id)}">${s.saved[j.id] ? "Saved ✓" : "Save"}</button>` : ""}
       ${authed && j.url ? `<a class="btn btn-ghost" href="${esc(safeUrl(j.url))}" target="_blank" rel="noopener">Apply ↗</a>` : ""}
       ${authed && hasResume ? `<button type="button" class="btn btn-ghost" data-tailor="${esc(j.id)}">Rudy tailor résumé</button>` : ""}
+      ${authed ? `<button type="button" class="btn btn-ghost btn-sm" data-ask-rudy="${esc(j.id)}">Ask Rudy about this job</button>` : ""}
       ${authed && hasPack ? `<button type="button" class="btn btn-ghost" data-pack="${esc(j.id)}">Open pack</button>` : ""}
       <button type="button" class="btn btn-ghost btn-sm" data-snooze="${esc(j.id)}">${isSnoozed ? "👁 Napping" : "Not today"}</button>
       <button type="button" class="btn btn-ghost btn-sm" data-hide="${esc(j.id)}">${isHidden ? "Unhide" : "Hide"}</button>
@@ -1625,7 +1631,7 @@ function printWorkLog(): void {
 
 function handleViewClick(e: Event): void {
   const t = (e.target as HTMLElement).closest(
-    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #pushbtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
+    "[data-needs-auth], [data-lock-signin], [data-apply], [data-unapply], [data-save], [data-remind], [data-remote], [data-commute], [data-sort], [data-view-jump], #filter-toggle, #filter-pay, #filter-train, #filter-trusted, #filter-saved, #filter-applied, #filter-show-hidden, #feed-retry, [data-follow-done], [data-follow-copy], [data-follow-undo], [data-doc-active], [data-doc-delete], [data-tailor], [data-ask-rudy], #rudy-job-chip-clear, [data-pack], [data-share], #open-rudy, #tour-start, #print-log, [data-hide], [data-snooze], #toggle-hidden, #notifybtn, #pushbtn, #coach-off-btn, #coach-on-btn, #upload-resume, .qopt"
   ) as HTMLElement | null;
   if (!t) return;
 
@@ -1894,6 +1900,17 @@ function handleViewClick(e: Event): void {
     const id = t.getAttribute("data-tailor")!;
     const job = jobs.find((x) => x.id === id);
     if (job) openTailor(job);
+    return;
+  }
+  if (t.hasAttribute("data-ask-rudy")) {
+    const id = t.getAttribute("data-ask-rudy")!;
+    const job = jobs.find((x) => x.id === id);
+    if (job) openRudy(job);
+    return;
+  }
+  if (t.id === "rudy-job-chip-clear") {
+    rudyJobContext = null;
+    renderRudyJobChip();
     return;
   }
   if (t.hasAttribute("data-pack")) {
@@ -2246,12 +2263,39 @@ function closeAuth(): void {
   resetAllPasswordVisibility();
 }
 
-function openRudy(): void {
+/** A short, gentle conversation-starter prefilled into the input when she taps
+ * "Ask Rudy about this job" — she can edit or replace it before sending; the
+ * app never sends anything to Rudy on her behalf. */
+function askRudyJobPrompt(job: Job): string {
+  return `Can you help me understand the ${job.title} job at ${job.company}?`;
+}
+
+/** The dismissible "Talking about: <job title> ✕" chip in the Rudy overlay.
+ * It mirrors exactly what rides along in the next chat turn (see sendRudy's
+ * jobContextPayload), so she always knows what Rudy can currently see about a
+ * specific posting and can clear it with one tap. */
+function renderRudyJobChip(): void {
+  const chip = $("#rudy-job-chip");
+  if (!chip) return;
+  if (!rudyJobContext) { chip.hidden = true; chip.innerHTML = ""; return; }
+  chip.hidden = false;
+  chip.innerHTML = `<span>Talking about: ${esc(rudyJobContext.title)}</span>` +
+    `<button type="button" class="btn btn-ghost btn-sm" id="rudy-job-chip-clear" aria-label="Stop talking about this job">✕</button>`;
+}
+
+function openRudy(job?: Job): void {
   if (!authed) return openAuth();
+  if (job) rudyJobContext = job;
   const ov = $("#rudy-overlay");
   if (ov) { ov.hidden = false; document.body.style.overflow = "hidden"; setModalTrap(ov); }
+  renderRudyJobChip();
   void renderRudyLog();
-  setTimeout(() => { ($("#rudy-input") as HTMLInputElement | null)?.focus(); }, 50);
+  setTimeout(() => {
+    const inp = $("#rudy-input") as HTMLInputElement | null;
+    if (!inp) return;
+    if (job && !inp.value.trim()) inp.value = askRudyJobPrompt(job);
+    inp.focus();
+  }, 50);
 }
 
 function closeRudy(): void {
@@ -2259,6 +2303,8 @@ function closeRudy(): void {
   if (ov) { ov.hidden = true; document.body.style.overflow = ""; clearModalTrap(); }
   stopRudyVoice();
   closeRudyMemory();
+  rudyJobContext = null;
+  renderRudyJobChip();
 }
 
 /** Human label for a saved quiz value, e.g. kind="home" -> "Working from home".
@@ -2385,6 +2431,28 @@ async function renderRudyLog(): Promise<void> {
   log.scrollTop = log.scrollHeight;
 }
 
+// Compact per-job snapshot sent to the companion edge function when a job is
+// active in Rudy chat (see rudyJobContext / "Ask Rudy about this job"). `pay`
+// is ALWAYS the already-computed verdict TEXT (never a raw number) — CLAUDE.md
+// invariant #1: a guessed wage must never be presented as a number. descFull
+// is capped client-side too (in addition to grounding.ts's own server-side
+// cap), mirroring MAX_ACTIVE_RESUME_CHARS's role for the résumé path, so a
+// huge posting can't balloon a single chat turn's request body.
+const MAX_JOB_CONTEXT_DESC_CHARS = 6000;
+
+function jobContextPayload(job: Job): Record<string, unknown> {
+  const desc = (job.descFull || "").trim();
+  return {
+    title: job.title,
+    company: job.company,
+    pay: job.pay,
+    location: job.remote ? "Remote" : job.location,
+    commute: job.commute,
+    posted: relativePosted(job.posted),
+    descFull: desc.length > MAX_JOB_CONTEXT_DESC_CHARS ? desc.slice(0, MAX_JOB_CONTEXT_DESC_CHARS) : desc,
+  };
+}
+
 async function sendRudy(): Promise<void> {
   const inp = $("#rudy-input") as HTMLInputElement | null;
   const log = $("#rudy-log");
@@ -2410,7 +2478,11 @@ async function sendRudy(): Promise<void> {
     return;
   }
   try {
-    const { data, error } = await sb.functions.invoke("companion", { body: { message: msg, spicy: spicyOn } });
+    // Only ride along a job snapshot when one is actually active — a plain
+    // chat turn (no job in view) sends nothing extra (see jobContextPayload).
+    const body: Record<string, unknown> = { message: msg, spicy: spicyOn };
+    if (rudyJobContext) body.activeJob = jobContextPayload(rudyJobContext);
+    const { data, error } = await sb.functions.invoke("companion", { body });
     const reply = (error?.message ? null : (data?.reply as string)) || "I'm here with you. Try again in a moment. 💜";
     thinkingBubble.classList.remove("think");
     thinkingBubble.textContent = reply;

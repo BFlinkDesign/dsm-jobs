@@ -560,6 +560,18 @@ body::after {
   padding: var(--space-3) 0;
   border-bottom: 1px solid var(--line);
 }
+.rudy-job-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  margin-top: var(--space-3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+}
 .rudy-log {
   flex: 1;
   overflow-y: auto;
