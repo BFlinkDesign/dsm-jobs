@@ -137,6 +137,11 @@ def project_ref() -> str | None:
     return match.group(1) if match else None
 
 
+# Cloudflare fronts api.supabase.com and bans urllib's default Python-urllib/3.x
+# signature outright (403, error code 1010) — before auth is even evaluated.
+USER_AGENT = "dsm-jobs-schema-verify/1.0 (+https://github.com/BFlinkDesign/dsm-jobs)"
+
+
 def http_json(
     url: str,
     *,
@@ -147,6 +152,7 @@ def http_json(
 ) -> object:
     data = None
     hdrs = dict(headers or {})
+    hdrs.setdefault("User-Agent", USER_AGENT)
     if body is not None:
         data = json.dumps(body).encode("utf-8")
         hdrs.setdefault("Content-Type", "application/json")
@@ -252,7 +258,9 @@ def verify_reachable() -> bool:
         print("FAIL: need SUPABASE_URL + SUPABASE_PUBLISHABLE_KEY for reachability check")
         return False
     req = urllib.request.Request(
-        f"{url}/rest/v1/", headers={"apikey": key}, method="GET",
+        f"{url}/rest/v1/",
+        headers={"apikey": key},
+        method="GET",
     )
     try:
         with urllib.request.urlopen(req, timeout=20.0) as resp:
@@ -414,11 +422,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if go:
-        print({
-            "full": "GO (full schema verify)",
-            "partial": "GO (partial — tables only; RLS/policies not checked)",
-            "reachable": "GO (reachability only — backend is up; schema not deep-verified)",
-        }.get(mode, "GO"))
+        print(
+            {
+                "full": "GO (full schema verify)",
+                "partial": "GO (partial — tables only; RLS/policies not checked)",
+                "reachable": "GO (reachability only — backend is up; schema not deep-verified)",
+            }.get(mode, "GO")
+        )
         return 0
     print("NO-GO: schema checks failed")
     return 1
