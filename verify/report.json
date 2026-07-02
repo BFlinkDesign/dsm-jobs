@@ -1,0 +1,42 @@
+[
+  {
+    "name": "header_scam_checked",
+    "ok": true,
+    "detail": "meta=4 safe jobs \u00b7 scam-checked \u00b7 2026-07-02 16:54"
+  },
+  {
+    "name": "filter_rows_labeled",
+    "ok": true,
+    "detail": "['Sort', 'Filter', 'Category', 'Job type', \"How far she'll drive from Grimes\"]"
+  },
+  {
+    "name": "commute_chips",
+    "ok": true,
+    "detail": "['Any distance', 'Within 20 min', 'Within 30 min', 'Within 45 min']"
+  },
+  {
+    "name": "job_cards_render",
+    "ok": true,
+    "detail": "cards=4 about=True sign-in-cta=True"
+  },
+  {
+    "name": "no_render_garbage",
+    "ok": true,
+    "detail": "visible-leak/token: []"
+  },
+  {
+    "name": "invariant1_no_predicted_dollar",
+    "ok": true,
+    "detail": "{'jobs': 4, 'bad': [], 'conflict': False}"
+  },
+  {
+    "name": "nav_switches_views",
+    "ok": true,
+    "detail": "{'today_locked': True, 'apps_locked': True, 'corner_locked': True, 'help': True, 'jobs': True}"
+  },
+  {
+    "name": "auth_dom_provider_aware",
+    "ok": true,
+    "detail": "{'modal': True, 'email': True, 'pass': True, 'googleHidden': True}"
+  }
+]
