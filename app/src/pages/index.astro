@@ -159,6 +159,7 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
           </div>
           <button type="button" class="btn btn-primary" id="auth-signin" style="width:100%;margin-top:12px">Sign in</button>
           <button type="button" class="btn btn-ghost" id="auth-signup" style="width:100%;margin-top:8px">Create account</button>
+          <button type="button" class="btn btn-ghost" id="auth-code-send" style="width:100%;margin-top:8px">Email me a 6-digit code</button>
           <button type="button" class="btn btn-ghost" id="auth-magic" style="width:100%;margin-top:8px">Email me a sign-in link</button>
           <button type="button" class="btn btn-ghost" id="auth-google" hidden style="width:100%;margin-top:8px">Continue with Google</button>
           <div class="auth-links">
@@ -171,11 +172,21 @@ const sentryDsnJson = JSON.stringify(sentryDsn);
         </div>
         <div id="auth-forgot-panel" hidden>
           <h2 id="auth-forgot-title">Reset your password ✦</h2>
-          <p class="job-meta" id="auth-forgot-sub">Enter your email and we'll send a link to set a new password.</p>
+          <p class="job-meta" id="auth-forgot-sub">Enter your email — we'll send a 6-digit code (and a link) to set a new password.</p>
           <input class="field" id="auth-forgot-email" type="email" autocomplete="username" placeholder="Email" />
-          <button type="button" class="btn btn-primary" id="auth-send-reset" style="width:100%;margin-top:12px">Send reset link</button>
+          <button type="button" class="btn btn-primary" id="auth-send-reset" style="width:100%;margin-top:12px">Email me a reset code</button>
+          <button type="button" class="auth-link auth-link--block" id="auth-forgot-code">Already have a code? Enter it</button>
           <button type="button" class="auth-link auth-link--block" id="auth-forgot-back">Back to sign in</button>
           <p class="field-hint" id="auth-forgot-msg" role="status"></p>
+        </div>
+        <div id="auth-code" hidden>
+          <h2 id="auth-code-title">Check your email ✦</h2>
+          <p class="job-meta" id="auth-code-sub">Type the 6-digit code from the email. No link-tapping needed — it works right here.</p>
+          <input class="field" id="auth-code-input" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="6-digit code" aria-label="6-digit code from your email" />
+          <button type="button" class="btn btn-primary" id="auth-code-verify" style="width:100%;margin-top:12px">Continue</button>
+          <button type="button" class="auth-link auth-link--block" id="auth-code-resend">Send a new code</button>
+          <button type="button" class="auth-link auth-link--block" id="auth-code-back">Back</button>
+          <p class="field-hint" id="auth-code-msg" role="status"></p>
         </div>
         <div id="auth-recover" hidden>
           <h2>Set a new password ✦</h2>

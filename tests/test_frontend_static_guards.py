@@ -658,3 +658,51 @@ def test_password_recovery_handles_expired_link_and_sends_her_back_to_the_app():
     astro = _read("app/src/pages/index.astro")
     assert 'id="auth-newpass" type="password" autocomplete="new-password"' in astro
     assert 'id="auth-newpass-confirm" type="password" autocomplete="new-password"' in astro
+
+def test_email_code_sign_in_is_wired_and_ipad_autofillable():
+    """The 6-digit email-code path exists because one-time LINKS keep failing
+    this user: mail scanners prefetch-burn them, and they open in a Safari tab
+    instead of the installed PWA. A typed code has neither problem — and on
+    iPadOS the code autofills straight from Mail, but ONLY if the input
+    carries autocomplete="one-time-code". Guard the whole chain:
+    """
+    app = _read("app/src/scripts/app.ts")
+    auth = _read("app/src/scripts/auth.ts")
+    astro = _read("app/src/pages/index.astro")
+
+    # auth.ts wrappers: code sender must NOT pass emailRedirectTo (that's what
+    # keeps the email a code-carrier instead of a burnable one-time link), and
+    # verification goes through supabase's verifyOtp.
+    assert "export async function sendEmailCode" in auth
+    assert "signInWithOtp({ email })" in auth
+    assert "export async function verifyEmailCode" in auth
+    assert "auth.verifyOtp({ email, token, type })" in auth
+    # Wrong-code phrasing exists and is distinct from the expired-link one.
+    assert "That code didn't match" in auth
+
+    # Panel + iPad Mail autofill attribute (the friction-free piece).
+    assert 'id="auth-code"' in astro
+    assert 'autocomplete="one-time-code"' in astro
+    assert 'inputmode="numeric"' in astro
+
+    # App wiring: both modes route through the one panel; recovery mode lands
+    # on the set-new-password panel INSIDE the app (no Safari tab at all).
+    assert "function showAuthCode" in app
+    assert 'verifyEmailCode(sb, codeCtx.email, token, codeCtx.mode)' in app
+    assert 'if (codeCtx.mode === "recovery") {' in app
+    assert "showAuthRecover();" in app
+    # Never claim success unless verifyOtp returned no error.
+    assert "const err = await verifyEmailCode(sb, codeCtx.email, token, codeCtx.mode);" in app
+    assert "if (err) {\n      setCodeMsg(friendlyAuthError(err), true);\n      return;\n    }" in app
+    # Resend exists with a cooldown so she can't machine-gun the mailer.
+    assert 'id="auth-code-resend"' in astro
+    assert "codeResendAt" in app
+
+    # The forgot flow is code-first now: sending a reset lands on code entry.
+    assert 'showAuthCode("recovery", email);' in app
+
+    # Templates that put {{ .Token }} in the emails exist for the operator.
+    tmpl = _read("docs/email-templates/magic-link.html")
+    rec = _read("docs/email-templates/recovery.html")
+    assert "{{ .Token }}" in tmpl and "{{ .ConfirmationURL }}" in tmpl
+    assert "{{ .Token }}" in rec and "{{ .ConfirmationURL }}" in rec

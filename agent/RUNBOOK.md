@@ -87,13 +87,24 @@ with softener-window tests (don't drop "CNA preferred but not required").
 **Gate:** existing softener tests stay green.
 
 ## Operator-only (no code — the owner does these)
-1. **Unblock Lilly now:** her old password almost certainly still works; else
-   fresh reset link → set password in the Safari tab → return to app icon →
-   sign in. Watch spam.
-2. **Squash-merge PR #172**, then watch the next scheduled scan deploy it.
-3. **Decide stale PRs #151 / #145** (merge or close).
-4. **Passkeys:** enable in Supabase dashboard → one password sign-in on her
-   iPad → accept Face ID/Touch ID enrollment.
-5. **Resend SMTP** on Supabase (kills the spam-prone default mailer, makes
-   reset/magic links reliable) — then consider "Confirm email" back ON.
+1. **Email templates (do first — powers the 6-digit codes):** Dashboard →
+   Authentication → Email Templates → paste `docs/email-templates/magic-link.html`
+   and `recovery.html` (subjects in each file's first comment). Then send
+   yourself a code from the app and confirm the digits render and the iPad
+   autofills them from Mail.
+2. **Both "incorrect password" cases predate the fixes** — the old password
+   is still the active one (the change never completed). Easiest path now:
+   sign in with a 6-digit code, then set a fresh password in Corner, or just
+   live on codes/passkeys.
+3. **Passkeys:** enable in Supabase dashboard → sign in once on her iPad →
+   accept Face ID enrollment. (Passkeys sync via iCloud Keychain — that's the
+   cross-device story.)
+4. **Custom sender ("from Rudy, not supabase"):** needs a domain you own
+   (~$10/yr; free TLDs are spam-scored — worse than the default, don't).
+   Then: Resend account (one likely exists — `RESEND_API_KEY` already powers
+   spend-cap mail) → verify domain (3 DNS records) → Dashboard → Auth → SMTP:
+   host `smtp.resend.com`, sender "Rudy at DSM Jobs <rudy@yourdomain>". Until
+   then the branded templates already fix subject/body.
+5. **Check Auth logs** (Dashboard → Logs → Auth) for the two accounts'
+   failed-login history if you want the paper trail.
 6. **Google OAuth** client (optional; button auto-appears once enabled).

@@ -93,6 +93,7 @@ const fakeAuth = {
   signInWithPassword: () => syncThenable({ data: {}, error: null }),
   signUp: () => syncThenable({ data: { user: null, session: null }, error: null }),
   signInWithOtp: () => syncThenable({ error: null }),
+  verifyOtp: () => syncThenable({ data: {}, error: null }),
   signInWithPasskey: () => syncThenable({ error: null }),
   registerPasskey: () => syncThenable({ error: null }),
   signInWithOAuth: () => syncThenable({ error: null }),
